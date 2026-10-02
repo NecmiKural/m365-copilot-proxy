@@ -743,12 +743,64 @@ export const FRAMING_VARIANT_NAMES = Object.keys(FRAMING_VARIANTS);
 
 // --- Parsing -----------------------------------------------------------------
 
-// Match a fenced block with a tool-like info-string. Dots and hyphens are allowed
-// so namespaced runtime tool names (```container.exec) can be recognised and
-// routed; an info-string that resolves to no spec is left in prose by
-// parseFencedToolCalls, so widening this costs nothing. Non-greedy body; the
-// closing fence is a line that is exactly ``` (start of line).
-const FENCE_REGEX = /```([A-Za-z0-9_.-]+)[ \t]*\r?\n([\s\S]*?)\r?\n?```/g;
+// Info-string of a fence that can be a tool call. Dots and hyphens are allowed so
+// namespaced runtime tool names (```container.exec) can be recognised and routed;
+// an info-string that resolves to no spec is left in prose by
+// parseFencedToolCalls, so widening this costs nothing.
+const FENCE_OPEN = /^[ \t]*```([A-Za-z0-9_.-]*)[ \t]*$/;
+const FENCE_CLOSE = /^[ \t]*```[ \t]*$/;
+
+interface FenceBlock {
+  info: string;
+  inner: string;
+  start: number;
+  end: number;
+}
+
+/** Top-level fenced blocks, with nesting counted.
+ *
+ *  The model nests same-length fences — a ```markdown document containing
+ *  ```bash examples, or a write_file whose body is a README with code in it —
+ *  and means them as nested. The old regex closed a fence at the first ``` it
+ *  met, including the backticks that OPEN an inner ```bash, so the outer block
+ *  ended early and every later inner block surfaced at the top level as a real
+ *  tool call. Measured: a ```markdown answer holding 3 illustrative ```bash
+ *  examples parsed as 2 executable bash calls — illustration run as a command;
+ *  an `rm -rf` in a code sample would have run.
+ *
+ *  So: an opener WITH an info-string inside an open fence nests; a bare ```
+ *  line closes the innermost; only depth-0 blocks are returned. Inner fences
+ *  stay part of their parent's body, which also lets a write_file carry a body
+ *  containing balanced fences — the limitation noted at the top of this file.
+ *  An unterminated fence at end of text is dropped, as the regex did. */
+function scanFences(text: string): FenceBlock[] {
+  const blocks: FenceBlock[] = [];
+  let depth = 0;
+  let open: { info: string; start: number; bodyStart: number } | null = null;
+  let offset = 0;
+  for (const raw of text.split("\n")) {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const lineEnd = offset + raw.length;
+    const opener = FENCE_OPEN.exec(line)?.[1];
+    if (depth === 0) {
+      if (opener) {
+        open = { info: opener, start: offset, bodyStart: lineEnd + 1 };
+        depth = 1;
+      }
+    } else if (FENCE_CLOSE.test(line)) {
+      if (--depth === 0 && open) {
+        let inner = text.slice(open.bodyStart, Math.max(open.bodyStart, offset - 1));
+        if (inner.endsWith("\r")) inner = inner.slice(0, -1);
+        blocks.push({ info: open.info, inner, start: open.start, end: lineEnd });
+        open = null;
+      }
+    } else if (opener) {
+      depth++;
+    }
+    offset = lineEnd + 1;
+  }
+  return blocks;
+}
 const SEARCH_REPLACE_REGEX =
   /<{5,}\s*SEARCH\s*\r?\n([\s\S]*?)\r?\n={5,}\s*\r?\n([\s\S]*?)\r?\n>{5,}\s*REPLACE/;
 
@@ -863,15 +915,13 @@ export function parseFencedToolCalls(
   const calls: ParsedToolCall[] = [];
   let leftover = text;
 
-  const re = new RegExp(FENCE_REGEX.source, "g");
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    const spec = specs.get(match[1]);
+  for (const block of scanFences(text)) {
+    const spec = specs.get(block.info);
     if (!spec) continue; // ```python illustration etc. — not a tool, leave in prose
-    const args = parseFencedInner(spec, match[2]);
+    const args = parseFencedInner(spec, block.inner);
     if (!args) continue;
     calls.push(makeCall(spec.name, args));
-    leftover = leftover.replace(match[0], "");
+    leftover = leftover.replace(text.slice(block.start, block.end), "");
   }
 
   return { calls, leftover };
@@ -883,11 +933,9 @@ export function findFirstToolFence(
   text: string,
   specs: Map<string, FencedToolSpec>,
 ): { start: number; end: number } | null {
-  const re = new RegExp(FENCE_REGEX.source, "g");
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    const spec = specs.get(match[1]);
-    if (spec && parseFencedInner(spec, match[2])) return { start: match.index, end: match.index + match[0].length };
+  for (const block of scanFences(text)) {
+    const spec = specs.get(block.info);
+    if (spec && parseFencedInner(spec, block.inner)) return { start: block.start, end: block.end };
   }
   return null;
 }
