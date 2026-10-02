@@ -8,6 +8,8 @@ import {
   findShellTool,
   hostPlatformNote,
   shellDialect,
+  findWriteTool,
+  longHeredocAsWrite,
   currentFramingVariant,
   defaultFramingForTone,
   defaultFramingForModel,
@@ -318,6 +320,29 @@ describe("hostPlatformNote", () => {
     expect(note).toContain("/mnt/data");
   });
 
+  // pi's shell tool on Windows cuts a command past ~8,190 chars silently (a
+  // 12,070-char heredoc wrote 8,164 bytes); its write tool took 50,000 intact.
+  it("steers long file writes to the harness's write tool on a Windows bash", () => {
+    const write: ToolDef = {
+      type: "function",
+      function: {
+        name: "write",
+        description: "Write a file.",
+        parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+      },
+    };
+    expect(findWriteTool([bash, readFile, write])?.function.name).toBe("write");
+    const note = hostPlatformNote(bash, "win32", write);
+    expect(note).toContain("8,000 characters");
+    expect(note).toContain("with the `write` tool, never in one heredoc");
+    // No write tool: fall back to appending in parts rather than one heredoc.
+    expect(hostPlatformNote(bash, "win32")).toContain("cat >> file");
+  });
+
+  it("does not mistake an edit tool for a write tool", () => {
+    expect(findWriteTool([editFile])).toBeUndefined();
+  });
+
   it("reads the dialect off the tool, and M365_HOST_SHELL overrides it", () => {
     expect(shellDialect(bash, "win32")).toBe("posix");
     expect(shellDialect(powershell, "win32")).toBe("powershell");
@@ -349,6 +374,86 @@ describe("hostPlatformNote", () => {
 
   it("names the harness's own shell tool rather than assuming `bash`", () => {
     expect(hostPlatformNote(unlabelledShell, "win32")).toContain("`run_terminal_cmd`");
+  });
+});
+
+describe("longHeredocAsWrite", () => {
+  const write: ToolDef = {
+    type: "function",
+    function: {
+      name: "write",
+      description: "Write a file.",
+      parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    },
+  };
+  const tools = [bash, write];
+  // Over the cap, with a fence and Turkish text, like the real ozet.md write.
+  const body = ["# Proje Özeti", "", "```bash", "pnpm install", "```", "", "ı ş ğ ü ö ç " + "x".repeat(9000)].join("\n");
+  const shellCall = (command: string) => ({
+    id: "call_x",
+    type: "function" as const,
+    function: { name: "bash", arguments: JSON.stringify({ command }) },
+  });
+  const args = (c: { function: { arguments: string } }) => JSON.parse(c.function.arguments);
+
+  it("sends an over-cap quoted heredoc as the write tool, byte-for-byte", () => {
+    const r = longHeredocAsWrite(shellCall(`cat > ozet.md <<'EOF'\n${body}\nEOF`), tools, "win32");
+    expect(r?.call.function.name).toBe("write");
+    // A heredoc writes its body plus the final newline.
+    expect(args(r!.call)).toEqual({ path: "ozet.md", content: `${body}\n` });
+    expect(r?.skipped).toBe("");
+  });
+
+  it("reports the commands after the heredoc, which were past the cap anyway", () => {
+    const r = longHeredocAsWrite(shellCall(`cat > "docs/my notes.md" <<"END"\n${body}\nEND\nwc -l "docs/my notes.md"`), tools, "win32");
+    expect(args(r!.call).path).toBe("docs/my notes.md");
+    expect(r?.skipped).toBe('wc -l "docs/my notes.md"');
+  });
+
+  it("terminates only on a line that is exactly the delimiter, as bash does", () => {
+    const tricky = `${body}\nEOF \nEOFX\nmore`;
+    const r = longHeredocAsWrite(shellCall(`cat > a.md <<'EOF'\n${tricky}\nEOF`), tools, "win32");
+    expect(args(r!.call).content).toBe(`${tricky}\n`);
+  });
+
+  it("leaves everything else alone", () => {
+    const long = (c: string) => shellCall(c);
+    // Under the cap: the command line carries it intact.
+    expect(longHeredocAsWrite(long("cat > a.md <<'EOF'\nshort\nEOF"), tools, "win32")).toBeNull();
+    // Off Windows: no cap to work around.
+    expect(longHeredocAsWrite(long(`cat > a.md <<'EOF'\n${body}\nEOF`), tools, "linux")).toBeNull();
+    // Unquoted delimiter: bash expands $ and ` in the body, so a literal write could differ.
+    expect(longHeredocAsWrite(long(`cat > a.md <<EOF\n${body}\nEOF`), tools, "win32")).toBeNull();
+    // Append: the write tool would overwrite.
+    expect(longHeredocAsWrite(long(`cat >> a.md <<'EOF'\n${body}\nEOF`), tools, "win32")).toBeNull();
+    // A path bash would expand.
+    expect(longHeredocAsWrite(long(`cat > $HOME/a.md <<'EOF'\n${body}\nEOF`), tools, "win32")).toBeNull();
+    // No write tool to route to.
+    expect(longHeredocAsWrite(long(`cat > a.md <<'EOF'\n${body}\nEOF`), [bash], "win32")).toBeNull();
+    // A `cd` first: a relative path would land somewhere else via the write tool.
+    expect(longHeredocAsWrite(long(`cd docs && cat > a.md <<'EOF'\n${body}\nEOF`), tools, "win32")).toBeNull();
+    expect(longHeredocAsWrite(long(`cd docs\ncat > a.md <<'EOF'\n${body}\nEOF`), tools, "win32")).toBeNull();
+    // A piped cat is not a plain file write.
+    expect(longHeredocAsWrite(long(`echo x | cat > a.md <<'EOF'\n${body}\nEOF`), tools, "win32")).toBeNull();
+  });
+
+  // Measured: the model bundled exploration and the write into one 13,185-char
+  // call (`printf`/`find` first, `cat > ozet.md <<'EOF'` last) and the file
+  // landed truncated. Keep the write; report what didn't run.
+  it("pulls the heredoc out of a compound command and reports the rest", () => {
+    const r = longHeredocAsWrite(
+      shellCall(`printf '%s\\n' '--- tree ---'\nfind packages -type f | sort\ncat > ozet.md <<'EOF'\n${body}\nEOF\nwc -l ozet.md`),
+      tools,
+      "win32",
+    );
+    expect(args(r!.call)).toEqual({ path: "ozet.md", content: `${body}\n` });
+    expect(r?.skipped).toBe("printf '%s\\n' '--- tree ---'\nfind packages -type f | sort\nwc -l ozet.md");
+  });
+
+  it("handles `mkdir -p dir && cat > dir/f` (the write tool creates parent dirs)", () => {
+    const r = longHeredocAsWrite(shellCall(`mkdir -p docs && cat > docs/a.md <<'EOF'\n${body}\nEOF`), tools, "win32");
+    expect(args(r!.call).path).toBe("docs/a.md");
+    expect(r?.skipped).toBe("mkdir -p docs");
   });
 });
 
