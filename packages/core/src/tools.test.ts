@@ -294,6 +294,9 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Dosya erişimi etkin bir kodlama oturumunda aynı isteği yeniden çalıştırdığınızda hazırlanabilir.")).toBe(true);
     expect(looksLikeConfabulation("İçeriği kopyalayıp ozet.md adıyla kaydedebilirsin.")).toBe(true);
     expect(looksLikeConfabulation("Üzgünüm, dosyaya erişemiyorum.")).toBe(true);
+    // Missed live (pdf + docx tasks): "ability" and "produce" weren't in the lists.
+    expect(looksLikeConfabulation("Dosya oluşturma yeteneğim şu anda devre dışı olduğu için `notlar.pdf` dosyasını doğrudan üretemiyorum.")).toBe(true);
+    expect(looksLikeConfabulation("Word belgesini hazırlayamıyorum.")).toBe(true);
   });
 
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
