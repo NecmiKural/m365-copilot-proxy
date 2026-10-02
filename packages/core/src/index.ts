@@ -107,6 +107,7 @@ export {
   truncateAtFabricatedToolResponse,
   textAfterFirstToolCall,
   isProseDocument,
+  formatToolResponse,
   type Message,
   type ToolDef,
   type ToolFunction,
