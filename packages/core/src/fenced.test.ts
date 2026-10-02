@@ -7,6 +7,7 @@ import {
   formatFencedToolDefinitions,
   findShellTool,
   hostPlatformNote,
+  shellDialect,
   currentFramingVariant,
   defaultFramingForTone,
   defaultFramingForModel,
@@ -19,6 +20,23 @@ const bash: ToolDef = {
   function: {
     name: "bash",
     description: "Run a shell command.",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+  },
+};
+// A harness whose shell really is PowerShell, and one that declares nothing.
+const powershell: ToolDef = {
+  type: "function",
+  function: {
+    name: "shell",
+    description: "Run a PowerShell command.",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+  },
+};
+const unlabelledShell: ToolDef = {
+  type: "function",
+  function: {
+    name: "run_terminal_cmd",
+    description: "Run a command.",
     parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
   },
 };
@@ -247,8 +265,37 @@ describe("hostPlatformNote", () => {
     expect(hostPlatformNote(undefined, "win32")).toBe("");
   });
 
-  it("names the platform and overrides every POSIX idiom the framing teaches", () => {
+  // A Windows HOST is not a PowerShell SHELL. pi on Windows sends a tool named
+  // `bash`, described as "Execute a bash command", backed by Git Bash — telling it
+  // to emit PowerShell returns `/usr/bin/bash: Write-Output: command not found`
+  // and the model gives up concluding it has no tools (#7).
+  it("keeps POSIX idioms when the harness's shell tool is a bash on Windows", () => {
     const note = hostPlatformNote(bash, "win32");
+    expect(note).toContain("HOST PLATFORM: Windows");
+    expect(note).not.toContain("```powershell");
+    for (const ps of ["Set-Content", "Get-ChildItem", "Write-Output"]) {
+      expect(note, `${ps} must not be prescribed to a bash`).not.toContain(`use ${ps}`);
+    }
+    expect(note).toContain("POSIX shell");
+    expect(note).toContain("/mnt/data");
+  });
+
+  it("reads the dialect off the tool, and M365_HOST_SHELL overrides it", () => {
+    expect(shellDialect(bash, "win32")).toBe("posix");
+    expect(shellDialect(powershell, "win32")).toBe("powershell");
+    // Undeclared name falls back to the host's native shell.
+    expect(shellDialect(unlabelledShell, "win32")).toBe("powershell");
+    expect(shellDialect(unlabelledShell, "linux")).toBe("posix");
+    process.env.M365_HOST_SHELL = "powershell";
+    try {
+      expect(shellDialect(bash, "win32")).toBe("powershell");
+    } finally {
+      delete process.env.M365_HOST_SHELL;
+    }
+  });
+
+  it("names the platform and overrides every POSIX idiom the framing teaches", () => {
+    const note = hostPlatformNote(powershell, "win32");
     expect(note).toContain("HOST PLATFORM: Windows");
     expect(note).toContain("```powershell");
     // The specific idioms baseline framing teaches by name must be countermanded.
@@ -263,15 +310,7 @@ describe("hostPlatformNote", () => {
   });
 
   it("names the harness's own shell tool rather than assuming `bash`", () => {
-    const shell: ToolDef = {
-      type: "function",
-      function: {
-        name: "run_terminal_cmd",
-        description: "Run a command.",
-        parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
-      },
-    };
-    expect(hostPlatformNote(shell, "win32")).toContain("`run_terminal_cmd`");
+    expect(hostPlatformNote(unlabelledShell, "win32")).toContain("`run_terminal_cmd`");
   });
 });
 

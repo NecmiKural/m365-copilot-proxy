@@ -214,6 +214,34 @@ export function formatFencedToolDefinitions(tools: ToolDef[], variantOverride?: 
   return build(tools) + hostPlatformNote(findShellTool(tools));
 }
 
+/** Which dialect the harness's shell tool actually speaks.
+ *
+ *  `process.platform` cannot answer this — it describes the host, and on Windows
+ *  the two common agent harnesses disagree: pi gives a Git Bash-backed `bash`
+ *  tool, others give PowerShell. Guessing wrong costs the whole session, because
+ *  every shell turn fails on syntax and the model reads that as "I have no tools".
+ *
+ *  Decided from the tool definition the harness sent (name + description, which is
+ *  what the harness itself claims to run). `M365_HOST_SHELL=bash|powershell`
+ *  overrides for a harness whose tool is named misleadingly. */
+export function shellDialect(
+  shell: ToolDef | undefined,
+  platform: NodeJS.Platform = process.platform,
+): "posix" | "powershell" | undefined {
+  if (!shell) return undefined;
+  const override = process.env.M365_HOST_SHELL?.toLowerCase();
+  if (override === "bash" || override === "sh" || override === "posix") return "posix";
+  if (override === "powershell" || override === "pwsh") return "powershell";
+
+  const claim = `${shell.function.name} ${shell.function.description ?? ""}`.toLowerCase();
+  // PowerShell first: a tool described as "run a powershell command" may still be
+  // *named* something generic like `shell`, and `sh` would match it by substring.
+  if (/\b(powershell|pwsh|cmd\.exe)\b/.test(claim)) return "powershell";
+  if (/\b(bash|zsh|sh|posix|wsl)\b/.test(claim)) return "posix";
+  // Nothing declared: fall back to the host's native shell.
+  return platform === "win32" ? "powershell" : "posix";
+}
+
 /** Per-turn correction telling the model which OS it is actually driving.
  *
  *  Every framing variant teaches POSIX idioms *by name* — `cat > f <<'EOF'`
@@ -232,6 +260,24 @@ export function hostPlatformNote(
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (platform !== "win32" || !shell) return "";
+
+  // A Windows HOST does not imply a PowerShell SHELL. pi on Windows ships a tool
+  // named `bash`, described as "Execute a bash command", backed by Git Bash — the
+  // tool_response says `/usr/bin/bash`. Telling that harness to emit ```powershell
+  // makes every shell turn come back as
+  //     /usr/bin/bash: line 2: Write-Output: command not found
+  // and after a failure or two the model concludes it has no working tools and
+  // gives up in prose — the exact "it just says it can't" report in #7, now with
+  // the shell dialect rather than the fence routing as the cause. So read the
+  // dialect off the tool the harness actually gave us, not off process.platform.
+  if (shellDialect(shell, platform) === "posix") {
+    return `
+
+HOST PLATFORM: Windows, but the \`${shell.function.name}\` tool is a POSIX shell on it (Git Bash or WSL), NOT PowerShell and NOT a container. Keep using \`\`\`${"bash"} blocks and POSIX idioms — \`<<'EOF'\` heredocs, \`sed -i\`, \`ls\`/\`grep\` all work. Do NOT emit PowerShell: \`Get-ChildItem\`, \`Set-Content\` and \`Write-Output\` are not commands here and the turn will fail.
+
+Only the filesystem is Windows: paths may be \`C:/Users/...\` or contain spaces, so quote them and prefer forward slashes. You are NOT in a Linux sandbox and have no \`/mnt/data\`; the working directory is the caller's real project directory — run \`pwd\` if you need to see it.`;
+  }
+
   return `
 
 HOST PLATFORM: Windows. The \`${shell.function.name}\` tool runs PowerShell on a real Windows machine — not Linux, and not a container. Any POSIX idiom named above is wrong here and will fail: there are no \`<<'EOF'\` heredocs, no \`sed -i\`, no \`ls\`/\`grep\`. Emit \`\`\`powershell blocks instead of \`\`\`bash, and use the Windows equivalents:
