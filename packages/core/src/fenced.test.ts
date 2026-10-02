@@ -235,7 +235,12 @@ describe("hostPlatformNote", () => {
   it("is empty off Windows, so POSIX framing stays byte-for-byte", () => {
     expect(hostPlatformNote(bash, "linux")).toBe("");
     expect(hostPlatformNote(bash, "darwin")).toBe("");
-    expect(formatFencedToolDefinitions([bash, readFile])).not.toContain("HOST PLATFORM");
+    // formatFencedToolDefinitions has no platform parameter, so this assertion
+    // reads the HOST — it only means "off Windows" when the suite runs off Windows.
+    // Asserted against the real platform instead of hardcoded absent, or the suite
+    // fails on a Windows checkout (where the note is the correct output).
+    expect(formatFencedToolDefinitions([bash, readFile]).includes("HOST PLATFORM"))
+      .toBe(process.platform === "win32");
   });
 
   it("is empty on Windows when the harness gave no shell tool", () => {
