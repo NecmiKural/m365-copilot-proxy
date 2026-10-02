@@ -539,7 +539,26 @@ export async function handleChatCompletion(
       if (!confab && !remoteArtifact && !halluc) break;
       const retryKind = remoteArtifact ? "Remote artifact completion" : confab ? "Confabulation" : "Hallucinated completion";
       log.info(`${retryKind} detected (no tool call) — forcing retry ${attempt + 1}/${maxConfabRetries}`);
-      text = remoteArtifact ? REMOTE_ARTIFACT_FORCE_PROMPT : confab ? CONFAB_FORCE_PROMPT : HALLUCINATION_FORCE_PROMPT;
+      const forcePrompt = remoteArtifact ? REMOTE_ARTIFACT_FORCE_PROMPT : confab ? CONFAB_FORCE_PROMPT : HALLUCINATION_FORCE_PROMPT;
+      // M365_CONFAB_RETRY_FRESH_THREAD=1 — OPT-IN, UNPROVEN. The force prompt is sent
+      // into the same thread with no framing, and two things stack against it there:
+      // the model's own refusal is the most recent content in M365's server-side
+      // state, and the framing that says "you have a real shell, act" was sent ONCE
+      // on turn 1 (the delta path above never re-sends it). Re-anchoring — new
+      // conversation, full history, framing in front — is the remedy the Disengaged
+      // path uses above for the same shape of problem.
+      // Measured on Windows / gpt-5.6-think-deeper, n=6 per arm: in-thread 5/6,
+      // fresh-thread 6/6. One event's difference is NOT a result, so this stays off
+      // by default. What dominated every sweep was thread-rate throttle
+      // (docs/hypotheses.md §322), not thread state — a rested account tool-calls
+      // 26/27 either way. Needs the multi-turn bench on a rested account to settle.
+      if (process.env.M365_CONFAB_RETRY_FRESH_THREAD) {
+        session.newConversation();
+        conv.sentMessageCount = 0;
+        text = `${formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant)}\n\n${forcePrompt}`;
+      } else {
+        text = forcePrompt;
+      }
       const retry = await runBuffered();
       if ("error" in retry) return { kind: "error", resp: retry.error };
       conv.sentMessageCount = body.messages.length;
