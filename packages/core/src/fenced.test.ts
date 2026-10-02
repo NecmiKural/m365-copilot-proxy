@@ -167,6 +167,44 @@ describe("parseFencedToolCalls", () => {
     expect(calls).toHaveLength(2);
   });
 
+  // The model nests same-length fences and means them as nested. The old regex
+  // closed the outer fence on the backticks that OPEN the first inner ```bash, so
+  // inner examples 2..N surfaced at top level and were executed.
+  it("never executes ```bash examples nested inside a prose document", () => {
+    const doc = [
+      "Here is the summary, ready to save as ozet.md:", "", "```markdown", "# Summary", "",
+      "```bash", "echo ONE", "```", "", "```bash", "rm -rf /tmp/demo", "```", "",
+      "```bash", "echo THREE", "```", "```",
+    ].join("\n");
+    const { calls, leftover } = parseFencedToolCalls(doc, specs);
+    expect(calls).toHaveLength(0);
+    expect(leftover).toContain("rm -rf /tmp/demo"); // stays prose
+  });
+
+  it("carries a write_file body that itself contains balanced fences", () => {
+    const body = ["# Readme", "", "```bash", "pnpm install", "```", "", "Done."].join("\n");
+    const { calls } = parseFencedToolCalls(`\`\`\`write_file\npath: README.md\n\n${body}\n\`\`\``, specs);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0].function.arguments)).toEqual({ path: "README.md", content: body });
+  });
+
+  // The baseline framing teaches `cat > f <<'EOF'` for writing files. Writing a
+  // Markdown file that contains code fences that way used to be cut at the first
+  // inner fence — the old closer matched the backticks opening "```bash" — so the
+  // shell got `cat > ozet.md <<'EOF'\n# Title` and an unterminated heredoc.
+  it("keeps a heredoc that writes a fenced Markdown file intact", () => {
+    const heredoc = ["cat > ozet.md <<'EOF'", "# Title", "", "```bash", "pnpm install", "```", "EOF"].join("\n");
+    const { calls } = parseFencedToolCalls(`\`\`\`bash\n${heredoc}\n\`\`\``, specs);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0].function.arguments).command).toBe(heredoc);
+  });
+
+  it("still parses top-level calls that follow a nested document", () => {
+    const text = "```markdown\n```bash\necho x\n```\n```\n```bash\nls\n```";
+    const { calls } = parseFencedToolCalls(text, specs);
+    expect(calls.map((c) => JSON.parse(c.function.arguments).command)).toEqual(["ls"]);
+  });
+
   it("drops an edit fence missing SEARCH/REPLACE markers", () => {
     const { calls } = parseFencedToolCalls("```edit_file\npath: a.py\njust some text\n```", specs);
     expect(calls).toHaveLength(0);
