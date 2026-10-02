@@ -62,6 +62,7 @@ export {
   defaultFramingForModel,
   transcriptStyleForVariant,
   FRAMING_VARIANT_NAMES,
+  longHeredocAsWrite,
   type TranscriptStyle,
 } from "./fenced.js";
 

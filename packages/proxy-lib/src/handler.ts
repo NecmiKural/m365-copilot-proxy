@@ -19,6 +19,7 @@ import {
   looksLikeRemoteArtifactCompletion,
   truncateAtFabricatedToolResponse,
   textAfterFirstToolCall,
+  longHeredocAsWrite,
   isProseDocument,
   getMessageContent,
   noteRequestOutcome,
@@ -647,9 +648,19 @@ export async function handleChatCompletion(
     }
 
     if (parsed.hasToolCalls && parsed.toolCalls.length > 0) {
+      // A heredoc file write past the Windows command-line cap would reach the
+      // shell cut short; run the same write through the harness's write tool.
+      const asWrite = longHeredocAsWrite(parsed.toolCalls[0], body.tools);
+      let rewriteNote: string | null = null;
+      if (asWrite) {
+        log.info(`Heredoc write to ${asWrite.path} is over the Windows command-line cap — sent as ${asWrite.call.function.name} instead`);
+        parsed.toolCalls = [asWrite.call];
+        rewriteNote = `(Note: your heredoc to \`${asWrite.path}\` was longer than the ~8,000-character Windows command-line limit and would have been cut off, so it was written with the \`${asWrite.call.function.name}\` tool instead.${asWrite.skipped ? ` The commands after the heredoc did NOT run: \`${asWrite.skipped.slice(0, 200)}\`.` : ""})`;
+      }
       // The model's server-side history holds more than what runs; say so on
       // the turn that carries the real result (executedOnlyFirstNote).
-      conv.pendingNote = executedOnlyFirstNote(cutFabricated, droppedCalls, textAfterFirstToolCall(fullText, body.tools).length);
+      const notes = [rewriteNote, executedOnlyFirstNote(cutFabricated, droppedCalls, textAfterFirstToolCall(fullText, body.tools).length)].filter(Boolean);
+      conv.pendingNote = notes.length ? notes.join("\n") : null;
       return { kind: "tools", toolCalls: parsed.toolCalls };
     }
     return { kind: "text", text: fullText };
