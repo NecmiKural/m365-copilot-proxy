@@ -298,6 +298,22 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // patterns because it says the session "does not expose" the filesystem.
   /(?:session|environment|runtime)\s+(?:does\s+not|doesn.?t|cannot)\s+(?:expose|mount|provide)\s+(?:the\s+)?(?:local\s+)?(?:repository\s+)?filesystem/i,
   /(?:my|the)\s+filesystem\s+(?:only\s+)?(?:contained|contains|has)[\s\S]{0,80}\/mnt\/data/i,
+  // Turkish. The model answers in the user's language, so every pattern above was
+  // blind to a Turkish-speaking user's give-ups: "Bu oturumda ... dosya yazma aracı
+  // etkin değil", "dosya oluşturma özelliğim devre dışı ... kaydedemiyorum" both
+  // went straight to the user with no forcing retry (measured, Windows/pi/GPT-5.6).
+  // Kept FIRST-PERSON or session-scoped on purpose: this repo's own docs say things
+  // like "retry devre dışı bırakılır" and "oturum yönetimi", and a project summary
+  // in Turkish must not read as a give-up. Verb forms are 1sg only (-amıyorum,
+  // -amam, -amadım), so third-person "okuyamıyorsa"/"çalıştıramaz" don't match.
+  // Spans allow a dot not followed by whitespace — `ozet.md` is a filename, not a
+  // sentence end — and avoid \w, which is ASCII-only and stops at ı/ş/ğ.
+  /bu\s+oturumda(?:[^.\n]|\.(?=\S)){0,80}(?:devre\s*dışı|etkin\s+değil|kullanılamıyor|mevcut\s+değil)/i,
+  /(?:özelliğim|aracım|araçlarım|erişimim|yetkim)(?:[^.\n]|\.(?=\S)){0,30}(?:devre\s*dışı|etkin\s+değil|yok)/i,
+  /(?:oluştur|kayded|eriş|çalıştır|oku|yaz|düzenle|incele|listele|aç)y?[ae]m(?:ıyorum|iyorum|am|em|adım|edim|adığım|ediğim)/i,
+  /araç\s+çağrısı\s+yapama/i,
+  /(?:dosya|araç)\s+erişimi\s+(?:olan|etkin)(?:[^.\n]|\.(?=\S)){0,40}oturum/i,                      // "dosya erişimi etkin bir kodlama oturumunda yeniden çalıştırın"
+  /kopyala(?:[^.\n]|\.(?=\S)){0,80}kayde[dt]/i,                                                   // "kopyalayıp ozet.md olarak kaydedebilirsin" — hands the write back (kaydet → kayded- before a vowel) (kaydet/kayded-: consonant softening)
 ];
 
 // M365 sometimes creates a real patch in its Teams-hosted remote artifact
