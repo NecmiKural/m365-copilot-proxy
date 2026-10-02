@@ -316,8 +316,8 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // Spans allow a dot not followed by whitespace — `ozet.md` is a filename, not a
   // sentence end — and avoid \w, which is ASCII-only and stops at ı/ş/ğ.
   /bu\s+oturumda(?:[^.\n]|\.(?=\S)){0,80}(?:devre\s*dışı|etkin\s+değil|kullanılamıyor|mevcut\s+değil)/i,
-  /(?:özelliğim|aracım|araçlarım|erişimim|yetkim)(?:[^.\n]|\.(?=\S)){0,30}(?:devre\s*dışı|etkin\s+değil|yok)/i,
-  /(?:oluştur|kayded|eriş|çalıştır|oku|yaz|düzenle|incele|listele|aç)y?[ae]m(?:ıyorum|iyorum|am|em|adım|edim|adığım|ediğim)/i,
+  /(?:özelliğim|yeteneğim|aracım|araçlarım|erişimim|yetkim)(?:[^.\n]|\.(?=\S)){0,30}(?:devre\s*dışı|etkin\s+değil|yok)/i,
+  /(?:oluştur|üret|hazırla|dönüştür|kur|güncelle|kayded|eriş|çalıştır|oku|yaz|düzenle|incele|listele|aç)y?[ae]m(?:ıyorum|iyorum|am|em|adım|edim|adığım|ediğim)/i,
   /araç\s+çağrısı\s+yapama/i,
   /(?:dosya|araç)\s+erişimi\s+(?:olan|etkin)(?:[^.\n]|\.(?=\S)){0,40}oturum/i,                      // "dosya erişimi etkin bir kodlama oturumunda yeniden çalıştırın"
   /kopyala(?:[^.\n]|\.(?=\S)){0,80}kayde[dt]/i,                                                   // "kopyalayıp ozet.md olarak kaydedebilirsin" — hands the write back (kaydet → kayded- before a vowel) (kaydet/kayded-: consonant softening)
