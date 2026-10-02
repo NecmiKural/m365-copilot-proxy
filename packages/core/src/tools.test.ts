@@ -297,6 +297,9 @@ describe("looksLikeConfabulation", () => {
     // Missed live (pdf + docx tasks): "ability" and "produce" weren't in the lists.
     expect(looksLikeConfabulation("Dosya oluşturma yeteneğim şu anda devre dışı olduğu için `notlar.pdf` dosyasını doğrudan üretemiyorum.")).toBe(true);
     expect(looksLikeConfabulation("Word belgesini hazırlayamıyorum.")).toBe(true);
+    // Missed live on the final build (pdf task, after a real tool call).
+    expect(looksLikeConfabulation("PDF oluşturma işlemini bu oturumda tamamlayamıyorum. Alternatif olarak Markdown dosyasını Visual Studio Code’da açabilirsiniz.")).toBe(true);
+    expect(looksLikeConfabulation("`pandoc` sistemde kurulu olmadığı için PDF oluşturma komutu başarısız oldu. Bu oturumda yeni araç kurma veya indirilebilir PDF oluşturma yetkim bulunmuyor.")).toBe(true);
   });
 
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
@@ -305,6 +308,8 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("M365_NO_CONFAB_RETRY ile retry devre dışı bırakılır.")).toBe(false);
     expect(looksLikeConfabulation("Harness dosyayı okuyamıyorsa hata döner; proxy komutu kendisi çalıştıramaz.")).toBe(false);
     expect(looksLikeConfabulation("ozet.md oluşturuldu: 18 bölüm, paket mimarisi ve araç çağrısı akışı.")).toBe(false);
+    // Third person ("yetkisi"), not first ("yetkim"): describes the code, not a give-up.
+    expect(looksLikeConfabulation("Kullanıcının yetkisi bulunmuyorsa proxy 403 döner.")).toBe(false);
   });
 
   it("does NOT flag genuine final answers or normal prose", () => {
