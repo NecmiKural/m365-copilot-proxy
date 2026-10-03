@@ -174,10 +174,21 @@ export class SessionPool {
     const existing = this.conversations.get(fingerprint);
 
     if (existing) {
-      // Messages shrunk means client restarted this conversation — reset M365 session
-      if (messages.length < existing.sentMessageCount) {
-        log.info(`Conversation ${fingerprint}: messages shrunk (${messages.length} < ${existing.sentMessageCount}), resetting`);
-        existing.session.reset();
+      // A request that carries no more messages than this conversation already
+      // sent is not its continuation (a harness re-sends the whole history and
+      // only ever appends). It's a new session that shares the first user message
+      // — two pi sessions opened with the same prompt, even in different
+      // directories — or a re-sent request. Either way it needs a FRESH M365
+      // conversation: reset() kept the conversationId, so the full prompt went
+      // into the old thread, and at equal length nothing reset at all and
+      // "Please continue." went there. Measured (Windows / pi, 30 runs of 2
+      // prompts): later sessions answered from earlier ones — "notlar.docx was
+      // already created and verified" in an empty directory — and the pass rate
+      // fell 7/10 → 4/10 → 3/10 over the sweep. The full prompt re-sends the
+      // whole history, so nothing the harness holds is lost.
+      if (messages.length <= existing.sentMessageCount) {
+        log.info(`Conversation ${fingerprint}: not a continuation (${messages.length} <= ${existing.sentMessageCount} sent), starting a fresh M365 conversation`);
+        existing.session.newConversation();
         existing.sentMessageCount = 0;
         existing.pendingNote = null;
       }

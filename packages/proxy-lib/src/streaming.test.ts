@@ -515,3 +515,61 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     scripted.queue = [];
   });
 });
+
+describe("a new harness session that shares the first user message", () => {
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+  const ask = async (messages: any[], pool: InstanceType<typeof SessionPool>) =>
+    (await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "gpt-5.6-think-deeper", stream: false, tools, messages }), pool)).json()).choices[0].message;
+
+  // Measured: pi sessions opened with the same prompt (even in different
+  // directories) were joined to the first session's M365 conversation and
+  // answered from it — "notlar.docx was already created" in an empty directory.
+  it("gets a fresh M365 conversation after a longer earlier session", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }, { fullText: "```bash\nls\n```" }];
+    const pool = new SessionPool();
+    const prompt = `make a pdf ${Math.random()}`;
+    const first: any[] = [{ role: "user", content: prompt }];
+    const m1 = await ask(first, pool);
+    first.push({ role: "assistant", content: null, tool_calls: m1.tool_calls });
+    first.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "notlar.md" });
+    await ask(first, pool);
+    await ask([{ role: "user", content: prompt }], pool); // a new session, same opener
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain(prompt); // the full prompt, not a delta
+    scripted.queue = [];
+  });
+
+  it("gets one after a single-turn session too (equal length used to send 'Please continue.')", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    scripted.queue = [{ fullText: "I can't do that." }, { fullText: "```bash\nls\n```" }];
+    const pool = new SessionPool();
+    const prompt = `make a docx ${Math.random()}`;
+    await ask([{ role: "user", content: prompt }], pool);
+    await ask([{ role: "user", content: prompt }], pool);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[scripted.texts.length - 1]).not.toBe("Please continue.");
+    expect(scripted.texts[scripted.texts.length - 1]).toContain(prompt);
+    scripted.queue = [];
+  });
+
+  it("still continues a real continuation in the same conversation", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }];
+    const pool = new SessionPool();
+    const msgs: any[] = [{ role: "user", content: `go ${Math.random()}` }];
+    const m1 = await ask(msgs, pool);
+    msgs.push({ role: "assistant", content: null, tool_calls: m1.tool_calls });
+    msgs.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "a.txt" });
+    await ask(msgs, pool);
+    expect(scripted.newConversations).toBe(0);
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash"'); // a delta
+    scripted.queue = [];
+  });
+});
