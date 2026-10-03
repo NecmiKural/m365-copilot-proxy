@@ -45,7 +45,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   (30/30 agent, 60/60 agent-less, 21/21 in real pi); a premium transient that mimics the dead route (F52)
 - §24 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F53), nested fences
   executed (F54), an ~8.2k-char command-line cap (F55), give-ups the retry never saw (F56–F58);
-  framing variants and thread poisoning not supported (F59); documents still open (F60)
+  framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
+  sharing an opening message shared an M365 conversation (F61)
 
 ---
 
@@ -3723,7 +3724,29 @@ skill 2/2 · repo Q&A 2/3 (one answer from context, wrong file) · .docx 3/6 · 
 project skills are trust-gated and `-p` mode skips them (`--approve` for automation — the first two
 skill runs were a test bug, not a model failure); and the last three PDF runs were turn-1 refusals
 in a row after well over 100 threads that night — plausibly account degradation (§9 F13), unproven.
-**Open:** the document give-ups follow an obstacle (no PDF tool, no Word library installed) — the
-model says "my tools are disabled" instead of installing one. **Probe:** on a rested account,
-interleaved, n≥10 per arm on pdf/docx: current mid-task prompt vs none, and a host capability note
-(Edge's headless print-to-pdf exists on every Windows install).
+**Update (Oct 4, rested account):** the "obstacle" reading was partly my harness. pandoc 3.12 and
+MiKTeX `xelatex` had been installed since Sep 29, but the shell the suite ran from had a stale PATH,
+so its agents never saw them; and one of the night's docx runs `pip install`ed python-docx, changing
+the environment for later runs. Day-to-day numbers are therefore not comparable. See F61 for what the
+probe actually found.
+
+### F61 — sessions that share an opening message shared one M365 conversation 🟢 (mechanism) / 🟡 (effect size)
+The F60 probe (Oct 4, one day of rest, 3 arms × {pdf, docx} × 5, interleaved; arms: control, the
+document recipes in the platform note, the same recipes as a project skill) scored control 7/10, note
+3/10, skill 4/10 — and **by position in the sweep** 7/10 → 4/10 → 3/10, every arm falling together.
+The failed runs' text explains it: in **empty** directories the model wrote "notlar.docx was already
+created and verified successfully", "Earlier in the conversation, the filesystem run already confirmed
+that notlar.md and notlar.docx exist", "Önceki çıktıya göre notlar.pdf başarıyla oluşturulmuş".
+`SessionPool` keys a conversation on the first user message, every run of a task sent the same one,
+and on a match the handler called `session.reset()` — which drops the `CopilotSession` object but
+keeps the `conversationId` — so the full prompt went into the previous run's M365 thread. At equal
+length nothing reset at all, the delta was empty, and `"Please continue."` went there. Real-use
+shape: two pi sessions opened with the same prompt within 30 minutes, even in different directories.
+This is also what F59's 1/30 was, read as a measurement artifact at the time. Fixed:
+`messages.length <= sentMessageCount` → `newConversation()` (a harness only ever appends, and the
+full prompt re-sends the whole history). Regression tests fail on the old handler.
+The document-recipe arms did not help (note 3/10 with 7 turn-1 give-ups vs control 2; p ≈ 0.07 on
+the give-ups, not significant) and were not shipped. **Open:** the live before/after on the fixed
+build was cut short (the host ran out of memory after 1 run). **Probe:** the same sweep, control
+only, n ≥ 10 per task — the falling-by-position curve should be gone; if it isn't, F13 is back on
+the table.
