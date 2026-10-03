@@ -3730,7 +3730,7 @@ so its agents never saw them; and one of the night's docx runs `pip install`ed p
 the environment for later runs. Day-to-day numbers are therefore not comparable. See F61 for what the
 probe actually found.
 
-### F61 — sessions that share an opening message shared one M365 conversation 🟢 (mechanism) / 🟡 (effect size)
+### F61 — sessions that share an opening message shared one M365 conversation 🟢
 The F60 probe (Oct 4, one day of rest, 3 arms × {pdf, docx} × 5, interleaved; arms: control, the
 document recipes in the platform note, the same recipes as a project skill) scored control 7/10, note
 3/10, skill 4/10 — and **by position in the sweep** 7/10 → 4/10 → 3/10, every arm falling together.
@@ -3746,7 +3746,9 @@ This is also what F59's 1/30 was, read as a measurement artifact at the time. Fi
 `messages.length <= sentMessageCount` → `newConversation()` (a harness only ever appends, and the
 full prompt re-sends the whole history). Regression tests fail on the old handler.
 The document-recipe arms did not help (note 3/10 with 7 turn-1 give-ups vs control 2; p ≈ 0.07 on
-the give-ups, not significant) and were not shipped. **Open:** the live before/after on the fixed
-build was cut short (the host ran out of memory after 1 run). **Probe:** the same sweep, control
-only, n ≥ 10 per task — the falling-by-position curve should be gone; if it isn't, F13 is back on
-the table.
+the give-ups, not significant) and were not shipped. **Live after the fix** (same sweep, control only, 10 × {pdf, docx}, interleaved, rested account):
+**17/20** (pdf 8/10, docx 9/10) vs control 7/10 before; by position 9/10 then 8/10 — the decline is
+gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prompt), and 0 outputs
+referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
+(F57/F58), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
+mid-task give-up after 2 tool calls, two turn-1 refusals.
