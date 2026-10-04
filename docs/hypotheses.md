@@ -3935,3 +3935,11 @@ passed** in both arms; every follow-up summarised its own request (12/12, note o
 minutes and did not trip the throttle. Two give-up turns, both turned by the forcing retry.
 **Still open:** baseline vs relay on the fixed build (relay's give-up evidence in F62 is the chain of
 thought, which forks don't explain, but its size may change).
+
+**GPT-5.5 Think Deeper on the fixed build** (Oct 5, 01:54; real pi, baseline vs relay via
+`M365_FRAMING_FILE`, interleaved; .pdf and .docx in Turkish as F62, write-code and fix-bug in
+English; × 2): baseline 7/8, relay 8/8, **0 give-up turns in either arm**. Relay took about twice the
+calls (write-code 4 vs 1, pdf 7.5 vs 4). The one baseline failure is a 57 KB PDF the verifier found
+no `/Type /Page` in, likely compressed object streams (not yet checked). So 5.5 keeps `baseline`.
+**Probe:** the same sweep on `gpt-5.6-think-deeper`, to see whether its baseline give-ups (F62:
+12/14 runs) survive the fork fix.
