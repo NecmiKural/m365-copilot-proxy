@@ -3819,7 +3819,7 @@ the user because the one forcing retry didn't turn them (the F62 conflict). Cave
 198 are English and about 6 of those are genuine answers (the prompts were Turkish; the rest are
 give-ups, hand-backs and two unparsed tool calls), which is why the English patterns stay narrow.
 
-### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (findings) / 🔴 (the note's effect: unmeasured)
+### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (the anchoring was F64's fork; the note is removed)
 **Long-session test** (Oct 4; real pi, `gpt-5.6-think-deeper`; one pi session per run with three
 consecutive requests — a 4-file feature, a follow-up feature, a PDF — each checked by a hidden
 verifier outside the project, validated beforehand on a reference solution, the untouched template
@@ -3840,6 +3840,9 @@ priorities… concurrent changes", went back to finishing the first request and 
 step failed. Inferred mechanism: every framing says to report "when the task is complete", "the
 task" is the session's first request, and follow-ups arrive as bare `<user>` blocks. **Candidate:**
 `FOLLOW_UP_NOTE` on the newest request, opt-in (`M365_FOLLOWUP_NOTE=1`) — unmeasured, see below.
+**Resolved (Oct 5): the inferred mechanism was wrong.** The follow-up steps ran on forked
+conversations that held part of step 1 (F64), so step 1 looked unfinished. On the fixed build every
+follow-up summarised its own request with the note off (6/6) and on (6/6); the note is removed.
 
 **Labels misdescribed tool calls** (fixed, default). `formatToolResponse` labelled file tools
 `command="todo.mjs"` and swapped `"` for `'` (`"$f"` shown as `'$f'`, a different shell command).
@@ -3883,12 +3886,15 @@ The final `type:2` item carries the server's own count of the conversation's use
 1,2,3,2,4,5,3,6,4,5,6,7,7,8,8,9,9: the turns were landing on two diverging copies of the
 conversation that shared only the first turn.
 
-**Scale** (`scripts/fork-scan.mjs` over the proxy debug logs on this machine, Oct 2–4): 70 of 135 conversations with 3+ turns
-forked, and 477 of 852 turns ran on an older copy. It is not timing: in the Oct 4 logs a turn sent
-under 1 s after the previous one closed was off the thread as often as a later one (46% and 46%).
-On off-thread turns the
-model repeated a tool call it had already made 18% of the time (1% on the full thread) and reasoned
-about mismatched responses 9% of the time (1%).
+**Scale** (`scripts/fork-scan.mjs` over the proxy debug logs on this machine, Oct 2–4; turns joined
+across files by ConversationId, so a long session logged one file per request reads as one
+conversation): 77 of 116 conversations with 3+ turns forked, and 455 of 852 turns ran on an older
+copy; in the long sessions 9 of 10 and 86% of turns. It is not timing: in the Oct 4 logs a turn sent
+under 1 s after the previous one closed was off the thread as often as a later one (46% and 46%). On
+off-thread turns the model repeated a tool call it had already made for the same request 21% of the
+time (1% on the full thread) and reasoned about mismatched responses 10% of the time (1%). (The fix
+commit quotes 70/135, 477/852, 18% and 9% from a first version of the scan that counted every
+request's log separately.)
 
 **Probe** (`scripts/fork-probe.mjs`, `gpt-5.6-think-deeper` with the agent; 6 turns each). Every
 message carries a fresh word and asks for all the words so far, so the reply shows what the model
@@ -3919,5 +3925,13 @@ mechanisms are suspect: relay's extra turns per task (F62, F63), the follow-up a
 follow-up steps ran far off the thread — the 18th message on a copy that held 10 — so step 1 looked
 unfinished), mid-task "my tools aren't working" give-ups, and F63 replies blamed on the concurrency
 hazard ("What would you like me to do with this CLI code?" is also what a turn that lost the task
-says). **Probe:** the long-session test on the fixed build: fork-free counters, calls per step,
-follow-up anchoring with the note on and off.
+says).
+
+**Validated in real pi** (Oct 5, 00:41; F63's long-session test on the fixed build, relay, note on vs
+off, 3 sessions each, interleaved, one job): 0 of 6 sessions forked (0 of 125 turns); **18/18 steps
+passed** in both arms; every follow-up summarised its own request (12/12, note or no note); no
+"mismatch" reasoning and no call repeated within a request. 5.9 tool calls and 48 s per step, against
+8.4 and 58 (F63, forked) and 12.8 and 92 (the forked re-run of Oct 4, 22:33). The whole run took 19
+minutes and did not trip the throttle. Two give-up turns, both turned by the forcing retry.
+**Still open:** baseline vs relay on the fixed build (relay's give-up evidence in F62 is the chain of
+thought, which forks don't explain, but its size may change).
