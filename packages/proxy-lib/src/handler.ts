@@ -319,10 +319,10 @@ export async function handleChatCompletion(
   const tone = getToneForModel(model);
   // Framing default follows the MODEL (defaultFramingForModel): Opus gets the
   // lean variant (it doesn't need the anti-narration cage, and its priority-
-  // access budget is small), Claude Sonnet — 4.6 and 5 — gets `relay` (it reads
-  // the `<system>`-tagged baseline as an injected prompt), and the rest keep the
-  // bench-tuned `baseline`. Keyed on the model, not the tone, because one tone
-  // can serve two models. M365_FRAMING_* still wins.
+  // access budget is small); Claude Sonnet, GPT-6, GPT-6 Sol and GPT-5.6 Think
+  // Deeper get `relay` (reasons and numbers in defaultFramingForTone); the rest
+  // keep the bench-tuned `baseline`. Keyed on the model, not the tone, because
+  // one tone can serve two models. M365_FRAMING_* still wins.
   const framingVariant = currentFramingVariant(defaultFramingForModel(model));
   let useToolAgent = !!hasTools && toolRequestUsesAgent(tone);
 
