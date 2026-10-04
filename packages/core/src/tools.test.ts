@@ -395,6 +395,55 @@ describe("tool-result labelling", () => {
     );
     expect(out).toContain('<tool_response tool="tool">');
   });
+
+  // GPT-5.6's CoT in a long pi session: "the tool is responding with an unexpected
+  // label" — an edit labelled command="todo.mjs", a command shown re-quoted.
+  it("labels a file tool by its path, not as a command", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const history = [{ role: "assistant", tool_calls: [{ id: "e1", function: { name: "edit", arguments: '{"path":"todo.mjs","edits":[]}' } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "e1", content: "Successfully replaced 1 block(s) in todo.mjs." }, history);
+    expect(out).toContain('<tool_response tool="edit" path="todo.mjs">');
+    expect(out).not.toContain("command=");
+  });
+
+  it("shows a command with its own quotes (escaped), not swapped for single quotes", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const cmd = `for f in a.mjs; do printf '%s\\n' "$f"; done`;
+    const history = [{ role: "assistant", tool_calls: [{ id: "b1", function: { name: "bash", arguments: JSON.stringify({ command: cmd }) } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "b1", content: "a.mjs" }, history);
+    expect(out).toContain(`command="for f in a.mjs; do printf '%s\\\\n' \\"$f\\"; done"`);
+    expect(out).not.toContain("'$f'"); // "$f" and '$f' are different shell commands
+  });
+});
+
+describe("follow-up requests", () => {
+  // Long pi sessions: follow-ups ended with a summary of the FIRST request, and a
+  // run drifted back into it; the framing's "the task" anchors to the first request.
+  it("marks only the newest request when a history holds several (M365_FOLLOWUP_NOTE=1)", async () => {
+    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
+    process.env.M365_FOLLOWUP_NOTE = "1";
+    try {
+      const out = formatMessages([
+        { role: "user", content: "add a remove command" },
+        { role: "assistant", content: "Done." },
+        { role: "user", content: "now add priorities" },
+      ]);
+      expect(out.split(FOLLOW_UP_NOTE)).toHaveLength(2); // exactly one note
+      expect(out.indexOf(FOLLOW_UP_NOTE)).toBeGreaterThan(out.indexOf("Done."));
+      expect(out).toContain(`${FOLLOW_UP_NOTE}\nnow add priorities`);
+      expect(formatMessages([{ role: "user", content: "only one" }])).not.toContain(FOLLOW_UP_NOTE);
+    } finally {
+      delete process.env.M365_FOLLOWUP_NOTE;
+    }
+  });
+
+  it("is off by default until measured", async () => {
+    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
+    const out = formatMessages([
+      { role: "user", content: "a" }, { role: "assistant", content: "ok" }, { role: "user", content: "b" },
+    ]);
+    expect(out).not.toContain(FOLLOW_UP_NOTE);
+  });
 });
 
 describe("fenced tool format (the only format)", () => {
