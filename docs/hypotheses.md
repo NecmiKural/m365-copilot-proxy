@@ -47,7 +47,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   executed (F54), an ~8.2k-char command-line cap (F55), give-ups the retry never saw (F56–F58);
   framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
   sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
-  that `relay` dissolves for GPT-5.6 Think Deeper (F62)
+  that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
+  request, and concurrent sessions with one opening message collide (F63)
 
 ---
 
@@ -3805,3 +3806,48 @@ Both sweeps together: relay 26/26 tasks with 0 give-up runs, baseline 21/26 with
 path under baseline. **Probe:** the document sweep on `gpt-5.5-think-deeper`; an English
 "wasn't able to …" confabulation pattern, checked against real final answers for false positives
 before it ships.
+
+### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (findings) / 🔴 (the note's effect: unmeasured)
+**Long-session test** (Oct 4; real pi, `gpt-5.6-think-deeper`; one pi session per run with three
+consecutive requests — a 4-file feature, a follow-up feature, a PDF — each checked by a hidden
+verifier outside the project, validated beforehand on a reference solution, the untouched template
+and three negative controls; sessions in a private `--session-dir`; arms interleaved, 3 sessions each):
+
+| | baseline | relay |
+|---|---|---|
+| step 1 (`remove`, 4 files) | 2/3 | 3/3 |
+| step 2 (follow-up: priorities) | 0/3 | 2/3 |
+| step 3 (PDF) | 3/3 | 2/2 (+1 lost to the throttle) |
+| sessions with a give-up turn | 3/3 | 1/3 (hidden: "PDF dosyası oluşturma özelliğim şu anda etkin değil" + a "run this" fence that shell routing executed) |
+| tool calls / seconds per step | 1.4 / 28 | 8.4 / 58 |
+
+**Follow-ups anchor to the first request.** Final messages of follow-up steps summarised an earlier
+request in baseline 2/6 and relay 3/5 runs (their own request 2/6 and 2/5; the rest gave up). One
+relay run started the new request, then read its own fresh edits as "unexpected changes in
+priorities… concurrent changes", went back to finishing the first request and reported that; the
+step failed. Inferred mechanism: every framing says to report "when the task is complete", "the
+task" is the session's first request, and follow-ups arrive as bare `<user>` blocks. **Candidate:**
+`FOLLOW_UP_NOTE` on the newest request, opt-in (`M365_FOLLOWUP_NOTE=1`) — unmeasured, see below.
+
+**Labels misdescribed tool calls** (fixed, default). `formatToolResponse` labelled file tools
+`command="todo.mjs"` and swapped `"` for `'` (`"$f"` shown as `'$f'`, a different shell command).
+The model's chain of thought flagged it twice: "the tool is responding with an unexpected label",
+"the command tool response that indicates a mislabeling issue". Labels now say `command=`, `path=`,
+`query=` or `input=` and escape quotes. Its effect on the anchoring is not separable in this data.
+
+**The note's A/B was lost to a concurrency hazard, which is itself a finding.** A sleeping measurement
+job was taken for dead (its log had stopped because it was sleeping) and a second one was started;
+both woke and ran against the same two proxies. Every session opened with the same first message,
+so `SessionPool` mapped both sweeps' sessions to one `ConversationState`, and under F61 each kept
+resetting the other's conversation — replies like "What would you like me to do with this CLI
+code?" and "this is just the same erroneous command's real output being passed again". All data
+from that hour is discarded. In real use the same collision happens whenever concurrent sessions
+open with the same message, e.g. parallel subagents given one prompt (#7 mentions agent-subagent
+workflows). **Open:** a client-supplied session key, or more than the first user message in the
+fingerprint, to keep concurrent sessions apart.
+
+**Throttle observations (F13).** Throttled at 09:13 after ~1 h of testing (~30 threads, ~200
+messages); probes still throttled at +50 and +52 min, clear at +70 min; throttled again after ~8 min
+of double load. Relay's one-command-per-turn style takes 2–6× the messages per task, which matters
+if the budget is message-weighted. **Probe:** the long-session A/B (note on vs off) as ONE job on a
+fully rested account, with a pre-flight check that no other measurement process is running.
