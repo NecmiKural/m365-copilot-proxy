@@ -431,36 +431,6 @@ describe("tool-result labelling", () => {
   });
 });
 
-describe("follow-up requests", () => {
-  // Long pi sessions: follow-ups ended with a summary of the FIRST request, and a
-  // run drifted back into it; the framing's "the task" anchors to the first request.
-  it("marks only the newest request when a history holds several (M365_FOLLOWUP_NOTE=1)", async () => {
-    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
-    process.env.M365_FOLLOWUP_NOTE = "1";
-    try {
-      const out = formatMessages([
-        { role: "user", content: "add a remove command" },
-        { role: "assistant", content: "Done." },
-        { role: "user", content: "now add priorities" },
-      ]);
-      expect(out.split(FOLLOW_UP_NOTE)).toHaveLength(2); // exactly one note
-      expect(out.indexOf(FOLLOW_UP_NOTE)).toBeGreaterThan(out.indexOf("Done."));
-      expect(out).toContain(`${FOLLOW_UP_NOTE}\nnow add priorities`);
-      expect(formatMessages([{ role: "user", content: "only one" }])).not.toContain(FOLLOW_UP_NOTE);
-    } finally {
-      delete process.env.M365_FOLLOWUP_NOTE;
-    }
-  });
-
-  it("is off by default until measured", async () => {
-    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
-    const out = formatMessages([
-      { role: "user", content: "a" }, { role: "assistant", content: "ok" }, { role: "user", content: "b" },
-    ]);
-    expect(out).not.toContain(FOLLOW_UP_NOTE);
-  });
-});
-
 describe("fenced tool format (the only format)", () => {
   const tools = [
     {

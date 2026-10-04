@@ -160,24 +160,6 @@ export function formatToolResponse(m: Message, history: Message[]): string {
   return `<tool_response tool="${name}"${argAttr}>\n${getMessageContent(m)}\n</tool_response>`;
 }
 
-/** Marks the newest request in a multi-request session. The framing says to
- *  report "when the task is complete", and a model reads "the task" as the
- *  session's FIRST request: in long pi sessions both baseline and relay finished
- *  follow-ups with a summary of the previous request ("Görev silme özelliği
- *  tamamlandı" after being asked for priorities, then for a PDF), and one relay
- *  run drifted back into the old request mid-way, reading its own new edits as
- *  "concurrent changes". In the user's voice, so it fits every framing variant.
- *  OPT-IN (M365_FOLLOWUP_NOTE=1) until measured: the live A/B was lost to two
- *  sweeps running concurrently (docs/hypotheses.md F63). */
-export const FOLLOW_UP_NOTE =
-  "(Follow-up from me: this is now the current request. Work on it, and when it is done, sum up what you did for this request, not the earlier ones.)";
-
-/** A user message as the model reads it; `current` marks a follow-up request. */
-export function formatUserMessage(m: Message, current: boolean): string {
-  const note = current && process.env.M365_FOLLOWUP_NOTE ? `${FOLLOW_UP_NOTE}\n` : "";
-  return `<user>\n${note}${getMessageContent(m)}\n</user>`;
-}
-
 /**
  * Inject a synthetic `reply(text)` tool that the model calls instead of
  * answering in prose. Wired by the handler (which converts `reply` back to a
@@ -236,11 +218,6 @@ export function formatMessages(
     parts.push(style.framingTag ? `<${style.framingTag}>\n${framing}\n</${style.framingTag}>` : framing);
   }
 
-  // A full history re-sent mid-session (a fresh conversation, a compacted one)
-  // can hold several requests; only the newest is the current one.
-  const users = messages.filter((m) => m.role === "user");
-  const current = users.length > 1 ? users[users.length - 1] : undefined;
-
   for (const m of messages) {
     if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
       const calls = m.tool_calls.map((tc) => {
@@ -272,8 +249,6 @@ export function formatMessages(
       parts.push(formatToolResponse(m, messages));
     } else if (m.role === "system") {
       parts.push(`<${style.systemTag}>\n${getMessageContent(m)}\n</${style.systemTag}>`);
-    } else if (m.role === "user") {
-      parts.push(formatUserMessage(m, m === current));
     } else {
       parts.push(`<${m.role}>\n${getMessageContent(m)}\n</${m.role}>`);
     }
