@@ -3754,7 +3754,7 @@ referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by 
 (F57/F58), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.
 
-### F62 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper 🟢 (documents) / 🟡 (coding)
+### F62 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper 🟢
 **Why it gives up.** M365 streams chain-of-thought summaries as `addToChainOfThought` frames (visible
 with `M365_DEBUG`). In give-up turns they name a conflict between two instruction sources: "There
 seems to be a conflict between the developer's statement about file generation being disabled and
@@ -3791,8 +3791,17 @@ Relay vs baseline, runs with a give-up: Fisher p ≈ 6×10⁻⁶. One `conflict`
 - **Throttle data point (F13):** the sweep's last run hit `PerUserThrottled` after ~100 threads in
   ~4 hours.
 
+**Coding tasks don't regress** (the same day, on a rested account; the general suite's repo Q&A,
+write code, fix a bug and use a skill, × 3 per arm, interleaved, through the shipped build with
+`M365_FRAMING_FILE` overriding per run): baseline 11/12, relay **12/12**. Runs with a give-up turn:
+baseline 1/12, relay 0/12 — the baseline one ended "I'm sorry, but I wasn't able to complete and
+verify the code change in this run" after one exploration turn, with its CoT planning the next bash
+step; no confabulation pattern matches "wasn't able to complete", so no retry ran. The cost is turns:
+4.2 tool calls and 30.5 s per coding task under relay vs 1.7 and 19.8 s.
+Both sweeps together: relay 26/26 tasks with 0 give-up runs, baseline 21/26 with 13.
+
 **Shipped:** `Gpt_5_6_Reasoning` → `relay`; the `conflict` note is not shipped. **Not measured:**
-coding tasks under relay on this tone (F59: relay = baseline on turn-1 tool calls, 5/5 each),
-`Gpt_5_6_Chat`, and GPT-5.5 Think Deeper (the README's recommended model). **Probe:** the general
-suite (repo Q&A, write code, fix a bug, use a skill) under relay on a rested account; the same
-document sweep on `gpt-5.5-think-deeper`.
+`Gpt_5_6_Chat`, and GPT-5.5 Think Deeper (the README's recommended model), which runs the same agent
+path under baseline. **Probe:** the document sweep on `gpt-5.5-think-deeper`; an English
+"wasn't able to …" confabulation pattern, checked against real final answers for false positives
+before it ships.
