@@ -48,7 +48,7 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
   sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
   that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
-  request, and concurrent sessions with one opening message collide (F63)
+  request, and concurrent sessions with one opening message collided (F63, fixed)
 
 ---
 
@@ -3805,7 +3805,15 @@ Both sweeps together: relay 26/26 tasks with 0 give-up runs, baseline 21/26 with
 `Gpt_5_6_Chat`, and GPT-5.5 Think Deeper (the README's recommended model), which runs the same agent
 path under baseline. **Probe:** the document sweep on `gpt-5.5-think-deeper`; an English
 "wasn't able to …" confabulation pattern, checked against real final answers for false positives
-before it ships.
+before it ships. **Shipped (Oct 4, evening):** three English patterns from the give-ups our pi
+transcripts hold — "no execution tool is enabled", "file tools aren't enabled in this chat", and "I
+wasn't able to complete … in this run" scoped to the whole task or run, so "I couldn't complete the
+integration tests because they need Docker" stays an answer — plus "erişilebilir değil" for Turkish.
+Old vs new detector over every distinct no-tool reply in those transcripts (198): 4 new hits, all
+give-ups; 0 lost; 0 false positives. The old detector's 38 hits are all give-ups too: they reached
+the user because the one forcing retry didn't turn them (the F62 conflict). Caveat: only 18 of the
+198 are English and about 6 of those are genuine answers (the prompts were Turkish; the rest are
+give-ups, hand-backs and two unparsed tool calls), which is why the English patterns stay narrow.
 
 ### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (findings) / 🔴 (the note's effect: unmeasured)
 **Long-session test** (Oct 4; real pi, `gpt-5.6-think-deeper`; one pi session per run with three
@@ -3843,8 +3851,15 @@ resetting the other's conversation — replies like "What would you like me to d
 code?" and "this is just the same erroneous command's real output being passed again". All data
 from that hour is discarded. In real use the same collision happens whenever concurrent sessions
 open with the same message, e.g. parallel subagents given one prompt (#7 mentions agent-subagent
-workflows). **Open:** a client-supplied session key, or more than the first user message in the
-fingerprint, to keep concurrent sessions apart.
+workflows), and sequentially too: open a second pi session with "merhaba", go back to the first, and
+the first one's next turn went into the second one's thread. **Fixed** without client cooperation:
+the pool keeps every conversation that shares a first message, and a request continues the one whose
+last reply it echoes back at position `sentMessageCount` — the tool-call ids (the client must return
+them verbatim to pair results), else the text. A conversation with a turn in flight can't be joined,
+and F61's fresh conversation no longer replaces the earlier one. With no echo match it falls back to
+the most recent candidate, so a client that rewrites old replies still continues. Three regression
+tests (two sessions continuing in their own threads by tool-call ids and by text, and a same-opener
+request alongside an in-flight turn) fail on the old handler.
 
 **Throttle observations (F13).** Throttled at 09:13 after ~1 h of testing (~30 threads, ~200
 messages); probes still throttled at +50 and +52 min, clear at +70 min; throttled again after ~8 min
