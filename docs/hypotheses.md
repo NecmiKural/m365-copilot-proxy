@@ -46,7 +46,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
 - §24 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F53), nested fences
   executed (F54), an ~8.2k-char command-line cap (F55), give-ups the retry never saw (F56–F58);
   framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
-  sharing an opening message shared an M365 conversation (F61)
+  sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
+  that `relay` dissolves for GPT-5.6 Think Deeper (F62)
 
 ---
 
@@ -3752,3 +3753,46 @@ gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prom
 referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
 (F57/F58), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.
+
+### F62 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper 🟢 (documents) / 🟡 (coding)
+**Why it gives up.** M365 streams chain-of-thought summaries as `addToChainOfThought` frames (visible
+with `M365_DEBUG`). In give-up turns they name a conflict between two instruction sources: "There
+seems to be a conflict between the developer's statement about file generation being disabled and
+the system execution indicating it is required"; "Mevcut geliştirici dosya oluşturmayı devre dışı
+bıraktı… Bu nedenle, sınırlamaları belirtmemiz gerekiyor". The model also knows where our framing
+sits: "the developer's instructions and the user's embedded system". So on the agent path M365's own
+(developer-level) instructions say file generation is disabled, baseline's `<system>`-tagged framing
+inside the user turn says create the file, and the model resolves the conflict either way — refusing
+is following the instruction hierarchy, not a malfunction.
+
+**Sweep** (Oct 4; real pi, `gpt-5.6-think-deeper`, PDF + .docx × 7 per arm, arms interleaved,
+per-request framing via `M365_FRAMING_FILE`): baseline · `relay` · `conflict` (baseline plus a note
+that the restriction means Copilot's built-in downloadable files, not the harness's shell). Every
+model turn audited with the proxy's own detector plus the phrases it missed:
+
+| arm | runs with any give-up turn | give-up turns | task passed | format drift |
+|---|---|---|---|---|
+| baseline | **12/14** | 22/55 | 10/14 | 2 turns |
+| `relay` | **0/14** | **0/89** | **14/14** | 0 |
+| `conflict` | 7/14 (every PDF run, no .docx run) | 14/53 | 12/13 | 0 |
+
+Relay vs baseline, runs with a give-up: Fisher p ≈ 6×10⁻⁶. One `conflict` run was lost to
+`PerUserThrottled` and is excluded from its pass rate. Notes:
+- **The final message undercounts give-ups.** In baseline most give-up turns still passed the task:
+  the refusal came with one "run this yourself" fence, and shell routing executed it. Final messages
+  showed 9/14 runs giving up; the turn audit shows 12/14.
+- **Relay doesn't hide the restriction; it changes how it is resolved.** 3 of 53 relay CoT summaries
+  still mention it, e.g. "need to follow the harness despite the developer's indication of no file
+  generation… the user is requesting commands one at a time" — commands the user runs are not file
+  generation by the model.
+- **Format drift, baseline only:** one turn emitted `<tool_name>bash</tool_name>` and one
+  `<tool_call>{"command": …}` repeated ~1,400 times (332 KB, 12.7 min, cut by M365); neither parses.
+- **Cost:** relay takes more turns (6.4 per run vs 3.9) — one command per turn.
+- **Throttle data point (F13):** the sweep's last run hit `PerUserThrottled` after ~100 threads in
+  ~4 hours.
+
+**Shipped:** `Gpt_5_6_Reasoning` → `relay`; the `conflict` note is not shipped. **Not measured:**
+coding tasks under relay on this tone (F59: relay = baseline on turn-1 tool calls, 5/5 each),
+`Gpt_5_6_Chat`, and GPT-5.5 Think Deeper (the README's recommended model). **Probe:** the general
+suite (repo Q&A, write code, fix a bug, use a skill) under relay on a rested account; the same
+document sweep on `gpt-5.5-think-deeper`.
