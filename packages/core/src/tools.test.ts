@@ -303,6 +303,21 @@ describe("looksLikeConfabulation", () => {
     // Missed in the framing sweep's turn audit (baseline arm, real pi).
     expect(looksLikeConfabulation("Dosya oluşturma özelliğim şu anda kullanılamıyor. Alternatif olarak, `notlar.md` içeriğini Microsoft Word’e yapıştırmaya hazır biçimde düzenleyebilirim.")).toBe(true);
     expect(looksLikeConfabulation("Şu anda dosya sistemine erişip `notlar.pdf` dosyasını kontrol edemiyorum.")).toBe(true);
+    // Missed in the long-session sweep (step 2, baseline).
+    expect(looksLikeConfabulation("Bu oturumda dosya sistemi ve komut çalıştırma araçları şu anda erişilebilir değil. Bu nedenle dosyaları güvenilir biçimde düzenleyip testleri gerçekten çalıştırdığımı gösteremem.")).toBe(true);
+  });
+
+  it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
+    // Exact strings from live Windows/pi runs that went straight to the user.
+    expect(looksLikeConfabulation("I’m sorry, but I wasn’t able to complete and verify the code change in this run.")).toBe(true);
+    expect(looksLikeConfabulation("I can’t issue a tool block because no execution tool is enabled in this turn, and the file/content to process has not been specified.")).toBe(true);
+    expect(looksLikeConfabulation("I can’t create or inspect files in the current directory because file tools aren’t enabled in this chat. To create `ozet.md`, copy the contents of `note.txt` here, and I’ll provide a one-line summary ready to paste into the file.")).toBe(true);
+  });
+
+  it("does NOT flag an honest partial report or prose about tool settings", () => {
+    expect(looksLikeConfabulation("I couldn't complete the integration tests because they need Docker; the 12 unit tests pass.")).toBe(false);
+    expect(looksLikeConfabulation("The bash tool is enabled by default; set M365_HOST_SHELL to override the dialect.")).toBe(false);
+    expect(looksLikeConfabulation("Tools are not enabled for requests without a tools array, so the proxy answers in plain text.")).toBe(false);
   });
 
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
