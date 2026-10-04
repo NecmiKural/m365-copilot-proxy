@@ -48,7 +48,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
   sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
   that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
-  request, and concurrent sessions with one opening message collided (F63, fixed)
+  request, and concurrent sessions with one opening message collided (F63, fixed); each turn landed
+  on a random backend and the conversation forked under the model, pinned with a routing header (F64)
 
 ---
 
@@ -2725,6 +2726,9 @@ N with no idea what turns 1..N-1 said.
 Two turns on one temporary conversation: turn 1 supplies a codeword, turn 2 asks for it back.
 Turn 2 answered `plum-harbor-77` verbatim. Context is retained on the live `ConversationId`.
 n=1, but the failure mode would be total rather than stochastic, so one clean sample settles it.
+(Oct 4: it was stochastic after all, for a different reason. Turns of a conversation forked across
+backends, saved or temporary alike, and every fork kept turn 1, which is all this check asked
+about. See §24 F64.)
 
 ### F29 — the temporary thread is genuinely absent from history 🟢
 
@@ -3866,3 +3870,54 @@ messages); probes still throttled at +50 and +52 min, clear at +70 min; throttle
 of double load. Relay's one-command-per-turn style takes 2–6× the messages per task, which matters
 if the budget is message-weighted. **Probe:** the long-session A/B (note on vs off) as ONE job on a
 fully rested account, with a pre-flight check that no other measurement process is running.
+**Ran** (22:33, rested 12 h, one job): throttled at 22:49 after 4 sessions (~110 messages in 16
+min). Follow-ups on their own topic: note on 1/3, off 1/4 — inconclusive, and confounded: these
+sessions ran on forked conversations (F64).
+
+### F64 — each turn landed on a random backend, and the conversation forked; a routing header pins it 🟢
+**Discovery** (Oct 4, the clean re-run of F63's A/B). The chain of thought kept naming a "mismatch"
+between the model's call and the `<tool_response>` it got — "they pasted a command line interface
+output instead of the expected file content" — and the model read `todo.mjs` four times in one step.
+The final `type:2` item carries the server's own count of the conversation's user messages
+(`turnCount`, `throttling.numUserMessagesInConversation`). Over the 17 turns of that step it ran
+1,2,3,2,4,5,3,6,4,5,6,7,7,8,8,9,9: the turns were landing on two diverging copies of the
+conversation that shared only the first turn.
+
+**Scale.** All proxy debug logs on this machine (Oct 2–4): 70 of 135 conversations with 3+ turns
+forked, and 477 of 852 turns ran on an older copy. It is not timing: in the Oct 4 logs a turn sent
+under 1 s after the previous one closed was off the thread as often as a later one (46% and 46%).
+On off-thread turns the
+model repeated a tool call it had already made 18% of the time (1% on the full thread) and reasoned
+about mismatched responses 9% of the time (1%).
+
+**Probe** (`scripts/fork-probe.mjs`, `gpt-5.6-think-deeper` with the agent; 6 turns each). Every
+message carries a fresh word and asks for all the words so far, so the reply shows what the model
+can see:
+
+| arm | conversations forked | turns off the thread | replies missing a word |
+|---|---|---|---|
+| temporary chat (the default) | 2/3 | 7/18 | 7/18 |
+| saved chat | 3/3 | 11/18 | 11/18 |
+| temporary chat + routing key | **0/4** | **0/24** | **0/24** |
+
+The replies list exactly the words of their copy (turn 4: "willow cobalt", missing turns 2–3; turn
+6: "willow biscuit maple violet", missing 4–5). Saved chat forks too, so `disableMemory=1` is not the
+cause, and F28's two-turn check could not have seen this: every fork here keeps turn 1.
+
+**Mechanism.** Handshake-only connections (no chat message, so no quota and no thread) on one
+ConversationId: `x-calculatedbetarget` named 4–6 different backends in 6 connections, pods in
+Switzerland North and Sweden Central, and no cookie came back. With the header
+`X-RoutingParameter-SessionKey: <ConversationId>`: 1 backend in 6, twice (a different one per
+conversation). The same key as a query parameter does not pin; neither does `X-AnchorMailbox` (OID or
+UPN) or a fixed `chatsessionid`. Inferred: each region keeps its own copy of a live conversation.
+**Fixed:** the proxy sends the header with the conversation id on every turn
+(`buildCopilotWebSocketHeaders`; `M365_NO_SESSION_ROUTING=1` leaves it out).
+
+**What this re-opens.** Before the fix, every multi-turn measurement ran with about half its turns on
+a partial history. Arms were compared fairly (they forked alike), but absolute numbers and some
+mechanisms are suspect: relay's extra turns per task (F62, F63), the follow-up anchoring (F63's
+follow-up steps ran far off the thread — the 18th message on a copy that held 10 — so step 1 looked
+unfinished), mid-task "my tools aren't working" give-ups, and F63 replies blamed on the concurrency
+hazard ("What would you like me to do with this CLI code?" is also what a turn that lost the task
+says). **Probe:** the long-session test on the fixed build: fork-free counters, calls per step,
+follow-up anchoring with the note on and off.
