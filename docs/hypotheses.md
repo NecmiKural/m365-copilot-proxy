@@ -46,7 +46,9 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
 - §24 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F53), nested fences
   executed (F54), an ~8.2k-char command-line cap (F55), give-ups the retry never saw (F56–F58);
   framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
-  sharing an opening message shared an M365 conversation (F61)
+  sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
+  that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
+  request, and concurrent sessions with one opening message collided (F63, fixed)
 
 ---
 
@@ -3752,3 +3754,115 @@ gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prom
 referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
 (F57/F58), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.
+
+### F62 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper 🟢
+**Why it gives up.** M365 streams chain-of-thought summaries as `addToChainOfThought` frames (visible
+with `M365_DEBUG`). In give-up turns they name a conflict between two instruction sources: "There
+seems to be a conflict between the developer's statement about file generation being disabled and
+the system execution indicating it is required"; "Mevcut geliştirici dosya oluşturmayı devre dışı
+bıraktı… Bu nedenle, sınırlamaları belirtmemiz gerekiyor". The model also knows where our framing
+sits: "the developer's instructions and the user's embedded system". So on the agent path M365's own
+(developer-level) instructions say file generation is disabled, baseline's `<system>`-tagged framing
+inside the user turn says create the file, and the model resolves the conflict either way — refusing
+is following the instruction hierarchy, not a malfunction.
+
+**Sweep** (Oct 4; real pi, `gpt-5.6-think-deeper`, PDF + .docx × 7 per arm, arms interleaved,
+per-request framing via `M365_FRAMING_FILE`): baseline · `relay` · `conflict` (baseline plus a note
+that the restriction means Copilot's built-in downloadable files, not the harness's shell). Every
+model turn audited with the proxy's own detector plus the phrases it missed:
+
+| arm | runs with any give-up turn | give-up turns | task passed | format drift |
+|---|---|---|---|---|
+| baseline | **12/14** | 22/55 | 10/14 | 2 turns |
+| `relay` | **0/14** | **0/89** | **14/14** | 0 |
+| `conflict` | 7/14 (every PDF run, no .docx run) | 14/53 | 12/13 | 0 |
+
+Relay vs baseline, runs with a give-up: Fisher p ≈ 6×10⁻⁶. One `conflict` run was lost to
+`PerUserThrottled` and is excluded from its pass rate. Notes:
+- **The final message undercounts give-ups.** In baseline most give-up turns still passed the task:
+  the refusal came with one "run this yourself" fence, and shell routing executed it. Final messages
+  showed 9/14 runs giving up; the turn audit shows 12/14.
+- **Relay doesn't hide the restriction; it changes how it is resolved.** 3 of 53 relay CoT summaries
+  still mention it, e.g. "need to follow the harness despite the developer's indication of no file
+  generation… the user is requesting commands one at a time" — commands the user runs are not file
+  generation by the model.
+- **Format drift, baseline only:** one turn emitted `<tool_name>bash</tool_name>` and one
+  `<tool_call>{"command": …}` repeated ~1,400 times (332 KB, 12.7 min, cut by M365); neither parses.
+- **Cost:** relay takes more turns (6.4 per run vs 3.9) — one command per turn.
+- **Throttle data point (F13):** the sweep's last run hit `PerUserThrottled` after ~100 threads in
+  ~4 hours.
+
+**Coding tasks don't regress** (the same day, on a rested account; the general suite's repo Q&A,
+write code, fix a bug and use a skill, × 3 per arm, interleaved, through the shipped build with
+`M365_FRAMING_FILE` overriding per run): baseline 11/12, relay **12/12**. Runs with a give-up turn:
+baseline 1/12, relay 0/12 — the baseline one ended "I'm sorry, but I wasn't able to complete and
+verify the code change in this run" after one exploration turn, with its CoT planning the next bash
+step; no confabulation pattern matches "wasn't able to complete", so no retry ran. The cost is turns:
+4.2 tool calls and 30.5 s per coding task under relay vs 1.7 and 19.8 s.
+Both sweeps together: relay 26/26 tasks with 0 give-up runs, baseline 21/26 with 13.
+
+**Shipped:** `Gpt_5_6_Reasoning` → `relay`; the `conflict` note is not shipped. **Not measured:**
+`Gpt_5_6_Chat`, and GPT-5.5 Think Deeper (the README's recommended model), which runs the same agent
+path under baseline. **Probe:** the document sweep on `gpt-5.5-think-deeper`; an English
+"wasn't able to …" confabulation pattern, checked against real final answers for false positives
+before it ships. **Shipped (Oct 4, evening):** three English patterns from the give-ups our pi
+transcripts hold — "no execution tool is enabled", "file tools aren't enabled in this chat", and "I
+wasn't able to complete … in this run" scoped to the whole task or run, so "I couldn't complete the
+integration tests because they need Docker" stays an answer — plus "erişilebilir değil" for Turkish.
+Old vs new detector over every distinct no-tool reply in those transcripts (198): 4 new hits, all
+give-ups; 0 lost; 0 false positives. The old detector's 38 hits are all give-ups too: they reached
+the user because the one forcing retry didn't turn them (the F62 conflict). Caveat: only 18 of the
+198 are English and about 6 of those are genuine answers (the prompts were Turkish; the rest are
+give-ups, hand-backs and two unparsed tool calls), which is why the English patterns stay narrow.
+
+### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (findings) / 🔴 (the note's effect: unmeasured)
+**Long-session test** (Oct 4; real pi, `gpt-5.6-think-deeper`; one pi session per run with three
+consecutive requests — a 4-file feature, a follow-up feature, a PDF — each checked by a hidden
+verifier outside the project, validated beforehand on a reference solution, the untouched template
+and three negative controls; sessions in a private `--session-dir`; arms interleaved, 3 sessions each):
+
+| | baseline | relay |
+|---|---|---|
+| step 1 (`remove`, 4 files) | 2/3 | 3/3 |
+| step 2 (follow-up: priorities) | 0/3 | 2/3 |
+| step 3 (PDF) | 3/3 | 2/2 (+1 lost to the throttle) |
+| sessions with a give-up turn | 3/3 | 1/3 (hidden: "PDF dosyası oluşturma özelliğim şu anda etkin değil" + a "run this" fence that shell routing executed) |
+| tool calls / seconds per step | 1.4 / 28 | 8.4 / 58 |
+
+**Follow-ups anchor to the first request.** Final messages of follow-up steps summarised an earlier
+request in baseline 2/6 and relay 3/5 runs (their own request 2/6 and 2/5; the rest gave up). One
+relay run started the new request, then read its own fresh edits as "unexpected changes in
+priorities… concurrent changes", went back to finishing the first request and reported that; the
+step failed. Inferred mechanism: every framing says to report "when the task is complete", "the
+task" is the session's first request, and follow-ups arrive as bare `<user>` blocks. **Candidate:**
+`FOLLOW_UP_NOTE` on the newest request, opt-in (`M365_FOLLOWUP_NOTE=1`) — unmeasured, see below.
+
+**Labels misdescribed tool calls** (fixed, default). `formatToolResponse` labelled file tools
+`command="todo.mjs"` and swapped `"` for `'` (`"$f"` shown as `'$f'`, a different shell command).
+The model's chain of thought flagged it twice: "the tool is responding with an unexpected label",
+"the command tool response that indicates a mislabeling issue". Labels now say `command=`, `path=`,
+`query=` or `input=` and escape quotes. Its effect on the anchoring is not separable in this data.
+
+**The note's A/B was lost to a concurrency hazard, which is itself a finding.** A sleeping measurement
+job was taken for dead (its log had stopped because it was sleeping) and a second one was started;
+both woke and ran against the same two proxies. Every session opened with the same first message,
+so `SessionPool` mapped both sweeps' sessions to one `ConversationState`, and under F61 each kept
+resetting the other's conversation — replies like "What would you like me to do with this CLI
+code?" and "this is just the same erroneous command's real output being passed again". All data
+from that hour is discarded. In real use the same collision happens whenever concurrent sessions
+open with the same message, e.g. parallel subagents given one prompt (#7 mentions agent-subagent
+workflows), and sequentially too: open a second pi session with "merhaba", go back to the first, and
+the first one's next turn went into the second one's thread. **Fixed** without client cooperation:
+the pool keeps every conversation that shares a first message, and a request continues the one whose
+last reply it echoes back at position `sentMessageCount` — the tool-call ids (the client must return
+them verbatim to pair results), else the text. A conversation with a turn in flight can't be joined,
+and F61's fresh conversation no longer replaces the earlier one. With no echo match it falls back to
+the most recent candidate, so a client that rewrites old replies still continues. Three regression
+tests (two sessions continuing in their own threads by tool-call ids and by text, and a same-opener
+request alongside an in-flight turn) fail on the old handler.
+
+**Throttle observations (F13).** Throttled at 09:13 after ~1 h of testing (~30 threads, ~200
+messages); probes still throttled at +50 and +52 min, clear at +70 min; throttled again after ~8 min
+of double load. Relay's one-command-per-turn style takes 2–6× the messages per task, which matters
+if the budget is message-weighted. **Probe:** the long-session A/B (note on vs off) as ONE job on a
+fully rested account, with a pre-flight check that no other measurement process is running.

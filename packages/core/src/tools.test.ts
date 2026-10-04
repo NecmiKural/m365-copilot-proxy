@@ -300,6 +300,24 @@ describe("looksLikeConfabulation", () => {
     // Missed live on the final build (pdf task, after a real tool call).
     expect(looksLikeConfabulation("PDF oluşturma işlemini bu oturumda tamamlayamıyorum. Alternatif olarak Markdown dosyasını Visual Studio Code’da açabilirsiniz.")).toBe(true);
     expect(looksLikeConfabulation("`pandoc` sistemde kurulu olmadığı için PDF oluşturma komutu başarısız oldu. Bu oturumda yeni araç kurma veya indirilebilir PDF oluşturma yetkim bulunmuyor.")).toBe(true);
+    // Missed in the framing sweep's turn audit (baseline arm, real pi).
+    expect(looksLikeConfabulation("Dosya oluşturma özelliğim şu anda kullanılamıyor. Alternatif olarak, `notlar.md` içeriğini Microsoft Word’e yapıştırmaya hazır biçimde düzenleyebilirim.")).toBe(true);
+    expect(looksLikeConfabulation("Şu anda dosya sistemine erişip `notlar.pdf` dosyasını kontrol edemiyorum.")).toBe(true);
+    // Missed in the long-session sweep (step 2, baseline).
+    expect(looksLikeConfabulation("Bu oturumda dosya sistemi ve komut çalıştırma araçları şu anda erişilebilir değil. Bu nedenle dosyaları güvenilir biçimde düzenleyip testleri gerçekten çalıştırdığımı gösteremem.")).toBe(true);
+  });
+
+  it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
+    // Exact strings from live Windows/pi runs that went straight to the user.
+    expect(looksLikeConfabulation("I’m sorry, but I wasn’t able to complete and verify the code change in this run.")).toBe(true);
+    expect(looksLikeConfabulation("I can’t issue a tool block because no execution tool is enabled in this turn, and the file/content to process has not been specified.")).toBe(true);
+    expect(looksLikeConfabulation("I can’t create or inspect files in the current directory because file tools aren’t enabled in this chat. To create `ozet.md`, copy the contents of `note.txt` here, and I’ll provide a one-line summary ready to paste into the file.")).toBe(true);
+  });
+
+  it("does NOT flag an honest partial report or prose about tool settings", () => {
+    expect(looksLikeConfabulation("I couldn't complete the integration tests because they need Docker; the 12 unit tests pass.")).toBe(false);
+    expect(looksLikeConfabulation("The bash tool is enabled by default; set M365_HOST_SHELL to override the dialect.")).toBe(false);
+    expect(looksLikeConfabulation("Tools are not enabled for requests without a tools array, so the proxy answers in plain text.")).toBe(false);
   });
 
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
@@ -310,6 +328,9 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("ozet.md oluşturuldu: 18 bölüm, paket mimarisi ve araç çağrısı akışı.")).toBe(false);
     // Third person ("yetkisi"), not first ("yetkim"): describes the code, not a give-up.
     expect(looksLikeConfabulation("Kullanıcının yetkisi bulunmuyorsa proxy 403 döner.")).toBe(false);
+    // Third person / conditional: the harness or a tool, not the model, can't do it.
+    expect(looksLikeConfabulation("Harness dosyayı kontrol edemiyorsa proxy hata döner.")).toBe(false);
+    expect(looksLikeConfabulation("Bu araç kullanılamıyorsa kurulum adımlarına bakın.")).toBe(false);
   });
 
   it("does NOT flag genuine final answers or normal prose", () => {
@@ -388,6 +409,55 @@ describe("tool-result labelling", () => {
       tools,
     );
     expect(out).toContain('<tool_response tool="tool">');
+  });
+
+  // GPT-5.6's CoT in a long pi session: "the tool is responding with an unexpected
+  // label" — an edit labelled command="todo.mjs", a command shown re-quoted.
+  it("labels a file tool by its path, not as a command", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const history = [{ role: "assistant", tool_calls: [{ id: "e1", function: { name: "edit", arguments: '{"path":"todo.mjs","edits":[]}' } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "e1", content: "Successfully replaced 1 block(s) in todo.mjs." }, history);
+    expect(out).toContain('<tool_response tool="edit" path="todo.mjs">');
+    expect(out).not.toContain("command=");
+  });
+
+  it("shows a command with its own quotes (escaped), not swapped for single quotes", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const cmd = `for f in a.mjs; do printf '%s\\n' "$f"; done`;
+    const history = [{ role: "assistant", tool_calls: [{ id: "b1", function: { name: "bash", arguments: JSON.stringify({ command: cmd }) } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "b1", content: "a.mjs" }, history);
+    expect(out).toContain(`command="for f in a.mjs; do printf '%s\\\\n' \\"$f\\"; done"`);
+    expect(out).not.toContain("'$f'"); // "$f" and '$f' are different shell commands
+  });
+});
+
+describe("follow-up requests", () => {
+  // Long pi sessions: follow-ups ended with a summary of the FIRST request, and a
+  // run drifted back into it; the framing's "the task" anchors to the first request.
+  it("marks only the newest request when a history holds several (M365_FOLLOWUP_NOTE=1)", async () => {
+    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
+    process.env.M365_FOLLOWUP_NOTE = "1";
+    try {
+      const out = formatMessages([
+        { role: "user", content: "add a remove command" },
+        { role: "assistant", content: "Done." },
+        { role: "user", content: "now add priorities" },
+      ]);
+      expect(out.split(FOLLOW_UP_NOTE)).toHaveLength(2); // exactly one note
+      expect(out.indexOf(FOLLOW_UP_NOTE)).toBeGreaterThan(out.indexOf("Done."));
+      expect(out).toContain(`${FOLLOW_UP_NOTE}\nnow add priorities`);
+      expect(formatMessages([{ role: "user", content: "only one" }])).not.toContain(FOLLOW_UP_NOTE);
+    } finally {
+      delete process.env.M365_FOLLOWUP_NOTE;
+    }
+  });
+
+  it("is off by default until measured", async () => {
+    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
+    const out = formatMessages([
+      { role: "user", content: "a" }, { role: "assistant", content: "ok" }, { role: "user", content: "b" },
+    ]);
+    expect(out).not.toContain(FOLLOW_UP_NOTE);
   });
 });
 

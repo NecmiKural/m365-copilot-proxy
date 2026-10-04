@@ -108,6 +108,8 @@ export {
   textAfterFirstToolCall,
   isProseDocument,
   formatToolResponse,
+  formatUserMessage,
+  FOLLOW_UP_NOTE,
   type Message,
   type ToolDef,
   type ToolFunction,

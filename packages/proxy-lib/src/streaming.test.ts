@@ -16,20 +16,24 @@ const scripted: {
   agentFlags: Array<boolean | undefined>;
   /** How many times the handler rotated to a fresh conversation. */
   newConversations: number;
-} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0 };
+  /** The M365 conversation id of every run() call, in order (unique per conversation). */
+  convs: string[];
+  ids: number;
+} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, convs: [], ids: 0 };
 
 vi.mock("@m365-copilot/core", async (importActual) => {
   const actual = await importActual<typeof import("@m365-copilot/core")>();
   class FakeModelSession {
     turnCount = 0;
-    conversationId = "conv-test";
+    conversationId = `conv-${++scripted.ids}`;
     reset() {}
-    newConversation() { this.conversationId = "conv-test-2"; this.turnCount = 0; scripted.newConversations++; }
+    newConversation() { this.conversationId = `conv-${++scripted.ids}`; this.turnCount = 0; scripted.newConversations++; }
     async refreshAgent() { return false; }
     async run(text: string, _model?: string, _signal?: AbortSignal, useAgent?: boolean) {
       this.turnCount++; // like the real session: later requests go down the delta path
       scripted.runs++;
       scripted.texts.push(text);
+      scripted.convs.push(this.conversationId);
       scripted.agentFlags.push(useAgent);
       const next = scripted.queue.shift();
       const deltas = next ? (next.fullText ? [next.fullText] : []) : scripted.deltas;
@@ -527,7 +531,7 @@ describe("a new harness session that shares the first user message", () => {
   it("gets a fresh M365 conversation after a longer earlier session", async () => {
     scripted.result = null;
     scripted.texts = [];
-    scripted.newConversations = 0;
+    scripted.convs = [];
     scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }, { fullText: "```bash\nls\n```" }];
     const pool = new SessionPool();
     const prompt = `make a pdf ${Math.random()}`;
@@ -537,7 +541,7 @@ describe("a new harness session that shares the first user message", () => {
     first.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "notlar.md" });
     await ask(first, pool);
     await ask([{ role: "user", content: prompt }], pool); // a new session, same opener
-    expect(scripted.newConversations).toBe(1);
+    expect(scripted.convs[2]).not.toBe(scripted.convs[0]);
     expect(scripted.texts[2]).toContain(prompt); // the full prompt, not a delta
     scripted.queue = [];
   });
@@ -545,13 +549,13 @@ describe("a new harness session that shares the first user message", () => {
   it("gets one after a single-turn session too (equal length used to send 'Please continue.')", async () => {
     scripted.result = null;
     scripted.texts = [];
-    scripted.newConversations = 0;
+    scripted.convs = [];
     scripted.queue = [{ fullText: "I can't do that." }, { fullText: "```bash\nls\n```" }];
     const pool = new SessionPool();
     const prompt = `make a docx ${Math.random()}`;
     await ask([{ role: "user", content: prompt }], pool);
     await ask([{ role: "user", content: prompt }], pool);
-    expect(scripted.newConversations).toBe(1);
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
     expect(scripted.texts[scripted.texts.length - 1]).not.toBe("Please continue.");
     expect(scripted.texts[scripted.texts.length - 1]).toContain(prompt);
     scripted.queue = [];
@@ -560,7 +564,7 @@ describe("a new harness session that shares the first user message", () => {
   it("still continues a real continuation in the same conversation", async () => {
     scripted.result = null;
     scripted.texts = [];
-    scripted.newConversations = 0;
+    scripted.convs = [];
     scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }];
     const pool = new SessionPool();
     const msgs: any[] = [{ role: "user", content: `go ${Math.random()}` }];
@@ -568,8 +572,102 @@ describe("a new harness session that shares the first user message", () => {
     msgs.push({ role: "assistant", content: null, tool_calls: m1.tool_calls });
     msgs.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "a.txt" });
     await ask(msgs, pool);
-    expect(scripted.newConversations).toBe(0);
+    expect(scripted.convs[1]).toBe(scripted.convs[0]);
     expect(scripted.texts[1]).toContain('<tool_response tool="bash"'); // a delta
+    scripted.queue = [];
+  });
+
+  // F63: the fresh conversation used to REPLACE the earlier session's, so a
+  // session still running (two measurement jobs at once) lost its thread each
+  // time the other one moved, and its next delta landed in the other's.
+  it("leaves the earlier session's conversation alone: each continues in its own", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "```bash\npwd\n```" }, { fullText: "X done." }, { fullText: "Y done." }];
+    const pool = new SessionPool();
+    const prompt = `merhaba ${Math.random()}`;
+    const x: any[] = [{ role: "user", content: prompt }];
+    const y: any[] = [{ role: "user", content: prompt }];
+    const mx = await ask(x, pool);
+    const my = await ask(y, pool);
+    x.push({ role: "assistant", content: null, tool_calls: mx.tool_calls }, { role: "tool", tool_call_id: mx.tool_calls[0].id, content: "x.txt" });
+    y.push({ role: "assistant", content: null, tool_calls: my.tool_calls }, { role: "tool", tool_call_id: my.tool_calls[0].id, content: "/y" });
+    await ask(x, pool);
+    await ask(y, pool);
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    expect(scripted.convs[2]).toBe(scripted.convs[0]);
+    expect(scripted.convs[3]).toBe(scripted.convs[1]);
+    expect(scripted.texts[2]).toContain("x.txt"); // deltas, each in its own thread
+    expect(scripted.texts[3]).toContain("/y");
+    scripted.queue = [];
+  });
+
+  it("tells text replies apart too", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.queue = [{ fullText: "Hi from X." }, { fullText: "Hi from Y." }, { fullText: "Sure." }];
+    const pool = new SessionPool();
+    const prompt = `hi ${Math.random()}`;
+    const mx = await ask([{ role: "user", content: prompt }], pool);
+    await ask([{ role: "user", content: prompt }], pool);
+    await ask([{ role: "user", content: prompt }, { role: "assistant", content: mx.content }, { role: "user", content: "and X?" }], pool);
+    expect(scripted.convs[2]).toBe(scripted.convs[0]); // X's, though Y spoke last
+    scripted.queue = [];
+  });
+
+  it("gives a same-opener request its own conversation while a turn is in flight", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "```bash\nls\n```" }];
+    const pool = new SessionPool();
+    const prompt = `parallel ${Math.random()}`;
+    await Promise.all([ask([{ role: "user", content: prompt }], pool), ask([{ role: "user", content: prompt }], pool)]);
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    scripted.queue = [];
+  });
+
+  it("still continues when the client rewrote the reply it echoes", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.queue = [{ fullText: "Hello there." }, { fullText: "Sure." }];
+    const pool = new SessionPool();
+    const prompt = `hello ${Math.random()}`;
+    const m1 = await ask([{ role: "user", content: prompt }], pool);
+    await ask([{ role: "user", content: prompt }, { role: "assistant", content: `${m1.content} (trimmed)` }, { role: "user", content: "and now?" }], pool);
+    expect(scripted.convs[1]).toBe(scripted.convs[0]);
+    expect(scripted.texts[1]).not.toContain(prompt); // a delta, not a fresh full prompt
+    scripted.queue = [];
+  });
+});
+
+describe("a follow-up request in the same session", () => {
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+  const ask = async (messages: any[], pool: InstanceType<typeof SessionPool>) =>
+    (await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "gpt-5.6-think-deeper", stream: false, tools, messages }), pool)).json()).choices[0].message;
+
+  afterEach(() => { delete process.env.M365_FOLLOWUP_NOTE; });
+
+  it("is marked as the current request in the delta; tool results are not (M365_FOLLOWUP_NOTE=1)", async () => {
+    const { FOLLOW_UP_NOTE } = await import("@m365-copilot/core");
+    process.env.M365_FOLLOWUP_NOTE = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }, { fullText: "```bash\nls\n```" }];
+    const pool = new SessionPool();
+    const msgs: any[] = [{ role: "user", content: `add remove ${Math.random()}` }];
+    const m1 = await ask(msgs, pool);
+    msgs.push({ role: "assistant", content: null, tool_calls: m1.tool_calls });
+    msgs.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "todo.mjs" });
+    const m2 = await ask(msgs, pool);                       // tool result only
+    msgs.push({ role: "assistant", content: m2.content });
+    msgs.push({ role: "user", content: "now add priorities" }); // the follow-up
+    await ask(msgs, pool);
+    expect(scripted.texts[1]).not.toContain(FOLLOW_UP_NOTE);
+    expect(scripted.texts[2]).toContain(`${FOLLOW_UP_NOTE}\nnow add priorities`);
     scripted.queue = [];
   });
 });
