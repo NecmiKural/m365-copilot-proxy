@@ -3883,7 +3883,7 @@ The final `type:2` item carries the server's own count of the conversation's use
 1,2,3,2,4,5,3,6,4,5,6,7,7,8,8,9,9: the turns were landing on two diverging copies of the
 conversation that shared only the first turn.
 
-**Scale.** All proxy debug logs on this machine (Oct 2–4): 70 of 135 conversations with 3+ turns
+**Scale** (`scripts/fork-scan.mjs` over the proxy debug logs on this machine, Oct 2–4): 70 of 135 conversations with 3+ turns
 forked, and 477 of 852 turns ran on an older copy. It is not timing: in the Oct 4 logs a turn sent
 under 1 s after the previous one closed was off the thread as often as a later one (46% and 46%).
 On off-thread turns the
