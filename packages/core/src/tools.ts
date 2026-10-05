@@ -346,6 +346,12 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // baseline, no file). The lookahead keeps suffixed forms out: "tamamlanamadıysa"
   // (if it couldn't) and "oluşturulamadığında" (when it can't) describe code.
   /(?:tamamlan|oluşturul|dönüştürül|kaydedil|üretil)[ae]m[ae]d[ıi](?![a-zçğıöşü])/i,
+  // Asking the user to hand over what is already on disk: "data.csv dosyasının
+  // içeriğine erişmem gerekiyor. Dosyayı buraya yüklediğinizde…" (Oct 5, after
+  // reading one skill, with 308 listed). "erişmem" is first person; "erişmesi
+  // gerekir" (third person) describes code and stays out.
+  /erişmem\s+gerek/i,
+  /(?:buraya|sohbete)\s+(?:yükle|yapıştır)/i,
 ];
 
 // M365 sometimes creates a real patch in its Teams-hosted remote artifact
