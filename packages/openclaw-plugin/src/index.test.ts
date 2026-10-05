@@ -71,6 +71,12 @@ describe("generateOpenClawConfig", () => {
     expect(models.find((m) => m.id === "think-deeper")?.reasoning).toBe(true);
     expect(models.find((m) => m.id === "quick")?.reasoning).toBe(false);
   });
+
+  it("names the two Opus models apart — one tone, two models (§24)", () => {
+    const models = generateOpenClawConfig().models.providers.m365.models;
+    expect(models.find((m) => m.id === "claude-opus")?.name).toBe("Claude Opus 5.5");
+    expect(models.find((m) => m.id === "claude-opus-4.5")?.name).toMatch(/^Claude Opus 4\.5/);
+  });
 });
 
 // --- Integration tests against real M365 Copilot via proxy ---

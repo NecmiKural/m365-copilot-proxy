@@ -1,7 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
+  activePriorityAccessExhaustion,
   couldBePriorityAccessPrefix,
+  notePriorityAccessExhausted,
+  opusAllowance,
+  parseMetering,
   parsePriorityAccessExhaustion,
+  priorityAccessExhaustionOf,
+  resetPriorityAccessState,
   secondsUntilReset,
 } from "./priority-access.js";
 
@@ -98,5 +104,76 @@ describe("couldBePriorityAccessPrefix (stream-head gate)", () => {
   it("stays held once the full refusal opener has matched", () => {
     expect(couldBePriorityAccessPrefix(DAILY)).toBe(true);
     expect(couldBePriorityAccessPrefix(WEEKLY)).toBe(true);
+  });
+});
+
+// The final item's throttling block of a paid-scenario Opus turn, verbatim
+// (2026-10-05 00:01Z, the first Opus 5.5 turn after the weekly reset; §24 F55).
+const METERING = {
+  DeepResearch: { remainingAllowance: 100 },
+  ClaudeOpusQuery: { remainingAllowance: 100 },
+  ClaudeOpusQuery75: { remainingAllowance: 74 },
+  ClaudeOpusQueryDev: { remainingAllowance: 5 },
+  ClaudeOpusQueryC1: { remainingAllowance: 0 },
+  ClaudeOpusQueryDaily: { remainingAllowance: 39 },
+  ClaudeOpusQueryHourlyDev: { remainingAllowance: 2 },
+  ClaudeOpusQueryWeeklyWord: { remainingAllowance: 75 },
+  ClaudeOpusQueryDailyWord: { remainingAllowance: 40 },
+};
+
+describe("parseMetering / opusAllowance", () => {
+  it("flattens the metering map and picks out the Opus daily and weekly allowances", () => {
+    const m = parseMetering(METERING)!;
+    expect(m.ClaudeOpusQuery75).toBe(74);
+    expect(m.DeepResearch).toBe(100);
+    expect(opusAllowance(m)).toEqual({ daily: 39, weekly: 74 });
+  });
+
+  it("returns null when there is nothing to read (included scenario: no metering)", () => {
+    expect(parseMetering(undefined)).toBeNull();
+    expect(parseMetering({})).toBeNull();
+    expect(parseMetering({ X: { remainingAllowance: "3" } })).toBeNull();
+    expect(opusAllowance(null)).toBeNull();
+    expect(opusAllowance({ DeepResearch: 100 })).toBeNull();
+  });
+});
+
+describe("priorityAccessExhaustionOf (result + text)", () => {
+  it("reads the OutOfCredits result's message", () => {
+    const r = priorityAccessExhaustionOf({ value: "OutOfCredits", message: WEEKLY }, "", WED)!;
+    expect(r.window).toBe("week");
+    expect(r.resetsAt.toISOString()).toBe("2026-09-21T00:00:00.000Z");
+  });
+
+  it("trusts OutOfCredits even if the refusal is ever reworded", () => {
+    const r = priorityAccessExhaustionOf({ value: "OutOfCredits", message: "Opus is unavailable until tomorrow." }, "", WED)!;
+    expect(r.window).toBe("day");
+    expect(r.resetsAt.toISOString()).toBe("2026-09-17T00:00:00.000Z");
+    expect(priorityAccessExhaustionOf({ value: "OutOfCredits", message: "back on Monday" }, "", WED)!.window).toBe("week");
+  });
+
+  it("still catches the text alone, and ignores ordinary turns", () => {
+    expect(priorityAccessExhaustionOf({ value: "Success" }, DAILY, WED)!.window).toBe("day");
+    expect(priorityAccessExhaustionOf({ value: "Success" }, "Done.", WED)).toBeNull();
+    expect(priorityAccessExhaustionOf(null, null, WED)).toBeNull();
+  });
+});
+
+describe("remembering an exhaustion until its reset", () => {
+  afterEach(() => resetPriorityAccessState());
+
+  it("is active until the reset, then forgotten", () => {
+    const e = parsePriorityAccessExhaustion(DAILY, WED)!;
+    notePriorityAccessExhausted(e, WED);
+    expect(activePriorityAccessExhaustion(new Date("2026-09-16T23:59:00Z"))).toBe(e);
+    expect(activePriorityAccessExhaustion(new Date("2026-09-17T00:00:01Z"))).toBeNull();
+  });
+
+  it("keeps the later reset when the weekly wall follows the daily one", () => {
+    const day = parsePriorityAccessExhaustion(DAILY, WED)!;
+    const week = parsePriorityAccessExhaustion(WEEKLY, WED)!;
+    notePriorityAccessExhausted(week, WED);
+    notePriorityAccessExhausted(day, WED);
+    expect(activePriorityAccessExhaustion(new Date("2026-09-18T00:00:00Z"))?.window).toBe("week");
   });
 });

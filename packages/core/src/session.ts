@@ -24,6 +24,7 @@ import {
   ACTION_ALLOWED_MESSAGE_TYPES,
 } from "./native-actions.js";
 import { createLogger, trunc } from "./log.js";
+import { parseMetering, opusAllowance } from "./priority-access.js";
 
 const RS = "\x1E";
 const log = createLogger("session");
@@ -309,10 +310,11 @@ export class CopilotSession {
     const requestId = crypto.randomUUID();
 
     // Resolve the tone ONCE and derive the connection's entitlement from the
-    // MODEL (not the tone alone). `scenario` is not cosmetic: the default
-    // `OfficeWebIncludedCopilot` will not serve `Claude_Opus` (canned
+    // MODEL (not the tone alone). `scenario` is not cosmetic: agent-less, the
+    // default `OfficeWebIncludedCopilot` will not serve `Claude_Opus` (canned
     // BotConnection apology), while `OfficeWebPaidCopilot` does — and the same
-    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5 on the other.
+    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5 on the other, the
+    // same `Claude_Opus` tone Opus 4.5 (agent, premium) and Opus 5.5.
     // See getScenarioForModel / docs §5.
     const tone = getToneForModel(model);
     const { scenario, licenseType } = getScenarioForModel(model);
@@ -363,6 +365,8 @@ export class CopilotSession {
       // account is rate-limited: the turn then carries NO content frames, only a
       // BotConnection apology inside that item (#35).
       let serverResult: { value: string; errorCode?: string; message?: string } | null = null;
+      // The final item's `throttling.metering` (priority-access allowances, §24 F55).
+      let metering: Record<string, number> | null = null;
       // Generated images captured this turn (§14). Keyed by fileToken so the
       // repeated progress snapshots for one image collapse to a single entry.
       const imagesByToken = new Map<string, CapturedImage>();
@@ -478,6 +482,9 @@ export class CopilotSession {
         },
         get result() {
           return serverResult;
+        },
+        get metering() {
+          return metering;
         },
         get images() {
           return [...imagesByToken.values()];
@@ -818,6 +825,9 @@ export class CopilotSession {
             if (item.turnState) turnState = item.turnState;
             if (item.throttling) {
               throttleInfo = { current: item.throttling.numUserMessagesInConversation, max: item.throttling.maxNumUserMessagesInConversation };
+              metering = parseMetering(item.throttling.metering);
+              const opus = opusAllowance(metering);
+              if (opus) log.info(`Opus priority access left: ${opus.daily ?? "?"} today, ${opus.weekly ?? "?"} this week`);
             }
             let resumedHere = false;
             for (const m of item.messages ?? []) {

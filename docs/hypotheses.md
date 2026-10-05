@@ -43,6 +43,13 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
 - §23 — GPT-6 Sol (#23): ungated, takes the agent only on a premium account (learned at runtime),
   has its own sandbox agent-less that no optionsSet removes, and `relay` wins on both paths
   (30/30 agent, 60/60 agent-less, 21/21 in real pi); a premium transient that mimics the dead route (F52)
+- §24 — Claude Opus 4.5 (`claude-opus-4.5`): `Claude_Opus` on the included scenario, reachable only
+  through the tool agent on a premium account; its system prompt says "Opus 5". The priority-access
+  budget is on the wire (`OutOfCredits`, `throttling.metering`), counts turns, and the included scenario
+  has none; both Opus models move onto the agent and `relay_batch` (the `<system>`-tagged framings
+  trip the jailbreak classifier, F56; batching cuts turns ~40%, F60); the refusal isn't streamed and
+  issue #18 (F59); Opus's native call markup leaking into fences (F57); four throttles in
+  a day that a per-turn bucket fits better than a conversation count (F58)
 
 ---
 
@@ -124,6 +131,10 @@ Unknown: the actual allowance size, whether daily and weekly are independent cou
 and whether it is per-account or per-tenant.
 
 ### H15.1 — Does the proxy's framing block burn the budget faster? 🟡 partially addressed, UNPROVEN
+
+> **Settled (§24 F55, 2026-10-04): no.** The budget is per turn (`creditScenario: "TotalTurn"`; each
+> Opus turn lowers `ClaudeOpusQuery75`/`ClaudeOpusQueryDaily` by exactly 1 whatever the prompt size).
+> `minimal` saved nothing, and Opus now defaults to `relay` (§24 F56).
 **Premise.** Opus exhausts "very quickly" through the proxy. The structural difference between
 proxy use and hand use is that every agentic turn prepends a tool-framing block — `baseline` is
 **3,894 chars for a 2-tool request**, and it exists to force M365's chat-tuned GPT path to *act*
@@ -215,7 +226,9 @@ of login+restart wall-clock is just the idle gap that lets the account self-heal
 
 **This contradiction already lives in the repo:** `auth-recovery.ts`/AGENTS.md say "fresh
 login clears it"; API doc §2/§7 say "re-auth does NOT clear throttling." §2/§7 is the more
-controlled finding. If H-R1 holds, auto-reauth provides **zero** throttle benefit while
+controlled finding. (Resolved 2026-10-04 in §2/§7's favour: `auth-recovery.ts` became the
+degradation backoff, and AGENTS.md now says a fresh login does not clear the throttle. E-T3,
+the probe that would settle it outright, still hasn't run on a degraded account.) If H-R1 holds, auto-reauth provides **zero** throttle benefit while
 carrying **all** the F25 flag-risk — pure downside.
 
 **Prediction.** On a degraded account, `forceReauth`→retry and (equal-wall-clock idle with
@@ -726,6 +739,10 @@ F13). The exact SOLVED task varies with prompt/account state; the *mechanism* is
 multi-turn ```bash loop, or JSON ever matches fenced on SOLVED, F12 weakens.
 
 ### F13 — Account degradation is THREAD-rate, not message-count; fresh login clears it 🟡
+
+> **Superseded in part (§11 H-R1):** the "fresh login clears it" half was n=1 and confounded with
+> a rest; the regenerated token keeps the same `oid`, i.e. the same throttle bucket (API doc §2/§7).
+> Treat the throttle as lifting with idle time, not with a login. The thread-rate half stands.
 
 > **Update (Sep 28 2026, #35):** it is not silent. A throttled turn's final `type:2` item says
 > `result.value: "Throttled"`, `errorCode: "PerUserThrottled"`; the proxy now 429s on it.
@@ -2786,6 +2803,7 @@ kept apart in code, not just in prose:
   and it drives M365's GPT path, which is what `baseline`'s anti-narration cage was tuned for.
   A `defaultFramingForTone` keyed on the paid scenario would have silently handed the GPT path
   the variant built for a model that doesn't need convincing.
+  (Both later moved to `relay`, for unrelated reasons: GPT-6 in §22 F47, Opus in §24 F56.)
   **Superseded 2026-10-01 (§22 F45, F47):** GPT-6 never ran on the GPT agent path. Its tool
   requests now go agent-less and default to `relay` (30/30 vs baseline 0/30). The principle
   stands: the framing is still chosen per tone, not keyed on the paid scenario.
@@ -3640,3 +3658,364 @@ its conversation and drops tasks lost to the network): agent 30/30 vs `demo_only
 difference: it counts the premium `demo_only` arm's post-F52 tail (4 tasks, 1 solved) under
 agent-less, since that is the path that served them, so agent-less `demo_only` is 10/24 and the
 comparison p = 6×10⁻¹⁰ (relay 60/60 either way).
+
+## 24. Oct 4 2026 — Claude Opus 4.5: `Claude_Opus` on the included scenario, through the tool agent only
+
+**Question.** The user's probes on the premium account (2026-10-02/04) show `Claude_Opus` answering
+on the *included* scenario when the tool agent is attached — and identifying as Claude Opus 4.5, not
+the paid scenario's Opus 5.5. Is it a usable second Opus, which accounts serve it, does it draw on the
+priority-access budget, and which framing makes it drive a coding loop? Shipped as `claude-opus-4.5`;
+`claude-opus` (Opus 5.5, paid) moves onto the agent and the same framing with it.
+
+**Raw data** (local, not in the repo): the user's runs in `scripts/agent-tone-out/` and
+`scripts/tone-out/` (2026-10-01…10-04) in the premium account's checkout and one non-premium account's
+checkout, re-read from disk (results and frames) against the pasted logs before use — they match.
+Bench: `~/.config/opencode-m365/sweeps/opus45*/` in the premium checkout (bench text, debug log and
+frames per arm). Services `1.0.03559.55742` … `1.0.03562.56583`.
+
+### F53 — the agent is Opus 4.5's only route, and only on a premium account 🟢
+| cell (`Claude_Opus` @ included) | premium | non-premium |
+|---|---|---|
+| agent attached (`agent-tone-probe`) | **DeepLeo, `3PDeclarativeAgent`, answers** (10/10, 2026-10-01…04) | dead: BotConnection, `result: InternalError` (2/2) |
+| agent-less (`tone-probe`) | dead: BotConnection apology (8/8) | dead: BotConnection apology (3/3) |
+
+So it is the reverse of every Claude tone so far (F44): the agent doesn't merely *let it through*, it is
+the only thing that reaches it. Two consequences in the proxy: a request on `claude-opus-4.5` carries
+the agent even without tools (`modelRequiresAgent`; the agent's instructions say to answer normally
+when there's no `<tools>` block, and the self-ID probes are exactly such tool-less turns), and there is
+no agent-less fallback to learn (`PREMIUM_ONLY_AGENT_TONES` doesn't apply: agent-less is dead too). On
+a non-premium account the request ends in a 502 `model_route_unavailable` that says the model is
+premium-only, instead of "empty response" after the retries. The paid route (Opus 5.5) answers with the
+agent too (premium, 8/8 before its weekly budget ran out), so both Opus models now take it.
+Live check: `proxy-verify.mjs --agent --tools --multiturn --model=claude-opus-4.5` (premium, 00:50Z):
+`tone=Claude_Opus, scenario=OfficeWebIncludedCopilot`, tool call in 7.2 s, PASS.
+
+### F54 — "Opus 5" is the system prompt talking; the model says 4.5 🟢
+Ten agent-attached self-IDs on the included scenario: **"Claude Opus 4.5"** 6/10 (cutoff "2025-01" or
+"unknown"), **"Claude Opus 5"** 4/10 (cutoff "2026-05" or "unknown"). The `ChainOfThoughtSummary`
+frames say why: *"This system prompt claims I'm "Claude Opus 5" built for Microsoft Enterprise Copilot
+with a May 2026 cutoff, but that's not accurate to who I actually am"* (10-04 00:25Z), *"This system
+prompt is giving me false identity details — claiming I'm Opus 5 from Microsoft with a 2026 cutoff"*
+(10-02 10:15Z); and when it answers "Opus 5", *"The system prompt identifies this as Claude Opus 5 …
+so I can answer directly based on that framing"* (10-04 00:20Z). One reply added it unprompted: *"this
+environment's instructions describe me as "Claude Opus 5" with a May 2026 cutoff, but I can't verify
+being that model"*. "Claude Opus 5, cutoff May 2026" is exactly what the paid route self-reported in
+September (§15 F26), so the included route seems to have kept that system prompt while serving an older
+model. The paid route is consistent: **"Claude Opus 5.5", cutoff 2026-06** (8/8 agent-attached, 3/3
+agent-less), sometimes prefixed "Microsoft (Enterprise) Copilot, based on…". `claude-opus` is therefore
+Opus 5.5 now; `claude-opus-5.5` is added as an alias and `claude-opus-5` kept as a legacy one.
+
+### F55 — the priority-access budget is on the wire, counts turns, and the included scenario has none 🟢
+Supersedes F27's "refuses in content, not in a status field" for this service build. From the frames
+of the user's probe runs:
+- The refusal turn's final item: `result: {value: "OutOfCredits", message: "You've used your available
+  priority access … for the week …", creditScenario: "TotalTurn"}`, reply from `BotConnection`
+  (5/5 refusals, 2026-10-02 20:47Z … 10-04 00:25Z).
+- Every **paid-scenario** turn, any tone, carries `throttling.metering`: `ClaudeOpusQuery75`,
+  `ClaudeOpusQueryDaily`, `ClaudeOpusQuery` (100), `…Dev` (5), `…HourlyDev` (2), `…WeeklyWord` (75),
+  `…DailyWord` (40), `…C1`/`…C2` variants (0), `DeepResearch` (100) — each `{remainingAllowance: n}`.
+- Each paid Opus turn, agent or not, lowers **`ClaudeOpusQuery75` and `ClaudeOpusQueryDaily` by exactly
+  1** (read after the turn); Sonnet 5 turns on the same scenario lower neither. On 10-02 the probes
+  took `ClaudeOpusQuery75` from 8 (10:15Z) to 0 (20:45Z) and `ClaudeOpusQueryDaily` from 40 to 32 —
+  8 Opus turns: 5 agent-attached cells with frames, and one gap of exactly 1 for each of the 3
+  agent-less tone-probe runs in between (tone-probe keeps no frames). The next Opus turn got the
+  **"for the week"** refusal: `ClaudeOpusQuery75` is the weekly allowance. `ClaudeOpusQueryDaily` was
+  back at 40 on 10-04 (UTC): the daily one, 40 per day. Refused turns lower neither counter.
+- **The weekly allowance is 75**, as its name says: the first Opus turn after the Monday reset
+  (2026-10-05 00:01Z, the smoke test below) read `ClaudeOpusQuery75` 74 and `ClaudeOpusQueryDaily`
+  39, the second 73 and 38.
+  Earlier in the week `ClaudeOpusQuery75` stood at 19 (10-01 05:53Z), and it dropped by more than the
+  probes account for between 10-01 08:13Z and 10-02 10:15Z: other Opus use on the account.
+- **Included-scenario turns carry no `metering` object at all** (every `Claude_Opus` @ included cell,
+  every `Claude_Sonnet` @ included cell), consistent with the user's report that Opus 4.5 has no daily
+  or weekly limit.
+
+**H15.1 settled: the budget is per turn.** One unit per turn regardless of prompt size, and the server
+calls the scenario `TotalTurn`. So `minimal`'s 82% smaller prompt could never have saved quota — which
+is what the user observed ("`minimal` was ineffective at addressing Opus's daily and weekly limit").
+The only quota lever is fewer turns, i.e. a framing that finishes tasks in fewer round trips, or
+`claude-opus-4.5` where it is good enough.
+**Done (2026-10-05, F59):** the proxy now keys on `result.value === "OutOfCredits"` and
+`result.message`, and surfaces the two allowances in `usage`. That turned out to be a bug fix, not
+hardening: the daily refusal is never streamed, so the text-only detector never fired on the live
+wire (F59).
+
+### F56 — framing sweep: solve rate at ceiling, the jailbreak classifier decides → `relay` 🟢
+`phase-sweep.sh`, `MODEL=claude-opus-4.5`, premium account, agent attached on every turn
+(`3PDeclarativeAgent`), `M365_DEBUG=1 M365_DUMP_FRAMES=1 M365_NO_CONFAB_RETRY=1`, 10 tasks per arm.
+Five sweeps, four of them cut short by the thread-rate throttle (F58), so arms ran in several
+orders: `opus45` (00:51–01:12Z), `opus45-r2` (02:18–02:52Z), `opus45-r3` (03:58–05:01Z, 300 s
+between arms), `opus45-r4` (06:46–07:00Z), and the confirmation round `opus45-r5`, in mirrored order
+retag, relay, softened, softened, relay, retag (`TASK_GAP=30`, 120 s between arms, the first F57
+parser fix in). r5 stopped at the throttle in its 4th arm (07:56Z) and was finished from where it
+stopped, with the same settings: `opus45-r5b` (that arm's 4 untried tasks, 09:50Z) and `opus45-r5c`
+(relay, retag, 09:54–10:13Z). Pooled with `analyze-arms.mjs`; throttled tasks excluded.
+
+| arm | solved | tasks with a Disengaged turn | failed on it | M365 turns / task | fresh conversations / task |
+|---|---|---|---|---|---|
+| `minimal` (old default) | 30/30 | **12/30** | 0 | 3.43 | 1.40 |
+| `baseline` | 30/30 | **8/30** | 0 | 3.43 | 1.27 |
+| **`relay`** | 47/50 | **0/50** | 0 | 3.56 | 1.00 |
+| `softened` | 30/30 | **0/30** | 0 | 3.40 | 1.00 |
+| `demo_only` | 17/17 | 2/17 | 0 | 3.41 | 1.12 |
+| `retag` | 29/30 | 1/30 | **1** | 2.87 | 1.07 |
+| `terse_user` | 13/16 | 3/16 | **3** | 3.06 | 1.38 |
+
+- **Opus 4.5 solves almost everything under any framing**, so the bench can't rank framings by
+  solve rate. No sandbox turns anywhere (0/~600 turns): with the agent attached there is no code
+  interpreter.
+- **What separates them is the JailBreak Classifier** (every Disengaged turn came from it). The two
+  `<system>`-tagged rule framings 20/60 vs relay + softened 0/80 (p = 5.1×10⁻⁹). The F22 retry
+  rescued those 20 (no solves lost), but each costs a dead turn and a second fresh conversation
+  (1.27–1.40 conversations per task instead of 1.00) — the budget F58 runs out of — and on Opus 5.5
+  maybe a priority-access unit too (unknown whether a Disengaged turn counts).
+- **A framing without `<system>` tags has no escape hatch.** The retry swaps a `<system>`-tagged
+  framing for `softened` but keeps any other one, so `terse_user` (3/3) and `retag` (1/1, r5
+  edit-config) disengaged twice and failed with a 502. relay never got there (0/50).
+- **Which tasks:** the classifier fires on find-needle, edit-config and ec-notes — "find the secret" /
+  "edit the config" prompts under rule-heavy framing.
+- **F22's additive shape again:** `retag` (baseline's text in `<harness_instructions>`) 1/20 vs
+  baseline 8/30; `softened` (`<system>` tags, no override language) 0/26.
+- **relay's three failures were all F57 parser misses**, all on count-lines (round 1, r2, r5c); the
+  current parser turns all three into the tool call Opus meant. Relay is also the arm that left the
+  fence unclosed most often (3 of its 5 count-lines runs; 0 of softened's 3), so it's the arm most
+  exposed if Opus finds yet another way to end a call.
+- **The full confirmation round (r5 + r5b + r5c, mirrored order):** relay 19/20, retag 19/20,
+  softened 20/20. Disengaged: relay 0, softened 0, retag 1 (failed).
+
+**Shipped then: `defaultFramingForTone("Claude_Opus") = "relay"`, for both Opus models** (since
+replaced by `relay_batch`, F60). relay vs softened
+is a tie on this bench (47/50 vs 30/30, p = 0.29, both 0 Disengaged; softened is the fallback if that
+changes); relay because it has no `<system>` tags,
+which Sonnet 5 reads as an injection (§21) — and Opus 5.5, which takes this default too, couldn't be
+benched then (weekly budget spent; F55; 10/10 after the reset, F59). It is also the default of every other Claude and GPT-6 model now.
+
+**Opus 5.5 with the agent and relay: smoke test passed** (2026-10-05 00:01Z, right after the weekly
+reset; `proxy-verify.mjs --agent --tools --multiturn --model=claude-opus`, debug log + frames). Turn 1:
+`tone=Claude_Opus, scenario=OfficeWebPaidCopilot`, agent attached (`3PDeclarativeAgent`), relay note,
+no `<system>` tag → a clean ```` ```read_file ```` call in 6.9 s. Turn 2: the tool result used,
+"The hostname is **web-prod-01**." (8.2 s). `result: Success` both turns, no Disengaged, no native
+markup. Its chain of thought on turn 2 checked the result's provenance: *"This tool result came from
+the user turn, so it's fine to use."* — the question relay's user-voice framing is built to answer.
+Cost: 2 priority-access units (weekly 75 → 73, daily 40 → 38). n = 1 conversation; not benched.
+Archive: `sweeps/opus55-smoke/`.
+`minimal` existed to save priority access by being short (H15.1), which F55 shows it can't.
+
+**Real pi with the shipped default: 10/10.** `opus45-pi` (09:12–09:26Z), `pi-reliability.sh` through
+`phase-sweep.sh`, no framing override: fix-bug 5/5, multi (2-file bug) 5/5, 29–32 s per run. On the
+wire: 60 streaming turns, every one `Claude_Opus` on the included scenario with the agent, relay on
+every first turn, no `<system>` tag, 0 Disengaged, 0 throttled, no `</invoke>` leak.
+
+
+### F57 — Opus ends some fenced calls with its native call markup (`</invoke>`, `</parameter>`) 🟢 (fixed)
+11 raw replies across the Opus 4.5 sweeps, all on the count-lines task, in relay, baseline,
+demo_only and retag arms (0 in the 60 real-pi turns). Opus ends a fenced call the way its native
+function-calling format ends one. Five shapes, verbatim tails:
+````
+```write_file              ```write_file              ```bash
+path: count.sh             path: count.sh             cat > count.sh <<'EOF'
+                                                      …
+#!/bin/bash                #!/bin/bash                cat -A count.txt
+wc -l < data.txt | … > …   wc -l < data.txt | … > …   </parameter>
+</invoke>                  </invoke>                  </invoke>
+∂   (or U+200C, or none)   <parameter name="path">count.sh</parameter>
+```   (sometimes missing)                             </function_calls>
+````
+— plus the same with `</write_file>` (the tool's own name) or a bare `</parameter>` as the closer.
+**What it cost:** with the closing fence present, the markup became the file's last line or the
+command's last line (a bash syntax error after the real work had run, so the bench still scored it
+SOLVED; in a real repo it's a corrupted file). In r3's relay arm Opus noticed: *"The write picked up a
+stray line — fixing it:"* — and wrote `</parameter>` into the file again. Without the closing fence
+(4 of 11, three of them under relay) there was no closed fence, the reply went back as prose, and the
+task failed (relay's 3 failures).
+**Fix** (`fenced.ts`, `stripNativeCloser` / `findUnclosedToolFence`): a body whose trailing lines are
+all native markup (`<parameter …>`, `</parameter>`, `<invoke …>`, `</invoke>`, `</function_calls>`,
+`</TOOLNAME>`) or short junk, and include a closer, has them dropped, and an unclosed fence that ends
+that way is accepted as a call. An unclosed fence with no such ending is still rejected (it could be
+a truncated reply), and markup followed by real content stays in the content. The first version (after
+round 1) handled only a closer on the last line; r5c showed two more shapes, one of which it accepted
+but left `</parameter>` in the command. Replaying all 11 replies through the current parser with the
+bench's tool definitions: 11 calls, no markup left in any argument. Unit tests use the replies verbatim.
+Not seen in any Sonnet or GPT sweep log.
+
+### F58 — four throttles in one day on the premium account; a fixed "N per 30 min" doesn't fit, a per-turn bucket might 🟡
+Every fresh conversation and every turn the proxy (and the user's probes) sent on the premium account
+on 2026-10-04, against the first `Turn result: Throttled (PerUserThrottled)` of each episode:
+
+| onset | fresh conversations in the preceding 15 / 30 / 60 min | turns in the preceding 30 / 60 min | throttle seen until |
+|---|---|---|---|
+| 01:10Z | 32 / 47 / 78 | 133 / 164 | 01:11Z (sweep stopped) |
+| 02:35Z | 38 / 45 / 45 | 127 / 127 | 02:52Z (user stopped it) |
+| 04:35Z | 20 / 42 / 55 | 126 / 159 | 05:01Z (the sweep kept going, every task throttled) |
+| 07:56Z | 16 / **31** / 47 | 106 / 148 | 07:56Z (sweep stopped itself, `TASK_GAP=30`) |
+
+It lifted within ~1 h of the last throttled turn every time, kept firing for as long as requests
+kept coming (26 min in r3), and the 07:56Z onset hit a turn in the middle of a conversation, not a
+fresh one.
+
+**No fixed window explains it.** The first three onsets looked like "~45 conversations per 30 min",
+but r5 tripped at 31 while running at half the pace, and other stretches of the same day reached 46 in
+30 min without a throttle. The same holds for every window from 30 to 180 min, counting either
+conversations or turns: some clean stretch always matches or beats an onset.
+
+**A token bucket over turns fits all four onsets.** Model: the account holds a bucket of C turns
+that refills at r per minute; each turn (fresh or not, Disengaged included) takes one; a throttle
+starts when it's empty. A grid fit over the day's events puts every predicted onset within a minute
+of the real one, with no throttle predicted anywhere else: **C ≈ 100 turns, r ≈ 1.6/min (~100/h)**.
+Counted in conversations instead, the best fit misses by 97 minutes in total. That's 2 parameters
+fitted to 4 onsets, so this is a hypothesis, not a finding.
+**Out of sample** (the same C and r, earlier sweeps on the same account, which never ran this hot for
+this long): GPT-6 Sol 10-02 (165 turns in 51 min, bucket bottoms out at 18) and GPT-6 10-01 —
+predicted no throttle, none happened; Sonnet 09-28 — predicted a marginal dip below zero (−5) at
+~12:28–12:44Z; the log has one isolated throttled turn at 13:22Z. Not refuted, not confirmed.
+
+**This also undercuts the "Opus-only" reading** of the first three onsets (those other sweeps did reach
+~50 fresh conversations in 30 min, but never drained a 100-turn bucket), so the model-specific
+explanation is now one candidate of several: (a) a per-turn bucket on the account, as above; (b) a
+budget specific to `Claude_Opus` or its route; (c) weighting by model cost; (d) a limit that moved
+between 10-02 and 10-04. Other use of the account outside these logs would bias everything here.
+
+**Probe that separates them (cheap in threads): one conversation, many turns.** On a rested account,
+send short turns in a SINGLE conversation at a fixed 4 turns/min with GPT-5.5. Under (a) it throttles
+at ~40 min (~160 turns: 100 + 1.6·t = 4·t); under F13's "conversations, not messages" it never does.
+Then, after a rest, the same with `claude-opus-4.5`: an earlier onset means (b)/(c). Needs a new
+sequential single-thread script; `throttle-probe.mjs` opens a fresh conversation per turn and fires
+them concurrently. If (a) holds it matters for real use: a long pi session at a turn every ~10 s
+would drain the bucket in ~25 min. Until one of these runs, none of it goes into AGENTS.md.
+
+**Predictions, written down before the runs.**
+- `opus45-pi` (09:12–09:26Z, written after, so not a test): 60 turns in 14 min from a full bucket;
+  the model has it bottom out at ~63. No throttle happened.
+- Finishing r5 (`opus45-r5b` + `opus45-r5c`, from 09:50Z, ~84 turns at r5's ~3.5 turns/min plus two
+  2-min cooldowns, starting from a bucket the model puts at 100): bottom at ~60, **no throttle**.
+  A throttle during it falsifies C ≈ 100 / r ≈ 1.6 as fitted, or the per-turn model itself.
+  **Outcome: held.** 75 turns 09:50–10:13Z (3.2/min), the model's bucket bottomed at 63, no throttled
+  turn. Weak evidence, though: the run also stayed under every conversation count that tripped
+  before (~25 fresh conversations in 30 min vs 31 at r5's onset), so a conversation-count rule
+  predicted the same. The single-conversation probe above is still what would tell them apart.
+
+**Bench changes (useful whatever the limit is):** `run.mjs --task-gap S` (phase-sweep `TASK_GAP`)
+paces tasks, and both now stop at the first throttled task instead of burning the rest of the sweep
+(`[bench] THROTTLED`, exit 3; phase-sweep writes `FAILED`).
+
+**Contamination, excluded (round 1):** a `pnpm test` run during the first relay arm inherited
+`M365_DEBUG=1` and wrote the unit tests' scripted throttles/dead routes into that arm's debug log
+(00:59:55–01:00:06Z). The archived log has those lines removed; the original sits next to it as
+`*.with-unit-test-noise.log.orig`. Don't run the unit tests with `M365_DEBUG` set during a sweep.
+
+### F59 — Opus 5.5 with the agent and relay; the daily wall; what issue #18 was 🟢
+**Opus 5.5 test run** (`opus55-r1`, 2026-10-05 00:13–00:29Z, right after the weekly reset, premium
+account, shipped defaults: agent + relay; `M365_DEBUG`, `M365_DUMP_FRAMES`, `M365_NO_CONFAB_RETRY`):
+- **Bench: 10/10**, 33 M365 turns (3.3 per task; Opus 4.5 under relay 3.56), every turn `Claude_Opus`
+  on the paid scenario with `3PDeclarativeAgent`, relay on every first turn, no `<system>` tag,
+  0 Disengaged, 0 sandbox turns, 0 native-markup leaks (F57), 3 replies with a short lead-in sentence
+  before the call (stripped as usual).
+- **Real pi fix-bug: 1/1 before the wall**, then 4 runs lost to it (`analyze-arms` now counts those as
+  `INVALID(quota)`, like a throttle). Plus the smoke test: 2/2 turns (F56).
+
+**The metering, turn by turn** (`throttling.metering` of every frame): each of the 40 served turns
+lowered `ClaudeOpusQueryDaily` and `ClaudeOpusQuery75` by exactly 1 — first turns carrying the
+~2.5 kB framing and 100-byte `<tool_response>` follow-ups alike. **40 turns from the reset to the
+wall**, as `ClaudeOpusQueryDaily` = 40 said (2 smoke + 33 bench + 5 pi). The 41st turn, mid-conversation
+in pi run 2 (00:24:51Z), was refused; weekly stood at 35. **Refused turns cost nothing** (15 of them:
+daily stays 0, weekly stays 35).
+
+**The refusal is not content.** On the refused turn nothing is streamed: the only text is a BotConnection
+message inside the final `type:2` item, plus `result: {value: "OutOfCredits", message: <the same
+text>}`. `session.ts` builds the reply from the streamed updates only, so the handler saw an EMPTY
+turn — and the text-only detector (`parsePriorityAccessExhaustion(fullText)`, F27) never fired. The
+handler retried twice with "Please continue." (2 more refused turns) and returned a 502 "M365 Copilot
+returned an empty response". Every exhausted request cost 3 M365 turns and told the client the wrong
+thing. The probes saw the text because `_probe-chat` reads the `type:2` item. The weekly refusal
+(10-02/10-04 probe frames) has the same shape. **Fixed:** `priorityAccessExhaustionOf()` reads
+`result.value === "OutOfCredits"` / `result.message` as well as the text. Live (00:31–00:32Z, daily
+wall): the first `claude-opus` request → 429 `priority_access_exhausted`, `param: day`, `Retry-After`
+to midnight UTC, after **1** M365 turn; the next ones, streaming or not → the same 429 after **0**
+turns (`activePriorityAccessExhaustion`, kept until the reset); `claude-opus-4.5` unaffected.
+
+**Issue #18** ("the daily Opus priority access budget is exhausted after only 11 bench tests";
+hypothesis: the framing size). What the wire shows:
+1. **Size is irrelevant**: one unit per turn (`creditScenario: "TotalTurn"`, Δ = 1 on every turn above,
+   whatever its size). A shorter framing can't help — the issue's suggestion, and `minimal`'s premise.
+2. **The budget is 40 turns a day and 75 a week**, per account, and a turn is one M365 request: every
+   tool call in an agent loop is one. A person in the web UI rarely sends 40 messages to Opus in a
+   day; one bench run sends ~33.
+3. **The proxy spent turns the bench never saw.** Its "M365 messages spent" counts client requests,
+   but the proxy adds its own: the Disengage retry (fresh conversation; `minimal` Disengaged on 40%
+   of Opus 4.5 tasks, F56), the confab retry (on by default, so in the issue's runs), and at the wall
+   2 "Please continue." retries per request. The issue's numbers fit that: 29 answered client
+   requests in the first bench and 4 in the second (33), then 502s that are exactly the "empty
+   response" above; ~7 hidden retry turns (the second bench's 29 s prose give-up alone looks like a
+   confab retry) would make 40. Not provable from the issue's data (no debug log, and the budget on
+   2026-09-22 is unknown), but consistent with a 40-turn daily budget.
+
+**What resolves it, in the proxy** (all shipped, unit-tested, and live-tested except where noted):
+- relay (F56): no Disengage retries on Opus (0/50 vs `minimal` 12/30) → 1.00 conversations/task.
+- the wall is detected on the first refused turn, remembered until the reset, and answered as a
+  429 with the reset time — 0 turns wasted afterwards.
+- `usage.x_m365_opus_daily_remaining` / `x_m365_opus_weekly_remaining` on every paid-scenario turn,
+  so a client sees it coming.
+- **`M365_OPUS_FALLBACK_MODEL=claude-opus-4.5`** (opt-in): once Opus 5.5 is exhausted, a
+  `claude-opus` request is re-sent, whole, to Opus 4.5 in a fresh conversation — unmetered, same
+  agent + relay path, premium accounts only — and later requests go straight there until the reset.
+  The response's `model` names the model that answered. A conversation that was on Opus 5.5 continues
+  on 4.5 in a fresh M365 conversation with the full history (unit-tested; not yet seen live, because
+  the wall had already been hit). Live (00:32Z): refused once → served by 4.5 with a tool call; then
+  straight to 4.5, streaming and tool-less included. **Real pi through it: 10/10** (`opus55-fallback-pi`,
+  `MODEL=claude-opus`, `M365_OPUS_FALLBACK_MODEL=claude-opus-4.5`, 00:33–00:48Z): fix-bug 5/5, multi
+  5/5, all streaming. 62 M365 turns: 1 refused (`OutOfCredits`, the first request), re-sent once to
+  Opus 4.5, then 60 served there directly; 0 Disengaged, 0 throttled, no native markup.
+- `claude-opus-4.5` directly, which has no budget at all.
+Not resolvable: the allowance itself is Microsoft's (and the `…Dev`, `…Word`, `…C1/C2` budgets in
+the map suggest other clients get other ones).
+
+### F60 — `relay_batch` cuts Opus 4.5's turns per task by 37% (bench) and 42% (real pi) at no cost → the Opus default 🟢
+Opus 5.5's budget counts turns (F59), so turns per task is the lever left. Two new user-voice relays
+(`fenced.ts`): `relay_nolook` = relay without "one command at a time" and "start by looking at them";
+`relay_batch` = relay asking for as much as fits in each block ("Each round trip takes me a while, so
+put as much as you can into one block: a script can look at the files, make the change and check the
+result all at once"). `opus45-turns`, `claude-opus-4.5` (unmetered), mirrored order relay, batch,
+nolook, nolook, batch, relay, `TASK_GAP=60`, 01:18–02:45Z, premium account.
+
+| arm | solved | M365 turns / task (sd) | Disengaged | tasks with fewer turns than relay |
+|---|---|---|---|---|
+| `relay` (shipped) | 20/20 | 3.65 (1.11) | 0/20 | — |
+| **`relay_batch`** | 20/20 | **2.30** (0.56) | 0/20 | 8 of 10 (0 more, 2 same) |
+| `relay_nolook` | 20/20 | 3.50 (0.97) | 0/20 | 2 of 10 (1 more, 7 same) |
+
+relay − batch = 1.35 turns/task (task-stratified permutation p < 10⁻⁴); relay − nolook = 0.15 (p = 0.50).
+So it isn't relay's "one at a time" wording; asking for batching is what changes behaviour. 2.30 is
+close to the floor of 2 (one block, one closing sentence): fizzbuzz written and run in one block,
+fix-bug read-then-fix in 2 blocks instead of 5, edits with before/after output and a JSON validity
+check in the same block. Every closing claim matched output it had seen. **The risk** is acting before
+looking: on ec-plain/ec-nonport it overwrote `value.txt` in the same block that first printed it —
+licensed here ("The file value.txt contains the number 3000"), and multi-field files got in-place
+`sed`/`perl` edits, but on real code a batched block runs on assumptions. On Opus 5.5 that would be
+~17 tasks a day instead of ~11. **Not yet:** real pi with `relay_batch` (below), and Opus 5.5 itself
+(after the 2026-10-06 00:00Z daily reset). The default stays `relay` until both are in.
+F58 check: pre-registered "no throttle, bottom ~22" at relay's rate; 189 turns, model bottom 41
+(fewer turns than assumed), no throttle — held (but a ~21-conversations-per-30-min run doesn't
+discriminate from a conversation-count rule either).
+
+**Real pi with `relay_batch` (Opus 4.5): 10/10, 3.5 turns per run vs relay's 6.0** (`opus45-batch-pi`,
+`M365_FRAMING_VARIANT=relay_batch`, 02:59–03:11Z, streaming):
+
+| | relay (`opus45-pi`, `opus55-fallback-pi`) | `relay_batch` |
+|---|---|---|
+| fix-bug | 10/10, 6.0 turns, 29–40 s | 5/5, **3.0** turns, 16–18 s |
+| multi (2-file bug) | 10/10, 6.0 turns, 28–37 s | 5/5, **4.0** turns, 22–25 s |
+
+0 Disengaged, 0 throttled, no native markup. In pi it did NOT act blind: every edit came in a block
+after a read (`ls` + `cat` + run the check → fix + re-run the check → one-line summary); multi took one
+extra read for the second file. Two fix-bug runs rewrote the 2-line `calc.py` whole with a heredoc
+instead of `sed` — after reading it, but on a big file that's the risky shape.
+
+**Shipped (2026-10-05): `defaultFramingForTone("Claude_Opus") = "relay_batch"`, for both Opus models.**
+Same classifier behaviour as relay (0 Disengaged in 40 bench + pi tasks) and ~40% fewer turns, which
+is the one thing Opus 5.5's budget counts. **Not measured:** Opus 5.5 itself under `relay_batch` (its
+bench and pi above are under relay, 10/10); the post-reset run planned for that
+(`sweeps/opus55-batch-plan.sh`) was cancelled before it started. The mid-conversation switch to the
+fallback (Opus 5.5 → 4.5 within one conversation) was tested by the user; the proxy-side runs here
+cover the switch at a request boundary (`opus55-fallback-pi`, `opus55-exhaust-B`).
+`scripts/opus-fallback-probe.mjs` (a counting conversation that crosses the wall) is kept for re-checks.
+

@@ -33,7 +33,9 @@
 // infrastructure: its error is a transport failure or a throttle (WebSocket /
 // connection / 429 / m365_throttled); or its conversation logged a network-level
 // WS error or a Throttled turn; or it timed out in an arm whose log shows network
-// failures elsewhere (a stalled connect leaves no error of its own). A solved
+// failures elsewhere (a stalled connect leaves no error of its own); or it hit
+// the Opus priority-access wall (a priority_access_exhausted error, or an
+// OutOfCredits turn in its conversation — `quota`). A solved
 // task is always valid. Plain client timeouts in a healthy arm stay failures.
 //
 // --compare A B: Fisher's exact test (two-sided) on solved/valid between two
@@ -118,7 +120,11 @@ function piRows(dir, a) {
 
 // --- wire --------------------------------------------------------------------
 
-const emptyWire = () => ({ runs: [], cids: new Set(), corr: [], fallback: 0, internalError: 0, throttled: 0, wsError: 0, disengagedRetry: 0 });
+const emptyWire = () => ({ runs: [], cids: new Set(), corr: [], fallback: 0, internalError: 0, throttled: 0, outOfCredits: 0, wsError: 0, disengagedRetry: 0 });
+// The Opus priority-access wall (§24 F55): the turn's final result is OutOfCredits.
+// Older proxies didn't recognise it (the refusal text isn't streamed) and returned
+// "empty response" instead, so read the turn result, not only the client's error.
+const QUOTA = /priority_access_exhausted|priority access to/i;
 
 /** Split an arm's debug log into conversations (see the header). */
 export function conversations(log) {
@@ -141,6 +147,7 @@ export function conversations(log) {
     } else if (line.includes("Agent route dead")) cur.fallback++;
     else if (line.includes("Turn result: InternalError")) cur.internalError++;
     else if (/Upstream Throttled|Turn result: Throttled/.test(line)) cur.throttled++;
+    else if (line.includes("Turn result: OutOfCredits")) cur.outOfCredits++;
     else if (NETWORK_WS_ERROR.test(line)) cur.wsError++;
     else if (line.includes("Upstream Disengaged")) cur.disengagedRetry++;
   }
@@ -171,7 +178,7 @@ export function analyzeArm(a) {
   const convs = existsSync(logFile) ? conversations(readFileSync(logFile, "utf8")) : [];
   const frames = frameFlags(join(a.dir, `${a.label}-frames`));
   const mapped = convs.length === rows.length;
-  const wire = { turns: 0, agent: 0, agentless: 0, sandbox: 0, disengaged: 0, jailbreak: 0, internalError: 0, fallback: 0, wsError: 0, throttled: 0 };
+  const wire = { turns: 0, agent: 0, agentless: 0, sandbox: 0, disengaged: 0, jailbreak: 0, internalError: 0, fallback: 0, wsError: 0, throttled: 0, outOfCredits: 0 };
   convs.forEach((c, i) => {
     const turnFlags = c.corr.map((id) => frames.get(id)).filter(Boolean);
     const w = {
@@ -182,6 +189,7 @@ export function analyzeArm(a) {
       disengaged: turnFlags.filter((x) => x.disengaged).length,
       jailbreak: turnFlags.filter((x) => x.jailbreak).length,
       internalError: c.internalError, fallback: c.fallback, wsError: c.wsError, throttled: c.throttled,
+      outOfCredits: c.outOfCredits,
     };
     for (const k of Object.keys(wire)) wire[k] += w[k];
     if (mapped) {
@@ -193,6 +201,7 @@ export function analyzeArm(a) {
     r.path ??= "?";
     const w = r.wire;
     r.invalid = r.solved ? null
+      : QUOTA.test(r.error) || w?.outOfCredits ? "quota"
       : TRANSPORT.test(r.error) ? (/429|throttl/i.test(r.error) ? "throttled" : "transport")
       : w?.throttled ? "throttled"
       : w?.wsError ? "transport"

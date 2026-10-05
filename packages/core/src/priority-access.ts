@@ -112,3 +112,82 @@ export function secondsUntilReset(
 ): number {
   return Math.max(1, Math.ceil((exhaustion.resetsAt.getTime() - now.getTime()) / 1000));
 }
+
+// --- What the wire says (docs/hypotheses.md §24 F55) -------------------------
+//
+// Besides the refusal text, M365 states the exhaustion and the allowances
+// outright. The refusal turn's final item carries `result: {value:
+// "OutOfCredits", message: <the refusal text>, creditScenario: "TotalTurn"}`,
+// and every turn on the paid scenario carries `throttling.metering`, a map of
+// `{<budget>: {remainingAllowance: n}}`. For Opus 5.5, `ClaudeOpusQuery75` is
+// the weekly allowance (75) and `ClaudeOpusQueryDaily` the daily one (40);
+// each turn takes one from both, whatever its size. Included-scenario turns
+// carry no `metering` (Opus 4.5 isn't metered).
+
+/** `throttling.metering` as `{budget: remainingAllowance}`; null when absent or empty. */
+export function parseMetering(raw: unknown): Record<string, number> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n = (v as { remainingAllowance?: unknown } | null)?.remainingAllowance;
+    if (typeof n === "number" && Number.isFinite(n)) out[k] = n;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** The Opus allowances in a metering map, when it has them. */
+export function opusAllowance(
+  metering: Record<string, number> | null | undefined,
+): { daily?: number; weekly?: number } | null {
+  if (!metering) return null;
+  const daily = metering.ClaudeOpusQueryDaily;
+  const weekly = metering.ClaudeOpusQuery75;
+  if (daily === undefined && weekly === undefined) return null;
+  return { ...(daily !== undefined ? { daily } : {}), ...(weekly !== undefined ? { weekly } : {}) };
+}
+
+/**
+ * The exhaustion a turn reports, from its final `result` and/or its text.
+ * `OutOfCredits` is authoritative even if the refusal is ever reworded; the
+ * text alone still counts (older builds, and the result is missing on some
+ * paths). Null for an ordinary turn.
+ */
+export function priorityAccessExhaustionOf(
+  result: { value: string; message?: string } | null | undefined,
+  text: string | null | undefined,
+  now: Date = new Date(),
+): PriorityAccessExhaustion | null {
+  const fromText = parsePriorityAccessExhaustion(result?.message, now) ?? parsePriorityAccessExhaustion(text, now);
+  if (fromText) return fromText;
+  if (result?.value !== "OutOfCredits") return null;
+  const message = (result.message ?? text ?? "").trim() || "OutOfCredits";
+  const window: PriorityAccessWindow = /\bweek|monday/i.test(message) ? "week" : "day";
+  return { window, resetsAt: window === "week" ? nextUtcMonday(now) : nextUtcMidnight(now), message };
+}
+
+// --- Remembering it ----------------------------------------------------------
+//
+// Once a metered Opus turn has been refused, every further Opus turn until the
+// reset is refused too. Each of those refusals still starts an M365 turn, often
+// in a fresh conversation — the thread budget the account throttles on (F13) —
+// so the proxy answers them itself until the reset. One process serves one
+// account, so this is per-account knowledge.
+let opusExhaustion: PriorityAccessExhaustion | null = null;
+
+/** Record that the Opus priority-access budget ran out. */
+export function notePriorityAccessExhausted(e: PriorityAccessExhaustion, now: Date = new Date()): void {
+  if (!opusExhaustion || e.resetsAt > opusExhaustion.resetsAt || opusExhaustion.resetsAt <= now) {
+    opusExhaustion = e;
+  }
+}
+
+/** The recorded exhaustion, while it lasts; null once its reset has passed. */
+export function activePriorityAccessExhaustion(now: Date = new Date()): PriorityAccessExhaustion | null {
+  if (opusExhaustion && opusExhaustion.resetsAt <= now) opusExhaustion = null;
+  return opusExhaustion;
+}
+
+/** Forget it. For tests. */
+export function resetPriorityAccessState(): void {
+  opusExhaustion = null;
+}

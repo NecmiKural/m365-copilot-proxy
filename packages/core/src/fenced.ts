@@ -269,19 +269,23 @@ export function currentFramingVariant(toneDefault?: string): string {
 
 /** The framing a tone should default to when the caller hasn't overridden it.
  *
- *  `baseline` is a cage built for M365's chat-tuned GPT path: it spends most of
- *  its length forcing a model that would rather narrate into acting. Opus does
- *  not need convincing — it acts from the schema alone — so the cage is pure
- *  weight, and weight is the one thing worth economising on there: Opus is
- *  metered by a small priority-access budget (see priority-access.ts), and a
- *  proxy that prepends ~4kB of framing to every turn exhausts it far faster
- *  than hand-driving the model does. `minimal` keeps the load-bearing parts
- *  (shell-routing + anti-confabulation) at roughly a fifth of the size.
- *
- *  Honest caveat: we have NOT confirmed the budget is token-weighted rather
- *  than per-message. If it is per-message this buys latency and nothing else —
- *  it is still the right default for a model that doesn't need the cage, but
- *  don't read it as a measured quota win. Override with M365_FRAMING_VARIANT.
+ *  `Claude_Opus` — both models, Opus 4.5 (`claude-opus-4.5`, included scenario)
+ *  and Opus 5.5 (`claude-opus`, paid), both with the tool agent — defaults to
+ *  `relay_batch` (docs §24 F56, F60). Two findings decide it:
+ *  - The JailBreak Classifier. Opus 4.5 solves almost every bench task under
+ *    any framing; the `<system>`-tagged rule framings tripped the classifier on
+ *    20 of 60 tasks (`minimal` 12/30, `baseline` 8/30), the user-voice relays
+ *    on none (relay 0/50, relay_batch 0/20). Each Disengage costs a dead turn
+ *    and a retry in a fresh conversation. User voice also avoids the `<system>`
+ *    tags Sonnet 5 reads as a prompt injection (§21).
+ *  - Turns. Opus 5.5's priority-access budget is 40 TURNS a day (§24 F55, F59,
+ *    issue #18), whatever the prompt size — which is why the old lean
+ *    `minimal` default saved nothing. relay_batch asks for as much as fits in
+ *    each block: 2.30 turns per bench task vs relay's 3.65 (20/20 each), and
+ *    3.5 vs 6.0 per real-pi run (10/10 each), measured on Opus 4.5.
+ *  The cost to watch: a batched block acts before it has seen output. In pi
+ *  every edit still followed a read. Opus 5.5 is benched under relay (10/10),
+ *  not yet under relay_batch.
  *
  *  `Claude_Sonnet` (Sonnet 4.6 on the included scenario, Sonnet 5 on the paid
  *  one) defaults to `relay`: both read the `<system>`-tagged baseline as an
@@ -306,7 +310,7 @@ export function currentFramingVariant(toneDefault?: string): string {
  *
  *  Every other tone keeps the bench-tuned `baseline` byte-for-byte. */
 export function defaultFramingForTone(tone?: string): string | undefined {
-  if (tone === "Claude_Opus") return "minimal";
+  if (tone === "Claude_Opus") return "relay_batch";
   if (tone === "Claude_Sonnet") return "relay";
   if (tone === "Gpt_6_Reasoning") return "relay";
   if (tone === "Gpt_6_Sol_Reasoning") return "relay";
@@ -350,6 +354,8 @@ const TRANSCRIPT_STYLES: Record<string, TranscriptStyle> = {
   honest: USER_VOICE_STYLE,
   terse_user: USER_VOICE_STYLE,
   relay: USER_VOICE_STYLE,
+  relay_nolook: USER_VOICE_STYLE,
+  relay_batch: USER_VOICE_STYLE,
 };
 export function transcriptStyleForVariant(variant: string): TranscriptStyle {
   return TRANSCRIPT_STYLES[variant] ?? SYSTEM_STYLE;
@@ -699,6 +705,30 @@ Each time you want something run or looked at, reply with just the command in a 
 
 ${toolsBlock(tools)}`;
   },
+
+  // Turn-saving relays (issue #18). Opus 5.5's priority-access budget counts
+  // TURNS (§24 F55). `relay_batch` — relay asking outright for as much as fits
+  // in each block — is the Claude_Opus default: 2.30 turns per bench task vs
+  // relay's 3.65, same solve rate (§24 F60). `relay_nolook` — relay minus "one
+  // command at a time" and "start by looking at them" — changed nothing (3.50):
+  // the model has to be asked to batch, not merely not told to go slowly.
+  relay_nolook(tools) {
+    const lang = findShellTool(tools) ? "bash" : "<tool_name>";
+    return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.
+
+Each time you want something run or looked at, reply with just the command in a single \`\`\`${lang} block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. The files the task mentions are already there. When the task is complete, tell me in a sentence instead of sending a block.
+
+${toolsBlock(tools)}`;
+  },
+
+  relay_batch(tools) {
+    const lang = findShellTool(tools) ? "bash" : "<tool_name>";
+    return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.
+
+Each time you want something run, reply with just a single \`\`\`${lang} block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. Each round trip takes me a while, so put as much as you can into one block: a script can look at the files, make the change and check the result all at once. The files the task mentions are already there. When the task is complete, tell me in a sentence instead of sending a block.
+
+${toolsBlock(tools)}`;
+  },
 };
 
 // Names of the framing strategies under test, for tooling/bench discovery.
@@ -712,8 +742,63 @@ export const FRAMING_VARIANT_NAMES = Object.keys(FRAMING_VARIANTS);
 // parseFencedToolCalls, so widening this costs nothing. Non-greedy body; the
 // closing fence is a line that is exactly ``` (start of line).
 const FENCE_REGEX = /```([A-Za-z0-9_.-]+)[ \t]*\r?\n([\s\S]*?)\r?\n?```/g;
+const FENCE_OPEN_REGEX = /```([A-Za-z0-9_.-]+)[ \t]*\r?\n/g;
 const SEARCH_REPLACE_REGEX =
   /<{5,}\s*SEARCH\s*\r?\n([\s\S]*?)\r?\n={5,}\s*\r?\n([\s\S]*?)\r?\n>{5,}\s*REPLACE/;
+
+// Claude Opus sometimes ends a fenced call the way its native function-calling
+// format ends one: a line `</parameter>`, `</invoke>` or `</write_file>` (the
+// tool's own name), or several (`</parameter>` / `</invoke>` /
+// `</function_calls>`), sometimes followed by more native markup
+// (`<parameter name="path">count.sh</parameter>`) or a stray symbol line (`∂`,
+// a zero-width joiner). Then either the closing ``` follows — and the markup
+// used to be written into the file, or run as the command's last line — or it
+// never comes, and the call was lost as prose (Opus 4.5: 11 replies, all on
+// the count-lines task, docs §24 F57). That trailing block is dropped only
+// when EVERY line of it is native markup or short junk and it holds a closer,
+// so a file that merely mentions `</invoke>` mid-way keeps it. Native
+// parameters are dropped, not applied: every one seen repeated a header the
+// fence already had.
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const NATIVE_TRAILER_LINE = String.raw`(?:<\/?(?:invoke|function_calls|parameter)\b[^\r\n]*|[^\p{L}\p{N}\r\n]{0,3})`;
+function nativeCloserRegex(name: string): RegExp {
+  return new RegExp(
+    String.raw`(?:\r?\n<\/?parameter\b[^\r\n]*)*\r?\n<\/(?:invoke|function_calls|parameter|${escapeRegExp(name)})>[ \t]*(?:\r?\n${NATIVE_TRAILER_LINE})*\s*$`,
+    "u",
+  );
+}
+
+/** The fence body without a trailing native-call closer line, or null if it has none. */
+function stripNativeCloser(inner: string, name: string): string | null {
+  const m = nativeCloserRegex(name).exec(inner);
+  return m ? inner.slice(0, m.index) : null;
+}
+
+/** A tool fence that is never closed with ``` but ends in a native-call closer
+ *  (see nativeCloserRegex). Only the last fence opening in the text, with no
+ *  ``` after it, can be one. */
+function findUnclosedToolFence(
+  text: string,
+  specs: Map<string, FencedToolSpec>,
+): { start: number; end: number; spec: FencedToolSpec; inner: string } | null {
+  let last: RegExpExecArray | null = null;
+  const re = new RegExp(FENCE_OPEN_REGEX.source, "g");
+  for (let m = re.exec(text); m !== null; m = re.exec(text)) last = m;
+  if (!last) return null;
+  const spec = specs.get(last[1]);
+  if (!spec) return null;
+  const bodyStart = last.index + last[0].length;
+  const tail = text.slice(bodyStart);
+  if (tail.includes("```")) return null; // closed: FENCE_REGEX's case
+  const inner = stripNativeCloser(tail, last[1]);
+  if (inner === null) return null; // no end marker: maybe a truncated reply
+  return { start: last.index, end: text.length, spec, inner };
+}
+
+/** A closed fence's body, minus a trailing native-call closer line. */
+function fenceInner(name: string, raw: string): string {
+  return stripNativeCloser(raw, name) ?? raw;
+}
 
 function makeCall(name: string, args: Record<string, unknown>): ParsedToolCall {
   return {
@@ -831,10 +916,19 @@ export function parseFencedToolCalls(
   while ((match = re.exec(text)) !== null) {
     const spec = specs.get(match[1]);
     if (!spec) continue; // ```python illustration etc. — not a tool, leave in prose
-    const args = parseFencedInner(spec, match[2]);
+    const args = parseFencedInner(spec, fenceInner(match[1], match[2]));
     if (!args) continue;
     calls.push(makeCall(spec.name, args));
     leftover = leftover.replace(match[0], "");
+  }
+
+  if (calls.length === 0) {
+    const open = findUnclosedToolFence(text, specs);
+    const args = open && parseFencedInner(open.spec, open.inner);
+    if (open && args) {
+      calls.push(makeCall(open.spec.name, args));
+      leftover = text.slice(0, open.start);
+    }
   }
 
   return { calls, leftover };
@@ -850,7 +944,9 @@ export function findFirstToolFence(
   let match: RegExpExecArray | null;
   while ((match = re.exec(text)) !== null) {
     const spec = specs.get(match[1]);
-    if (spec && parseFencedInner(spec, match[2])) return { start: match.index, end: match.index + match[0].length };
+    if (spec && parseFencedInner(spec, fenceInner(match[1], match[2]))) return { start: match.index, end: match.index + match[0].length };
   }
+  const open = findUnclosedToolFence(text, specs);
+  if (open && parseFencedInner(open.spec, open.inner)) return { start: open.start, end: open.end };
   return null;
 }
