@@ -341,6 +341,11 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   /araç\s+çağrısı\s+yapama/i,
   /(?:dosya|araç)\s+erişimi\s+(?:olan|etkin)(?:[^.\n]|\.(?=\S)){0,40}oturum/i,                      // "dosya erişimi etkin bir kodlama oturumunda yeniden çalıştırın"
   /kopyala(?:[^.\n]|\.(?=\S)){0,80}kayde[dt]/i,                                                   // "kopyalayıp ozet.md olarak kaydedebilirsin" — hands the write back (kaydet → kayded- before a vowel) (kaydet/kayded-: consonant softening)
+  // Passive "could not be completed/created", as a whole sentence about the task:
+  // "PDF oluşturma işlemi tamamlanamadı." after one missing library (Oct 5,
+  // baseline, no file). The lookahead keeps suffixed forms out: "tamamlanamadıysa"
+  // (if it couldn't) and "oluşturulamadığında" (when it can't) describe code.
+  /(?:tamamlan|oluşturul|dönüştürül|kaydedil|üretil)[ae]m[ae]d[ıi](?![a-zçğıöşü])/i,
 ];
 
 // M365 sometimes creates a real patch in its Teams-hosted remote artifact

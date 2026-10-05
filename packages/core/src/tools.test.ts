@@ -305,6 +305,9 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Şu anda dosya sistemine erişip `notlar.pdf` dosyasını kontrol edemiyorum.")).toBe(true);
     // Missed in the long-session sweep (step 2, baseline).
     expect(looksLikeConfabulation("Bu oturumda dosya sistemi ve komut çalıştırma araçları şu anda erişilebilir değil. Bu nedenle dosyaları güvenilir biçimde düzenleyip testleri gerçekten çalıştırdığımı gösteremem.")).toBe(true);
+    // Missed on the fixed build (pdf, baseline): passive, after one missing library; no file was made.
+    expect(looksLikeConfabulation("PDF oluşturma işlemi tamamlanamadı. WeasyPrint kurulumu, gerekli `libgobject-2.0-0` sistem kitaplığını bulamadı.")).toBe(true);
+    expect(looksLikeConfabulation("notlar.pdf oluşturulamadı.")).toBe(true);
   });
 
   it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
@@ -331,6 +334,9 @@ describe("looksLikeConfabulation", () => {
     // Third person / conditional: the harness or a tool, not the model, can't do it.
     expect(looksLikeConfabulation("Harness dosyayı kontrol edemiyorsa proxy hata döner.")).toBe(false);
     expect(looksLikeConfabulation("Bu araç kullanılamıyorsa kurulum adımlarına bakın.")).toBe(false);
+    // Suffixed passives describe code paths, not this task.
+    expect(looksLikeConfabulation("Kurulum tamamlanamadıysa proxy 502 döner.")).toBe(false);
+    expect(looksLikeConfabulation("Dosya oluşturulamadığında hata günlüğe yazılır.")).toBe(false);
   });
 
   it("does NOT flag genuine final answers or normal prose", () => {
