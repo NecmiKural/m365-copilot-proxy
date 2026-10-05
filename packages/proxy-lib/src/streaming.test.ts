@@ -230,6 +230,13 @@ describe("the only-the-first-call-ran note", () => {
     const sent = await converse(["```bash\nls\n```", "Done."]);
     expect(sent[1]).not.toContain("(Note:");
   });
+
+  it("names the tool on a follow-up turn, though the tool message carries no name (#50)", async () => {
+    // Like pi: the result names its call only by tool_call_id.
+    const sent = await converse(["```bash\nls\n```", "Done."]);
+    expect(sent[1]).toMatch(/<tool_response name="bash" call_id="[^"]+">\nreal output 0\n<\/tool_response>/);
+    expect(sent[1]).not.toContain('name="unknown"');
+  });
 });
 
 describe("a reply that opens with a tool call and then writes an essay", () => {
