@@ -34,10 +34,19 @@
 #
 # Knobs (env): MODEL and PHASES (required), TAG (sweep), PORT (4141), REPEAT (1,
 #   bench reps per task), TASKS (all bench tasks), PI_N (5), COOLDOWN (60 s
-#   between arms), PHASE_COOLDOWN (60 s), ARCHIVE (~/.config/opencode-m365/
+#   between arms), PHASE_COOLDOWN (60 s), TASK_GAP (0 s between bench tasks;
+#   every task is a fresh conversation, an arm starts ~2 a minute, and the
+#   account throttles on the rate of those — how fast is too fast isn't pinned
+#   down, see hypotheses §24 F58; 30 halves the rate),
+#   ARCHIVE (~/.config/opencode-m365/
 #   sweeps/$TAG), PROXY_CMD (the built proxy; `node scripts/bench/_mock-proxy.mjs`
 #   exercises the driver without spending M365 threads), DRY_RUN=1 (validate and
 #   print the plan, spend nothing).
+#
+# The sweep stops at the first throttled bench task (FAILED says where); the
+# throttle only lifts once the account stops starting conversations. It stops
+# the same way when the model's priority-access budget runs out (Opus 5.5).
+# A real-pi arm doesn't stop early on either; analyze-arms marks its runs.
 #
 # One sweep per account at a time: the proxy writes its debug log and frames to
 # ~/.config/opencode-m365, and the driver moves them into $ARCHIVE after each
@@ -56,6 +65,7 @@ TASKS="${TASKS:-}"
 PI_N="${PI_N:-5}"
 COOLDOWN="${COOLDOWN:-60}"
 PHASE_COOLDOWN="${PHASE_COOLDOWN:-60}"
+TASK_GAP="${TASK_GAP:-0}"
 CFG="$HOME/.config/opencode-m365"
 ARCHIVE="${ARCHIVE:-$CFG/sweeps/$TAG}"
 PROXY_CMD="${PROXY_CMD:-node packages/proxy/bin/m365-proxy.mjs}"
@@ -135,7 +145,7 @@ exec > >(tee -a "$ARCHIVE/driver.log") 2>&1
 
 {
   echo "MODEL=$MODEL"; echo "TAG=$TAG"; echo "PHASES=$PHASES"; echo "REPEAT=$REPEAT"; echo "TASKS=$TASKS"
-  echo "PI_N=$PI_N"; echo "PROXY_CMD=$PROXY_CMD"; echo "GIT=$(git describe --always --dirty 2>/dev/null)"
+  echo "PI_N=$PI_N"; echo "TASK_GAP=$TASK_GAP"; echo "COOLDOWN=$COOLDOWN"; echo "PROXY_CMD=$PROXY_CMD"; echo "GIT=$(git describe --always --dirty 2>/dev/null)"
   echo "STARTED=$(date -u +%FT%TZ)"
 } > "$ARCHIVE/sweep.env"
 printf 'label\tphase\tenv\tarm\tkind\tmodel\tstart\tend\tresult\n' > "$ARCHIVE/manifest.tsv"
@@ -175,14 +185,18 @@ collect() {
 }
 
 RESULT=""
+THROTTLED=""
+EXHAUSTED=""
 run_bench_arm() {
   local label="$1" arm="$2" json
   if [ "$arm" = default ]; then : > "$CONTROL"; else echo "$arm" > "$CONTROL"; fi
   node scripts/bench/run.mjs --base-url "http://localhost:$PORT/v1" --model "$MODEL" \
-    --label "$label" --repeat "$REPEAT" ${TASKS:+--tasks "$TASKS"} 2>&1 | tee "$ARCHIVE/$label-bench.txt"
+    --label "$label" --repeat "$REPEAT" --task-gap "$TASK_GAP" ${TASKS:+--tasks "$TASKS"} 2>&1 | tee "$ARCHIVE/$label-bench.txt"
   json="$(sed -n 's/^\[bench\] → //p' "$ARCHIVE/$label-bench.txt" | tail -1)"
   [ -n "$json" ] && [ -f "$json" ] && cp "$json" "$ARCHIVE/$label.json"
   RESULT="$(grep -o 'SOLVED [0-9]*/[0-9]*' "$ARCHIVE/$label-bench.txt" | tail -1)"
+  if grep -q '^\[bench\] THROTTLED' "$ARCHIVE/$label-bench.txt"; then THROTTLED=1; RESULT="$RESULT (stopped: throttled)"; fi
+  if grep -q '^\[bench\] PRIORITY ACCESS EXHAUSTED' "$ARCHIVE/$label-bench.txt"; then EXHAUSTED=1; RESULT="$RESULT (stopped: priority access exhausted)"; fi
 }
 
 run_pi_arm() {
@@ -217,6 +231,18 @@ for i in "${!names[@]}"; do
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$label" "$name" "$penv" "$arm" "$kind" "$MODEL" \
       "$start" "$(date -u +%FT%TZ)" "$RESULT" >> "$ARCHIVE/manifest.tsv"
     echo "$label : $RESULT" >> "$ARCHIVE/summary.txt"
+    # A throttled account fails every later arm the same way, and each attempt
+    # keeps the throttle alive (2026-10-04: 26 min of throttled tasks, §24).
+    if [ -n "$THROTTLED" ]; then
+      stop_proxy
+      die "throttled in $label — stopping the sweep; re-run the remaining arms once the throttle has lifted"
+    fi
+    # The model's priority-access budget (Opus 5.5) is used up until midnight UTC
+    # (weekly: Monday); every later arm on it would only measure the 429.
+    if [ -n "$EXHAUSTED" ]; then
+      stop_proxy
+      die "priority access exhausted in $label — stopping the sweep; re-run the remaining arms after the reset"
+    fi
     # Between arms of a phase; the phase cooldown covers the gap to the next phase.
     if [ "$j" -lt $(( ${#al[@]} - 1 )) ]; then
       echo "[sweep] cooldown ${COOLDOWN}s"; sleep "$COOLDOWN"

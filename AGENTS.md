@@ -188,19 +188,37 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   pi works and heavy harnesses (opencode) don't. The proxy also enforces one tool call per
   turn and strips M365's invented `{confidence}`/`{final}` JSON (`M365_ALLOW_MULTI_TOOL` to opt out).
 - **`claude-opus` is entitlement-gated and separately metered.** The WS `scenario` decides which
-  models will serve: Opus is a dead route on `OfficeWebIncludedCopilot` and a real model on
-  `OfficeWebPaidCopilot` (`getScenarioForModel`, derived per-turn from the model ID).
-  `licenseType: Premium` pairs with it but unlocks nothing alone. Opus also has a small
-  priority-access budget that **refuses in content, not in a status field** ("You've used your
-  available priority access…"), so it reads as a successful turn — `parsePriorityAccessExhaustion`
-  catches it and the proxy 429s. Resets midnight UTC (weekly: Monday). Don't burn it on sweeps.
-  See docs/hypotheses.md §15.
+  models will serve: agent-less, Opus is a dead route on `OfficeWebIncludedCopilot` and a real model
+  (Opus 5.5) on `OfficeWebPaidCopilot` (`getScenarioForModel`, derived per-turn from the model ID).
+  `licenseType: Premium` pairs with it but unlocks nothing alone. Opus 5.5 also has a small
+  priority-access budget — 75/week (`ClaudeOpusQuery75`) and 40/day (`ClaudeOpusQueryDaily`), **one unit
+  per turn whatever the prompt size** — so a leaner framing saves nothing; only fewer turns do
+  (the proxy's own retries count too). The refusal is **not streamed**: it is only in the final
+  item (`result.value: "OutOfCredits"`, `result.message`), so a stream reader sees an empty turn —
+  read the result (`priorityAccessExhaustionOf`), not the text. The proxy 429s, remembers the wall
+  until the reset (midnight UTC; weekly: Monday) and, with `M365_OPUS_FALLBACK_MODEL=claude-opus-4.5`,
+  serves Opus 4.5 instead. Every paid turn carries `throttling.metering` (surfaced in `usage`).
+  Don't burn it on sweeps. See docs/hypotheses.md §15, §24 F55, F59 (issue #18).
+- **`claude-opus-4.5` is the same tone on the included scenario — reachable only through the tool
+  agent, only on a premium account, and unmetered.** Agent-less it is the dead route everywhere, so
+  `modelRequiresAgent` attaches the agent even to tool-less requests, and there is no agent-less
+  fallback (it is NOT in `PREMIUM_ONLY_AGENT_TONES`). Routing is the mirror of Sonnet 5: the tone is
+  paid and the model ID opts back into the included scenario (`INCLUDED_SCENARIO_MODELS`, plus
+  `opus-4-5`-style strings). Its system prompt calls it "Claude Opus 5"; trust its "Opus 4.5" and
+  its `ChainOfThoughtSummary`, not the name in the prompt. Both Opus models carry the agent on tool
+  requests (`AGENT_CLAUDE_TONES`) and default to `relay_batch`: every framing solves on Opus 4.5,
+  so rank framings by Disengaged turns and turns per task, not the solve rate — the `<system>`-tagged
+  ones tripped the jailbreak classifier on a third of tasks (§24 F56), and relay_batch's "put as much
+  as you can into one block" cut turns per task 37% (F60), which is what Opus 5.5's budget counts. Opus sometimes ends a tool fence with its native call
+  markup (`</invoke>`, `</parameter>`…); the parser strips it (F57), don't "simplify" that away. Only a premium account can
+  bench it. See docs/hypotheses.md §24.
 - **Entitlement-gated ≠ metered.** `gpt-6-think-deeper` (`Gpt_6_Reasoning`) needs the same paid
   scenario as Opus but carries **no** priority-access budget and throttles like everything else,
   so `PAID_SCENARIO_TONES` is about reaching a model, not about what it costs. Don't key metering
   or framing decisions off that set — the quota detector reads the refusal text and the framing
-  default is per-tone (Opus `minimal` for its budget, GPT-6 `relay` for its sandbox — see the
-  agent bullet below). See docs/hypotheses.md §17, §22.
+  default is per-model (Opus `relay_batch` for its turn-counted budget and the jailbreak classifier,
+  §24 F56/F60; GPT-6 `relay` for its sandbox — see the agent bullet below). See
+  docs/hypotheses.md §17, §22.
 - **One tone can be two models — `Claude_Sonnet` is Sonnet 4.6 (included) and Sonnet 5 (paid).**
   So routing follows the **model ID** (`getScenarioForModel`, `PAID_SCENARIO_MODELS`), and so does
   the framing default (`defaultFramingForModel`). Never add `Claude_Sonnet` to
@@ -216,7 +234,7 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   **Read its `ChainOfThoughtSummary` frames** (`M365_DUMP_FRAMES=1`) — they say why it refused.
 - **Not every tone serves with the tool agent — `toneUsesToolAgent()` decides, per exact tone**
   (`M365_FORCE_AGENT=1`/`0` overrides it either way).
-  Claude tones and `Gpt_6_Reasoning` go agent-less even with tools. With the agent attached GPT-6 is
+  Claude tones (except `Claude_Opus`, see above) and `Gpt_6_Reasoning` go agent-less even with tools. With the agent attached GPT-6 is
   a dead route on every account (`result: InternalError`; the proxy used to 502 on it, #41), and
   Claude is dead on non-premium accounts. Add a tone to `AGENTLESS_TOOL_TONES` only after
   `scripts/agent-tone-probe.mjs` says so. Agent-less also means M365's code interpreter is on, and under `baseline` GPT-6
@@ -242,9 +260,12 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   filter (check: no `messageType:"Disengaged"` → it's throttle). **It is explicit on the wire:**
   the final `type:2` item says `result.value:"Throttled"`, `errorCode:"PerUserThrottled"`, and
   the proxy now returns 429 `m365_throttled` without retrying (#35). ~190 fresh threads in a
-  day tripped it on the premium account. **A fresh login (move
-  `msal-cache.json` aside, restart → new tokens) clears it.** Space experiment runs; don't
-  loop new conversations.
+  day tripped it on the premium account. The bench and phase-sweep stop at the first throttled
+  task, and `TASK_GAP` paces bench tasks. **A fresh login does NOT clear it:** the throttle is
+  keyed on the account's `oid`, which a new token keeps (API doc §2/§7, hypotheses §11 H-R1 —
+  F13's "fresh login clears it" was n=1 and confounded with a rest). It lifts with idle time,
+  which is why the proxy's degradation backoff replaced the old auto-reauth. Space experiment
+  runs; don't loop new conversations.
 - The `nativeclient` OAuth redirect bounces to `/common/wrongplace`; the auth code is
   scraped from the navigation request, not a settled URL.
 

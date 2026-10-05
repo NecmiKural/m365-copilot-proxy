@@ -40,15 +40,27 @@ const MODEL_TONES: Record<string, string> = {
   // knowledge cutoff 2026-01). The scenario comes from PAID_SCENARIO_MODELS.
   "claude-sonnet-5": "Claude_Sonnet",
   "claude-sonnet-think-deeper": "Claude_Sonnet_Reasoning",
-  // Opus is real and strong, but it is NOT reachable on the default
-  // `OfficeWebIncludedCopilot` scenario — there it deflects with a
-  // BotConnection apology, which is what the old "dead tone" reading (F23) was
-  // measuring. Requesting `scenario=OfficeWebPaidCopilot` on the WS query makes
-  // it serve; see PAID_SCENARIO_TONES below and docs §5.
-  // The model behind this tone is currently Claude Opus 5 (knowledge cutoff May
-  // 2026)
+  // `Claude_Opus` is one tone and two models, like `Claude_Sonnet`, but the
+  // other way round: the TONE is paid (PAID_SCENARIO_TONES) and one model ID
+  // opts back into the included scenario (INCLUDED_SCENARIO_MODELS).
+  //
+  // Paid scenario: Claude Opus 5.5 (self-IDs "Claude Opus 5.5", knowledge
+  // cutoff 2026-06, since at least 2026-10-01; it was Opus 5, cutoff 2026-05,
+  // in September). Metered
+  // by a small daily + weekly priority-access budget (priority-access.ts). On
+  // the included scenario agent-less it deflects with a BotConnection apology —
+  // what the old "dead tone" reading (F23) was measuring. `claude-opus-5` is a
+  // legacy alias: it reaches the same (paid) model.
   "claude-opus": "Claude_Opus",
   "claude-opus-5": "Claude_Opus",
+  "claude-opus-5.5": "Claude_Opus",
+  // Included scenario, WITH the tool agent attached, on a premium account only:
+  // Claude Opus 4.5, outside the priority-access budget. Its system prompt
+  // tells it it is "Claude Opus 5" with a May 2026 cutoff, and its chain of
+  // thought disputes that ("…that's not accurate to who I actually am"); it
+  // self-IDs as Opus 4.5 most of the time. Agent-less it is the dead route on
+  // every account, and with the agent it is dead on a non-premium one (docs §24).
+  "claude-opus-4.5": "Claude_Opus",
 
   // GPT-5.5 (current generation)
   "gpt-5.5": "Gpt_5_5_Chat",
@@ -126,8 +138,9 @@ export function getToneForModel(model: string): string {
   // …except an unmapped Opus string (`claude-opus-5[1m]`, and any dated or
   // context-suffixed Opus 5 variant), which now has a working route of its own
   // rather than being downgraded to Sonnet. The match is on `opus` alone, so it
-  // survives whatever version suffix a client decides to send. The paid scenario
-  // is attached automatically (getScenarioForTone).
+  // survives whatever version suffix a client decides to send. The scenario is
+  // attached automatically (getScenarioForModel): paid (Opus 5.5) unless the
+  // string names Opus 4.5 (`claude-opus-4-5-…`), which goes to the included one.
   if (/opus/i.test(model)) return "Claude_Opus";
   if (/^claude/i.test(model)) return "Claude_Sonnet";
   return MODEL_TONES["m365-copilot"];
@@ -167,6 +180,9 @@ const PAID_LICENSE_TYPE = "Premium";
  * Opus was the sole member, so nothing downstream should infer one from the
  * other — `defaultFramingForTone`, `parsePriorityAccessExhaustion` and
  * `toneUsesToolAgent` each decide for themselves.
+ *
+ * A model ID can opt out: `claude-opus-4.5` is the same tone on the included
+ * scenario (INCLUDED_SCENARIO_MODELS), and isn't metered.
  */
 export const PAID_SCENARIO_TONES: ReadonlySet<string> = new Set([
   "Claude_Opus",
@@ -197,6 +213,30 @@ export function isSonnet5Model(model: string): boolean {
     (getToneForModel(model) === "Claude_Sonnet" && SONNET_5_PATTERN.test(model));
 }
 
+/**
+ * Model IDs that need the INCLUDED scenario even though their tone is in
+ * PAID_SCENARIO_TONES — the mirror image of PAID_SCENARIO_MODELS.
+ *
+ * `Claude_Opus` is Opus 5.5 on the paid scenario and Opus 4.5 on the included
+ * one. The included model serves only with the tool agent attached and only on
+ * a premium account (agent-tone-probe, 2026-10-02/04, docs §24). Unmapped
+ * strings a client may send for it (`claude-opus-4-5-20251101`,
+ * `claude-opus-4.5[1m]`) are caught by OPUS_4_5_PATTERN rather than silently
+ * served by Opus 5.5 — which would also spend the priority-access budget.
+ */
+export const INCLUDED_SCENARIO_MODELS: ReadonlySet<string> = new Set([
+  "claude-opus-4.5",
+]);
+// `opus-4.5`, `opus-4-5`, `opus4_5`, `opus 4.5`, and anything after it — but not
+// `opus-4` / `opus-4-1` / `opus-4.6`, and not a hypothetical `opus-4.50`.
+const OPUS_4_5_PATTERN = /opus[-_ ]?4[-_. ]5(?!\d)/i;
+
+/** True when this model ID is Claude Opus 4.5, i.e. `Claude_Opus` + included scenario. */
+export function isOpus45Model(model: string): boolean {
+  return INCLUDED_SCENARIO_MODELS.has(model) ||
+    (getToneForModel(model) === "Claude_Opus" && OPUS_4_5_PATTERN.test(model));
+}
+
 // --- Which tool requests carry the Copilot Studio tool agent ------------------
 //
 // The proxy attaches its declarative tool agent to tool requests, because the
@@ -204,7 +244,8 @@ export function isSonnet5Model(model: string): boolean {
 //
 // - Claude tones tool-call reliably agent-less (F23), and a non-premium
 //   account's agent path doesn't serve Claude at all — a dead route
-//   (BotConnection, `result: InternalError`), hypotheses §22 F44.
+//   (BotConnection, `result: InternalError`), hypotheses §22 F44. The
+//   exception is `Claude_Opus` (AGENT_CLAUDE_TONES).
 // - `Gpt_6_Reasoning` doesn't serve with the agent attached on any account:
 //   the same dead route, 4/4 across a premium and a non-premium account, while
 //   the same tone agent-less answers as GPT-6 (§22 F45, #41). Its bench score
@@ -216,6 +257,24 @@ export function isSonnet5Model(model: string): boolean {
 // on BOTH kinds of account before deciding which side it belongs on.
 export const AGENTLESS_TOOL_TONES: ReadonlySet<string> = new Set([
   "Gpt_6_Reasoning",
+]);
+
+/**
+ * Claude tones that DO take the tool agent; every other `Claude_*` tone goes
+ * agent-less.
+ *
+ * - `Claude_Opus`: on the included scenario (`claude-opus-4.5`, Opus 4.5) the
+ *   agent is the ONLY route — agent-less it is the BotConnection dead route on
+ *   every account, with the agent it serves on a premium account (docs §24). On
+ *   the paid scenario (`claude-opus`, Opus 5.5) it serves either way, and takes
+ *   the agent so both Opus models run the same path and the same framing.
+ *   There is no agent-less fallback to learn (it isn't in
+ *   PREMIUM_ONLY_AGENT_TONES): a non-premium account can't reach either model
+ *   at all — the paid scenario is unlicensed there (F46), and the included one
+ *   is dead with and without the agent.
+ */
+export const AGENT_CLAUDE_TONES: ReadonlySet<string> = new Set([
+  "Claude_Opus",
 ]);
 
 /**
@@ -279,7 +338,9 @@ export function resetAgentRoutes(): void {
 
 /** Whether a tool request on this tone should carry the tool agent. */
 export function toneUsesToolAgent(tone: string): boolean {
-  return !/^Claude_/i.test(tone) && !AGENTLESS_TOOL_TONES.has(tone) && !deadAgentRoutes.has(tone);
+  if (AGENTLESS_TOOL_TONES.has(tone) || deadAgentRoutes.has(tone)) return false;
+  if (/^Claude_/i.test(tone)) return AGENT_CLAUDE_TONES.has(tone);
+  return true;
 }
 
 /**
@@ -292,6 +353,26 @@ export function toolRequestUsesAgent(tone: string): boolean {
   if (force === "1") return true;
   if (force === "0") return false;
   return toneUsesToolAgent(tone);
+}
+
+/**
+ * Model IDs that serve ONLY with the tool agent attached, so a request carries
+ * it even without tools (the agent's instructions say to answer normally when
+ * there's no <tools> block). Today that's Opus 4.5: agent-less, the included
+ * scenario gives `Claude_Opus` the BotConnection dead route (docs §24).
+ */
+export function modelRequiresAgent(model: string): boolean {
+  return isOpus45Model(model);
+}
+
+/**
+ * The agent decision for one request of any kind. Tool requests follow
+ * toolRequestUsesAgent; a tool-less request carries the agent only when the
+ * model can't be served without it (`M365_FORCE_AGENT=0` still turns it off).
+ */
+export function requestUsesAgent(model: string, hasTools: boolean): boolean {
+  if (hasTools) return toolRequestUsesAgent(getToneForModel(model));
+  return modelRequiresAgent(model) && process.env.M365_FORCE_AGENT !== "0";
 }
 
 export interface ScenarioRouting {
@@ -320,10 +401,34 @@ export function getScenarioForTone(tone: string): ScenarioRouting {
 /**
  * The scenario a MODEL ID must be requested under: paid when its tone is
  * entitlement-gated (Opus, GPT-6) or when the ID itself selects the paid
- * model behind a shared tone (Sonnet 5). This is what session.ts routes on.
+ * model behind a shared tone (Sonnet 5); included when the ID selects the
+ * included model behind a paid tone (Opus 4.5). This is what session.ts
+ * routes on.
  */
 export function getScenarioForModel(model: string): ScenarioRouting {
+  if (isOpus45Model(model)) return routing(false);
   return routing(PAID_SCENARIO_TONES.has(getToneForModel(model)) || isSonnet5Model(model));
+}
+
+/**
+ * Whether this model's turns draw on the Opus priority-access budget: Opus on
+ * the paid scenario (Opus 5.5). Opus 4.5 on the included scenario doesn't.
+ */
+export function isMeteredOpusModel(model: string): boolean {
+  return getToneForModel(model) === "Claude_Opus" && getScenarioForModel(model).scenario === PAID_SCENARIO;
+}
+
+/**
+ * `M365_OPUS_FALLBACK_MODEL`: the model to serve a metered Opus request with
+ * once the priority-access budget is used up (typically `claude-opus-4.5`,
+ * which isn't metered), instead of a 429. Opt-in, because it swaps the model:
+ * the response's `model` field then names the one that answered. Ignored when
+ * it names a metered model itself.
+ */
+export function opusFallbackModel(): string | null {
+  const v = process.env.M365_OPUS_FALLBACK_MODEL?.trim();
+  if (!v || isMeteredOpusModel(v)) return null;
+  return v;
 }
 
 export function getAvailableModels(): string[] {
@@ -381,6 +486,10 @@ export interface CopilotStream {
   /** The final item's `result`: `{value:"Success"}`, or `{value:"Throttled",
    *  errorCode:"PerUserThrottled", message}` when the account is rate-limited. */
   result?: { value: string; errorCode?: string; message?: string } | null;
+  /** The final item's `throttling.metering` as `{budget: remainingAllowance}`
+   *  (e.g. `ClaudeOpusQueryDaily`, `ClaudeOpusQuery75`), read after the turn.
+   *  Paid-scenario turns only (docs §24 F55). */
+  metering?: Record<string, number> | null;
   /** True if the model triggered a native custom action this turn (H-NATIVE-6). */
   sawAction?: boolean;
 }

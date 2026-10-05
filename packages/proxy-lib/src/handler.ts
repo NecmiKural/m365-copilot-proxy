@@ -4,7 +4,8 @@ import {
   createLogger,
   trunc,
   getToneForModel,
-  toolRequestUsesAgent,
+  requestUsesAgent,
+  modelRequiresAgent,
   noteAgentRouteDead,
   noteAgentRouteAlive,
   isAgentRouteAlive,
@@ -12,7 +13,12 @@ import {
   defaultFramingForModel,
   currentFramingVariant,
   transcriptStyleForVariant,
-  parsePriorityAccessExhaustion,
+  priorityAccessExhaustionOf,
+  notePriorityAccessExhausted,
+  activePriorityAccessExhaustion,
+  opusAllowance,
+  isMeteredOpusModel,
+  opusFallbackModel,
   couldBePriorityAccessPrefix,
   secondsUntilReset,
   type PriorityAccessExhaustion,
@@ -120,6 +126,10 @@ interface ConversationState {
   /** Sent ahead of the next tool result when the proxy executed less than the
    *  model wrote last turn (see executedOnlyFirstNote). */
   pendingNote: string | null;
+  /** The model that last answered in this conversation. A different one (the
+   *  Opus fallback, #18) can't continue the M365 conversation — it may need
+   *  another scenario — so it starts a fresh one with the full history. */
+  servedModel?: string;
 }
 
 /**
@@ -300,31 +310,57 @@ export async function handleChatCompletion(
   const conv = pool.resolve(body.messages);
   const { session } = conv;
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
-  const model = body.model;
+  const requestedModel = body.model;
 
-  // Which tool requests carry the declarative tool agent. GPT-the-chat-model won't
+  // Opus priority access (§15, §24 F55, issue #18). Once the budget is used up
+  // every metered Opus turn is refused until the reset, so don't start one:
+  // serve the opt-in fallback model (M365_OPUS_FALLBACK_MODEL, e.g. the
+  // unmetered claude-opus-4.5), or answer the 429 here. A refused turn costs no
+  // allowance, but it does cost an M365 turn and often a fresh conversation —
+  // what the account's thread-rate throttle counts.
+  const knownExhaustion = isMeteredOpusModel(requestedModel) ? activePriorityAccessExhaustion() : null;
+  const fallbackModel = knownExhaustion ? opusFallbackModel() : null;
+  if (knownExhaustion && !fallbackModel) {
+    log.info(`Priority access exhausted (${knownExhaustion.window}) until ${knownExhaustion.resetsAt.toISOString()} — 429 without contacting M365`);
+    return priorityAccessResponse(knownExhaustion, requestedModel);
+  }
+  let model = fallbackModel ?? requestedModel;
+  if (fallbackModel) log.info(`Priority access exhausted until ${knownExhaustion!.resetsAt.toISOString()} — serving ${requestedModel} with ${fallbackModel} (M365_OPUS_FALLBACK_MODEL)`);
+  if (conv.servedModel && conv.servedModel !== model) {
+    // The conversation was being served by another model (e.g. Opus 5.5 before
+    // the fallback): continue in a fresh M365 conversation with the full history.
+    log.info(`Conversation switches model ${conv.servedModel} → ${model}: fresh conversation, full history`);
+    session.newConversation();
+    conv.sentMessageCount = 0;
+  }
+
+  // Which requests carry the declarative tool agent. GPT-the-chat-model won't
   // tool-call agent-less (0/4), so it needs the agent. Claude tool-calls reliably
   // AGENT-LESS via shell-routing (F23), and on a non-premium account the agent
-  // path doesn't serve Claude at all (§22 F44). `Gpt_6_Reasoning` doesn't serve
+  // path doesn't serve Claude at all (§22 F44) — except Claude Opus, whose
+  // included-scenario model (Opus 4.5) serves ONLY with the agent (§24), so it
+  // carries the agent even on a tool-less request. `Gpt_6_Reasoning` doesn't serve
   // with the agent on any account (§22 F45, #41), and `Gpt_6_Sol_Reasoning` only
   // on a premium one (learned at runtime, see the dead-route fallback in
-  // runBuffered). The rule lives in core (`toolRequestUsesAgent`);
-  // M365_FORCE_AGENT=1 / =0 forces the agent on / off.
+  // runBuffered). The rule lives in core (`requestUsesAgent`);
+  // M365_FORCE_AGENT=1 / =0 forces the agent on / off for tool requests.
   // Derive it from the RESOLVED tone, not the raw model string: getToneForModel
   // routes any unmapped `claude-*` (e.g. the `claude-opus-5[1m]` a Claude Code
   // client sends) to a Claude tone, so this keeps that request on the working
   // agent-less path. The old `/claude/i.test(model)` + `magic` fallback split a
   // claude-* string into GPT-tone + agent-suppressed — the confab quadrant we
   // observed. One resolved tone drives both.
-  const tone = getToneForModel(model);
-  // Framing default follows the MODEL (defaultFramingForModel): Opus gets the
-  // lean variant (it doesn't need the anti-narration cage, and its priority-
-  // access budget is small), Claude Sonnet — 4.6 and 5 — gets `relay` (it reads
-  // the `<system>`-tagged baseline as an injected prompt), and the rest keep the
-  // bench-tuned `baseline`. Keyed on the model, not the tone, because one tone
-  // can serve two models. M365_FRAMING_* still wins.
-  const framingVariant = currentFramingVariant(defaultFramingForModel(model));
-  let useToolAgent = !!hasTools && toolRequestUsesAgent(tone);
+  let tone = getToneForModel(model);
+  // Framing default follows the MODEL (defaultFramingForModel): Claude Sonnet
+  // (4.6 and 5) and GPT-6 / GPT-6 Sol get the user-voice `relay` (Sonnet reads
+  // the `<system>`-tagged baseline as an injected prompt), Opus (4.5 and 5.5)
+  // its turn-saving sibling `relay_batch` (the `<system>`-tagged framings trip
+  // the jailbreak classifier on it, and its budget counts turns, §24), and the
+  // rest keep the bench-tuned `baseline`.
+  // Keyed on the model, not the tone, because one tone can serve two models.
+  // M365_FRAMING_* still wins.
+  let framingVariant = currentFramingVariant(defaultFramingForModel(model));
+  let useToolAgent = requestUsesAgent(model, !!hasTools);
 
   // Format message: full prompt on first turn, delta on follow-ups.
   // M365 is stateful — it remembers everything from prior turns,
@@ -371,6 +407,7 @@ export async function handleChatCompletion(
   let lastMessageType: string | null | undefined;
   let lastScores: Record<string, number> | null | undefined;
   let lastTurnCount: number | null | undefined;
+  let lastMetering: Record<string, number> | null | undefined;
 
   // `onDelta` (when provided) forwards each text delta to the caller AS IT ARRIVES,
   // for live incremental streaming. It's safe to forward without ever retracting:
@@ -383,6 +420,7 @@ export async function handleChatCompletion(
     let agentRefreshed = false;
     let disengageRetried = false;
     let agentFallbackDone = false;
+    let opusFallbackDone = false;
     let originalText = text;
     // Self-imposed pacing while the account is degraded (thread-rate throttle). A
     // no-op when healthy; during backoff it sleeps a jittered delay so we stop
@@ -434,6 +472,7 @@ export async function handleChatCompletion(
       lastMessageType = copilotStream.messageType;
       lastScores = copilotStream.scores;
       lastTurnCount = copilotStream.turnCount;
+      lastMetering = copilotStream.metering;
 
       // M365 SAYS when it throttles: the final item's result is `Throttled` /
       // `PerUserThrottled` (#35). Checked BEFORE the content check so
@@ -477,19 +516,41 @@ export async function handleChatCompletion(
         continue;
       }
 
+      // The Opus priority-access cap arrives as a turn whose text is a refusal
+      // ("You've used your available priority access…") and whose final result
+      // is `OutOfCredits` (§24 F55). Left alone, the client would receive a
+      // refusal dressed as an answer — the same hazard class as the image-quota
+      // text (§14 H14.4). Surface it as a 429 with the reset time instead, or,
+      // when M365_OPUS_FALLBACK_MODEL is set, re-send the whole request to that
+      // model in a fresh conversation (issue #18). Either way remember it, so the
+      // next requests don't spend M365 turns on refusals until the reset.
+      const exhausted = priorityAccessExhaustionOf(copilotStream.result, fullText);
+      if (exhausted) {
+        const metered = isMeteredOpusModel(model);
+        if (metered || copilotStream.result?.value === "OutOfCredits") notePriorityAccessExhausted(exhausted);
+        const fallback = metered && !opusFallbackDone ? opusFallbackModel() : null;
+        if (fallback) {
+          opusFallbackDone = true;
+          log.info(`Priority access exhausted (${exhausted.window}) — re-sending to ${fallback} (M365_OPUS_FALLBACK_MODEL) in a fresh conversation`);
+          model = fallback;
+          tone = getToneForModel(model);
+          framingVariant = currentFramingVariant(defaultFramingForModel(model));
+          useToolAgent = requestUsesAgent(model, !!hasTools);
+          session.newConversation();
+          text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant);
+          originalText = text;
+          attempt--;
+          continue;
+        }
+        noteRequestOutcome(false, convId); // an answer, not a throttle
+        log.info(`Priority access exhausted (${exhausted.window}) — resets ${exhausted.resetsAt.toISOString()}`);
+        return { error: priorityAccessResponse(exhausted, model) };
+      }
+
       if (copilotStream.hasContent || fullText.length > 0) {
         noteRequestOutcome(false, convId); // clean response → degradation has lifted
         if (useToolAgent) noteAgentRouteAlive(tone); // the agent route answered on this account
-        // The Opus priority-access cap arrives as a SUCCESSFUL turn whose text is
-        // a refusal ("You've used your available priority access…"), so nothing
-        // above catches it and the client would receive a refusal dressed as an
-        // answer. Surface it as a 429 with the reset time instead. Same hazard
-        // class as the image-quota text (§14 H14.4).
-        const exhausted = parsePriorityAccessExhaustion(fullText);
-        if (exhausted) {
-          log.info(`Priority access exhausted (${exhausted.window}) — resets ${exhausted.resetsAt.toISOString()}`);
-          return { error: priorityAccessResponse(exhausted, model) };
-        }
+        conv.servedModel = model;
         return { fullText };
       }
 
@@ -559,6 +620,14 @@ export async function handleChatCompletion(
         await new Promise(r => setTimeout(r, SHORT_RETRY_DELAY_MS));
         text = "Please continue."; // M365 already has context
       } else {
+        // A model that serves only with the agent, on an account whose agent
+        // route doesn't serve it (Opus 4.5 on a non-premium account: BotConnection,
+        // `InternalError`, every time — §24). Not a throttle, so it doesn't feed
+        // the degradation backoff; say what it is instead of "empty response".
+        if (useToolAgent && modelRequiresAgent(model) && copilotStream.result?.value === "InternalError") {
+          log.info(`${model}: agent route returned InternalError on every attempt — premium-only model on a non-premium account?`);
+          return { error: premiumOnlyModelResponse(model) };
+        }
         // Final empty after retries, and not an at-limit (per-conversation) cap:
         // this is the thread-rate throttle signature (F13). Feed the degradation-
         // backoff policy — once empties span enough distinct conversations it paces
@@ -735,7 +804,7 @@ export async function handleChatCompletion(
 
   // --- Render: JSON (non-stream) or an early-flushed SSE stream (stream) ---
   const includeUsage = !!body.stream_options?.include_usage;
-  const usage = () => buildUsage(lastThrottle, lastContentOrigin, lastMessageType, lastScores, lastTurnCount);
+  const usage = () => buildUsage(lastThrottle, lastContentOrigin, lastMessageType, lastScores, lastTurnCount, lastMetering);
 
   if (!body.stream) {
     const p = await produce();
@@ -860,6 +929,7 @@ function buildUsage(
   messageType?: string | null,
   scores?: Record<string, number> | null,
   turnCount?: number | null,
+  metering?: Record<string, number> | null,
 ): Record<string, unknown> {
   const base: Record<string, unknown> = {
     prompt_tokens: 0,
@@ -885,6 +955,11 @@ function buildUsage(
     if (typeof scores.dea_violation === "number") base.x_m365_dea_score = scores.dea_violation;
     if (typeof scores.BotOffense === "number") base.x_m365_offense_score = scores.BotOffense;
   }
+  // Opus priority access left after this turn (paid-scenario turns only, §24
+  // F55): one unit per turn, so a client can see the wall coming (issue #18).
+  const opus = opusAllowance(metering);
+  if (opus?.daily !== undefined) base.x_m365_opus_daily_remaining = opus.daily;
+  if (opus?.weekly !== undefined) base.x_m365_opus_weekly_remaining = opus.weekly;
   return base;
 }
 
@@ -965,6 +1040,16 @@ function emptyResponseResponse(throttle: { current: number; max: number } | null
     error: {
       message: `M365 Copilot returned an empty response${detail} — likely a content filter, an invalid agent/session, or a transient upstream error.`,
       type: "upstream_empty_response",
+    },
+  });
+}
+
+function premiumOnlyModelResponse(model: string): Response {
+  return jsonResponse(502, {
+    error: {
+      message: `M365 Copilot didn't serve ${model}: its only route (with the tool agent attached) returned InternalError on every attempt. ${model} is served only on a premium (paid Microsoft 365 Copilot) account; on any other account use claude-sonnet.`,
+      type: "upstream_error",
+      code: "model_route_unavailable",
     },
   });
 }

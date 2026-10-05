@@ -58,6 +58,11 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "gpt-5.2": "GPT-5.2 Quick",
   "gpt-5.2-quick": "GPT-5.2 Quick",
   "gpt-5.2-think-deeper": "GPT-5.2 Think Deeper",
+  // Two models behind one tone: the scenario picks them (copilot.ts).
+  "claude-opus": "Claude Opus 5.5",
+  "claude-opus-5.5": "Claude Opus 5.5",
+  "claude-opus-5": "Claude Opus 5.5",
+  "claude-opus-4.5": "Claude Opus 4.5 (premium, unmetered)",
 };
 
 const REASONING_MODELS = new Set([
