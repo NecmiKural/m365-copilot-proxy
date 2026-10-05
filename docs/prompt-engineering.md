@@ -85,6 +85,8 @@ premium account) there's no sandbox, but the cage framings still lose to relay (
 the model confabulates "I can't access your working directory from this chat", even after a
 successful `cat`. relay removes the question: the user runs the commands, so the model needs no
 belief about its own access. **Lesson:** for any new reasoning tone, put `relay` in the first sweep.
+GPT-6 now runs the batching relay (`relay_batch`, below): a third fewer turns, no sandbox turns. GPT-6
+Sol doesn't: agent-less, batching sent it to its sandbox twice as often (hyp §25 F61).
 
 ## Claude Opus: when every framing solves, count the Disengages
 
@@ -109,6 +111,13 @@ block" (`relay_batch`) took Opus 4.5 from 3.65 to 2.30 turns per bench task at 2
 Real pi agreed: 3.5 turns per run vs 6.0, 10/10 each. It is the
 Opus default (both models). The cost to watch: a batched block acts before it has seen any output —
 in pi every edit still came after a read.
+
+**It carries to other models unevenly — measure in real pi, not only on the bench** (hyp §25). The
+bench's turn savings: GPT-6 and GPT-6 Sol −33%, Sonnet 4.6 −14%, Sonnet 5 −15%. In pi: Sonnet 4.6
+−21%, Sonnet 5 only −6% (relay already reads, fixes and checks in ~5 turns). Savings come from tasks
+one script can finish; fix-bug and config edits barely move. **And batching needs a shell:** with a
+read-only toolset, "a script can look at the files…" made Sonnet 4.6 announce it had only its own
+sandbox tools (3/7 vs relay 6/6, H25b), so `relay_batch` is plain relay when there is no shell tool.
 
 ## What does NOT work (confirmed dead-ends — don't re-litigate)
 
@@ -162,14 +171,15 @@ registered in `packages/core/src/fenced.ts` (`FRAMING_VARIANTS`) and selected pe
 Current strategies: `baseline` (shipped default, unchanged), `minimal`, `recency`,
 `fewshot`, `proof_demand`, `persona`, `react`, `negative`, `terse`, `softened`, `demo_only`,
 `session_facts`, `reply_tool` (synthetic `reply()` tool; also `M365_INJECT_REPLY_TOOL=1`), and the
-Claude Sonnet set: `retag`, `honest`, `terse_user`, `relay`, and the turn-saving relay for metered
-Opus, `relay_batch` (hyp §24 F60). A variant can also change
+Claude Sonnet set: `retag`, `honest`, `terse_user`, `relay`, and the turn-saving `relay_batch`
+(hyp §24 F60, §25). A variant can also change
 the transcript's **tags** (`transcriptStyleForVariant`): the Claude Sonnet set never emits `<system>`;
 the harness's own system prompt becomes `<harness_system_prompt>`.
 
 **The default is model-aware** (`defaultFramingForModel`, falling back to `defaultFramingForTone`).
-`Claude_Sonnet` — Sonnet 4.6 and Sonnet 5 — `Gpt_6_Reasoning` and `Gpt_6_Sol_Reasoning` → `relay`;
-`Claude_Opus` — Opus 4.5 and 5.5 — → `relay_batch`. **Every other model keeps `baseline` byte-for-byte** (including
+`Claude_Opus` (Opus 4.5 and 5.5), `Claude_Sonnet` (as Sonnet 4.6) and `Gpt_6_Reasoning` →
+`relay_batch`; Sonnet 5 (`claude-sonnet-5`, same tone, keyed on the model ID) and
+`Gpt_6_Sol_Reasoning` → `relay`. **Every other model keeps `baseline` byte-for-byte** (including
 `claude-sonnet-think-deeper`, unmeasured under relay), so no GPT-5.x bench number moves, and
 `M365_FRAMING_*` still wins. Opus used to default to `minimal`, to spend less of its priority-access
 budget by sending a shorter prompt; that budget counts turns, not tokens (docs/hypotheses.md §24

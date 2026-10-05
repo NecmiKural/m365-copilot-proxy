@@ -310,11 +310,11 @@ export async function handleChatCompletion(
   // claude-* string into GPT-tone + agent-suppressed — the confab quadrant we
   // observed. One resolved tone drives both.
   let tone = getToneForModel(model);
-  // Framing default follows the MODEL (defaultFramingForModel): Claude Sonnet
-  // (4.6 and 5) and GPT-6 / GPT-6 Sol get the user-voice `relay` (Sonnet reads
-  // the `<system>`-tagged baseline as an injected prompt), Opus (4.5 and 5.5)
-  // its turn-saving sibling `relay_batch` (the `<system>`-tagged framings trip
-  // the jailbreak classifier on it, and its budget counts turns, §24), and the
+  // Framing default follows the MODEL (defaultFramingForModel): the Claude,
+  // GPT-6 and GPT-6 Sol tones get a user-voice relay (Sonnet reads the
+  // `<system>`-tagged baseline as an injected prompt; on Opus it trips the
+  // jailbreak classifier). Opus, Sonnet 4.6 and GPT-6 get the turn-saving
+  // `relay_batch` (§24 F60, §25); Sonnet 5 and GPT-6 Sol plain `relay`. The
   // rest keep the bench-tuned `baseline`.
   // Keyed on the model, not the tone, because one tone can serve two models.
   // M365_FRAMING_* still wins.

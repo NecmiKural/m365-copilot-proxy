@@ -217,8 +217,8 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   so `PAID_SCENARIO_TONES` is about reaching a model, not about what it costs. Don't key metering
   or framing decisions off that set — the quota detector reads the refusal text and the framing
   default is per-model (Opus `relay_batch` for its turn-counted budget and the jailbreak classifier,
-  §24 F56/F60; GPT-6 `relay` for its sandbox — see the agent bullet below). See
-  docs/hypotheses.md §17, §22.
+  §24 F56/F60; GPT-6 a user-voice relay for its sandbox, batched since §25 — see the agent bullet
+  below). See docs/hypotheses.md §17, §22, §25.
 - **One tone can be two models — `Claude_Sonnet` is Sonnet 4.6 (included) and Sonnet 5 (paid).**
   So routing follows the **model ID** (`getScenarioForModel`, `PAID_SCENARIO_MODELS`), and so does
   the framing default (`defaultFramingForModel`). Never add `Claude_Sonnet` to
@@ -227,8 +227,12 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - **Sonnet 5 has its own tools in a remote sandbox and reads `<system>` tags as an injection.**
   Nothing client-side disables `bash_tool`/`create_file` (`/home/claude`), and a `<system>` block in
   the user turn makes it disregard the framing and work there ("no such file"). Its default is the
-  user-voice `relay` framing (45/50 vs 6/40; 5/5 in real pi) — and Sonnet 4.6's too (78/90 vs
-  47/76). Don't move `Claude_Sonnet` back to a `<system>`-tagged variant, and don't wrap the note
+  user-voice `relay` framing (45/50 vs 6/40; 5/5 in real pi). Sonnet 4.6 beat baseline with relay too
+  (78/90 vs 47/76) and now defaults to `relay_batch` (same solves, −21% turns in real pi, §25 F62);
+  batching saved Sonnet 5 only 6% in pi, so `SONNET_5_DEFAULT_FRAMING` keeps it on relay (F63) — the
+  one place the two Sonnets differ. `relay_batch` is plain relay when the toolset has no shell: asked
+  for a script it couldn't run, Sonnet 4.6 claimed it had only its sandbox tools (§25 H25b) — and
+  `proxy-verify --tools` is shell-less. Don't move `Claude_Sonnet` back to a `<system>`-tagged variant, and don't wrap the note
   in `<user>` tags either: tags are just text to it, and the variant that did (`relay_inline`,
   removed) scored 1/20 (§21 F43).
   **Read its `ChainOfThoughtSummary` frames** (`M365_DUMP_FRAMES=1`) — they say why it refused.
@@ -238,7 +242,8 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   a dead route on every account (`result: InternalError`; the proxy used to 502 on it, #41), and
   Claude is dead on non-premium accounts. Add a tone to `AGENTLESS_TOOL_TONES` only after
   `scripts/agent-tone-probe.mjs` says so. Agent-less also means M365's code interpreter is on, and under `baseline` GPT-6
-  worked there instead of acting (0/30); its default is `relay` (30/30; 5/5 in real pi). See docs/hypotheses.md §22.
+  worked there instead of acting (0/30); relay fixed that (30/30; 5/5 in real pi), and its default is now
+  `relay_batch` (20/20 at a third fewer turns, 10/10 in real pi). See docs/hypotheses.md §22, §25.
 - **Some tones take the agent only on a premium account — and nothing on the token says which
   account this is.** `Gpt_6_Sol_Reasoning` (`gpt-6-sol`) serves with the agent on a premium account
   and is the dead route (`InternalError`) on a non-premium one. It is in `PREMIUM_ONLY_AGENT_TONES`:

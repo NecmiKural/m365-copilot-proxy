@@ -288,17 +288,22 @@ export function currentFramingVariant(toneDefault?: string): string {
  *  not yet under relay_batch.
  *
  *  `Claude_Sonnet` (Sonnet 4.6 on the included scenario, Sonnet 5 on the paid
- *  one) defaults to `relay`: both read the `<system>`-tagged baseline as an
+ *  one) is user-voice because both read the `<system>`-tagged baseline as an
  *  injected prompt, and relay beat baseline for each — Sonnet 5 45/50 vs 6/40,
- *  Sonnet 4.6 78/90 vs 47/76 (docs §21).
+ *  Sonnet 4.6 78/90 vs 47/76 (docs §21). The tone's default is now relay_batch,
+ *  for Sonnet 4.6: same solves, 14% fewer turns on the bench (80/80) and 21%
+ *  fewer in real pi (39/39), and every pi edit still followed a read (docs §25
+ *  F61, F62). Sonnet 5 stays on relay — see SONNET_5_DEFAULT_FRAMING.
  *
- *  `Gpt_6_Reasoning` defaults to `relay` too. It used to keep `baseline` on the
+ *  `Gpt_6_Reasoning` defaults to relay_batch. It used to keep `baseline` on the
  *  theory that it drives M365's GPT agent path — but it never served WITH the
  *  agent (#41), so its tool requests go agent-less, where the proxy also enables
  *  M365's code interpreter. Under baseline GPT-6 worked in that sandbox
  *  (`/mnt/data`, `bash -lc …`) instead of emitting tool calls, and 12 of 30 first
  *  turns tripped the JailBreak Classifier: 0/30 solved, vs relay 30/30 (bench,
- *  2026-10-01, confab-retry off; docs §22 F47).
+ *  2026-10-01, confab-retry off; docs §22 F47). relay_batch keeps relay's
+ *  framing and cuts its turns by a third: 3.15 → 2.10 per bench task (40/40, no
+ *  sandbox turns either way), 3 turns per real-pi run, 10/10 (docs §25 F61, F63).
  *
  *  `Gpt_6_Sol_Reasoning` (gpt-6-sol) defaults to `relay` on BOTH of its paths
  *  (#23, docs §23). Agent-less (any non-premium account) it has a sandbox of its
@@ -307,12 +312,15 @@ export function currentFramingVariant(toneDefault?: string): string {
  *  scored 0–6/10, relay 60/60. With the agent (premium) there's no sandbox, but
  *  the other framings confabulate "I can't access your working directory" or
  *  trip the JailBreak Classifier: 3–9/10, relay 30/30. Real pi: 21/21.
+ *  relay_batch saved a third of its turns on both paths, but agent-less it went
+ *  to that sandbox twice as often (4 vs 2 turns in 20 tasks), so it stays on
+ *  relay (docs §25 F61).
  *
  *  Every other tone keeps the bench-tuned `baseline` byte-for-byte. */
 export function defaultFramingForTone(tone?: string): string | undefined {
   if (tone === "Claude_Opus") return "relay_batch";
-  if (tone === "Claude_Sonnet") return "relay";
-  if (tone === "Gpt_6_Reasoning") return "relay";
+  if (tone === "Claude_Sonnet") return "relay_batch";
+  if (tone === "Gpt_6_Reasoning") return "relay_batch";
   if (tone === "Gpt_6_Sol_Reasoning") return "relay";
   return undefined;
 }
@@ -331,8 +339,9 @@ export function defaultFramingForModel(model: string): string | undefined {
 // assistant role, rather than being told it is an agent with a second tool
 // format. Under `baseline` it reads the framing as a prompt injection and works
 // in its own sandbox instead (6/40); relay: 45/50, and 5/5 through real pi.
-// Today this equals the `Claude_Sonnet` tone default; it stays separate so the
-// two models can diverge without a routing change.
+// It does NOT follow its tone to relay_batch: 15% fewer turns on the bench, but
+// 6% in real pi (4.90 vs 5.20 per run, 10/10 each, p = 0.47), where relay
+// already reads, fixes and checks in ~5 turns (docs §25 F63).
 const SONNET_5_DEFAULT_FRAMING = "relay";
 
 /** How formatMessages wraps the framing block and the harness's own system
@@ -707,13 +716,18 @@ ${toolsBlock(tools)}`;
 
   // Turn-saving relay (issue #18). Opus 5.5's priority-access budget counts
   // TURNS (§24 F55). `relay_batch` — relay asking outright for as much as fits
-  // in each block — is the Claude_Opus default: 2.30 turns per bench task vs
-  // relay's 3.65, same solve rate (§24 F60).
+  // in each block — is the default for Claude_Opus (2.30 turns per bench task
+  // vs relay's 3.65, same solve rate, §24 F60), and since §25 for Sonnet 4.6
+  // and GPT-6 too (−14% and −33% bench turns, F61–F63).
+  // Batching means a script, so it needs a shell tool. Without one it is relay
+  // byte-for-byte: asked for a script it couldn't run, Sonnet 4.6 announced it
+  // had no tools but its own sandbox ones — 3/7 shell-less checks, relay 6/6
+  // (§25 H25b).
   relay_batch(tools) {
-    const lang = findShellTool(tools) ? "bash" : "<tool_name>";
+    if (!findShellTool(tools)) return FRAMING_VARIANTS.relay(tools);
     return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.
 
-Each time you want something run, reply with just a single \`\`\`${lang} block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. Each round trip takes me a while, so put as much as you can into one block: a script can look at the files, make the change and check the result all at once. The files the task mentions are already there. When the task is complete, tell me in a sentence instead of sending a block.
+Each time you want something run, reply with just a single \`\`\`bash block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. Each round trip takes me a while, so put as much as you can into one block: a script can look at the files, make the change and check the result all at once. The files the task mentions are already there. When the task is complete, tell me in a sentence instead of sending a block.
 
 ${toolsBlock(tools)}`;
   },

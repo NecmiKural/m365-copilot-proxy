@@ -400,29 +400,39 @@ describe("defaultFramingForTone", () => {
     expect(transcriptStyleForVariant("relay_batch").framingTag).toBeNull();
   });
 
+  it("asks for batching only when there's a shell to batch in — otherwise it is relay (§25 H25b)", () => {
+    // Shell-less, "a script can look at the files…" read as a request only its
+    // own sandbox could meet: Sonnet 4.6 3/7 vs relay 6/6.
+    expect(formatFencedToolDefinitions([readFile], "relay_batch")).toBe(formatFencedToolDefinitions([readFile], "relay"));
+    expect(formatFencedToolDefinitions([bash, readFile], "relay_batch")).not.toBe(formatFencedToolDefinitions([bash, readFile], "relay"));
+  });
+
   it("leaves every other tone on the bench-tuned baseline", () => {
     for (const tone of ["magic", "Claude_Sonnet_Reasoning", "Gpt_5_5_Reasoning", undefined]) {
       expect(defaultFramingForTone(tone)).toBeUndefined();
     }
   });
 
-  it("gives the Claude_Sonnet tone (4.6 and 5) the <system>-free relay framing", () => {
-    // Both Sonnets read the <system>-tagged baseline as an injected prompt (§21).
-    expect(defaultFramingForTone("Claude_Sonnet")).toBe("relay");
+  it("gives the Claude_Sonnet tone the <system>-free relay_batch (Sonnet 4.6, §25 F62)", () => {
+    // Both Sonnets read the <system>-tagged baseline as an injected prompt (§21);
+    // batching cut Sonnet 4.6's turns 14% on the bench and 21% in real pi.
+    expect(defaultFramingForTone("Claude_Sonnet")).toBe("relay_batch");
   });
 
-  it("gives GPT-6 relay — it runs agent-less, next to M365's code interpreter (#41)", () => {
+  it("gives GPT-6 relay_batch — it runs agent-less, next to M365's code interpreter (#41)", () => {
     // Not because it is paid-gated (Opus 5.5 is gated too): GPT-6
     // never served with the tool agent, and agent-less under baseline it worked
     // in the code interpreter instead of acting — 0/30 vs relay 30/30 (docs §22 F47).
-    expect(defaultFramingForTone("Gpt_6_Reasoning")).toBe("relay");
-    expect(defaultFramingForModel("gpt-6-think-deeper")).toBe("relay");
+    // relay_batch keeps relay's user voice and cuts its turns by a third (§25 F61).
+    expect(defaultFramingForTone("Gpt_6_Reasoning")).toBe("relay_batch");
+    expect(defaultFramingForModel("gpt-6-think-deeper")).toBe("relay_batch");
   });
 
   it("gives GPT-6 Sol relay on both of its paths, agent and agent-less (#23)", () => {
     // One default for both: agent-less (non-premium) it has its own sandbox and
     // only relay kept it out (60/60 vs ≤6/10); with the agent (premium) relay
-    // 30/30 vs 3–9/10 for the rest (docs §23).
+    // 30/30 vs 3–9/10 for the rest (docs §23). relay_batch sent it to that
+    // sandbox twice as often agent-less (§25 F61), so not that one either.
     expect(defaultFramingForTone("Gpt_6_Sol_Reasoning")).toBe("relay");
     expect(defaultFramingForModel("gpt-6-sol")).toBe("relay");
   });
@@ -440,15 +450,16 @@ describe("defaultFramingForTone", () => {
 describe("defaultFramingForModel", () => {
   // `Claude_Sonnet` is Sonnet 4.6 on the included scenario and Sonnet 5 on the
   // paid one, so the tone alone can't choose Sonnet 5's framing.
-  it("gives Sonnet 5 the relay framing, including unmapped Sonnet 5 strings", () => {
+  it("keeps Sonnet 5 on relay, including unmapped Sonnet 5 strings — its tone moved on without it", () => {
+    // Batching saved 15% of Sonnet 5's bench turns but only 6% in real pi (§25 F63).
     for (const id of ["claude-sonnet-5", "claude-sonnet-5[1m]"]) {
       expect(defaultFramingForModel(id)).toBe("relay");
     }
   });
 
-  it("gives Sonnet 4.6 relay too — and every unmapped claude-* string that lands on its tone", () => {
+  it("gives Sonnet 4.6 relay_batch — and every unmapped claude-* string that lands on its tone", () => {
     for (const id of ["claude-sonnet", "claude-sonnet-4.6", "claude-sonnet-4.5", "claude", "claude-haiku-9"]) {
-      expect(defaultFramingForModel(id)).toBe("relay");
+      expect(defaultFramingForModel(id)).toBe("relay_batch");
     }
   });
 
