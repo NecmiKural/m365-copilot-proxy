@@ -187,10 +187,13 @@ export function cursorMessageId(j: string | undefined): string | null {
 export class TurnTextComposer {
   private texts = new Map<string, string>();
   private target: string | null = null;
+  /** No delta has arrived since the last cursor (see delta). */
+  private afterCursor = false;
 
   /** A cursor frame: subsequent deltas extend message `id`. */
   cursor(id: string): void {
     this.target = id;
+    this.afterCursor = true;
   }
 
   /** A full-text snapshot of one message. Before any cursor has been seen, the
@@ -201,10 +204,20 @@ export class TurnTextComposer {
     this.texts.set(key, foldStreamText(this.texts.get(key) ?? "", text).answer);
   }
 
-  /** A token delta for the message the cursor last named. */
+  /** A token delta for the message the cursor last named.
+   *
+   *  The first delta after a cursor can restate the head snapshot that came with
+   *  it. A message that opens with "<" streams the snapshot "<" and then the delta
+   *  "<document" (M365 holds the "<" back until it knows the tag), so appending
+   *  gave "<<document>notlar.docx…", and the final snapshot, one character
+   *  shorter, never replaced it. 9 of 1,061 cursor frames in the Oct 2–5 debug
+   *  logs, each one a "<"; in the rest the first delta continues the snapshot. */
   delta(text: string): void {
     const key = this.target ?? "";
-    this.texts.set(key, (this.texts.get(key) ?? "") + text);
+    const current = this.texts.get(key) ?? "";
+    const restated = this.afterCursor && current.length > 0 && text.startsWith(current);
+    this.texts.set(key, restated ? text : current + text);
+    this.afterCursor = false;
   }
 
   get text(): string {
@@ -276,7 +289,7 @@ export function buildCopilotWebSocketUrl(
  * Sweden Central), which keep separate copies of the conversation. The model
  * then answers from whichever copy the turn landed on: in real pi runs 56% of
  * turns ran on an older copy, missing the model's own earlier calls and their
- * results (docs/hypotheses.md F64). With the key: 1 backend in 6. The query-string form
+ * results (docs §24 F64). With the key: 1 backend in 6. The query-string form
  * doesn't pin. M365_NO_SESSION_ROUTING=1 leaves it out.
  */
 export function buildCopilotWebSocketHeaders(conversationId: string): Record<string, string> {

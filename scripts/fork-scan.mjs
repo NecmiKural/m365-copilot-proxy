@@ -2,7 +2,7 @@
 // (M365_DEBUG=1; files or directories, *.debug.log / debug.log found recursively)
 // and checks the server's own count of user messages after each turn, which must
 // grow by one per turn on one ConversationId. A turn whose count falls short ran
-// on an older copy of the conversation (docs/hypotheses.md F64).
+// on an older copy of the conversation (docs/hypotheses.md §24 F64).
 //
 //   node scripts/fork-scan.mjs ~/.config/opencode-m365/debug.log
 //   SHOW=1 node scripts/fork-scan.mjs <dir>     # one line per conversation

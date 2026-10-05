@@ -25,7 +25,6 @@ import {
   textAfterFirstToolCall,
   longHeredocAsWrite,
   formatToolResponse,
-  formatUserMessage,
   isProseDocument,
   getMessageContent,
   noteRequestOutcome,
@@ -291,9 +290,6 @@ function parseReply(text: string, tools: Parameters<typeof parseToolCalls>[1]): 
 
 function formatDeltaMessages(messages: ParsedMessage[], history: ParsedMessage[]): string {
   const parts: string[] = [];
-  // A user message in a delta is a follow-up by definition (the conversation
-  // already ran); the newest one is the current request (FOLLOW_UP_NOTE).
-  const current = [...messages].reverse().find((m) => m.role === "user");
   for (const m of messages) {
     if (m.role === "assistant") {
       // Skip assistant messages — M365 already has them server-side.
@@ -304,8 +300,6 @@ function formatDeltaMessages(messages: ParsedMessage[], history: ParsedMessage[]
       parts.push(formatToolResponse(m, history));
     } else if (m.role === "system") {
       // Skip system messages on follow-up turns
-    } else if (m.role === "user") {
-      parts.push(formatUserMessage(m, m === current));
     } else {
       parts.push(`<${m.role}>\n${getMessageContent(m)}\n</${m.role}>`);
     }
