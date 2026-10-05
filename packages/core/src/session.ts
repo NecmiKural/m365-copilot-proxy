@@ -276,7 +276,7 @@ export function buildCopilotWebSocketUrl(
  * Sweden Central), which keep separate copies of the conversation. The model
  * then answers from whichever copy the turn landed on: in real pi runs 56% of
  * turns ran on an older copy, missing the model's own earlier calls and their
- * results (docs §24 F64). With the key: 1 backend in 6. The query-string form
+ * results (docs/hypotheses.md F64). With the key: 1 backend in 6. The query-string form
  * doesn't pin. M365_NO_SESSION_ROUTING=1 leaves it out.
  */
 export function buildCopilotWebSocketHeaders(conversationId: string): Record<string, string> {
