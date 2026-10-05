@@ -308,6 +308,8 @@ describe("looksLikeConfabulation", () => {
     // Missed on the fixed build (pdf, baseline): passive, after one missing library; no file was made.
     expect(looksLikeConfabulation("PDF oluşturma işlemi tamamlanamadı. WeasyPrint kurulumu, gerekli `libgobject-2.0-0` sistem kitaplığını bulamadı.")).toBe(true);
     expect(looksLikeConfabulation("notlar.pdf oluşturulamadı.")).toBe(true);
+    // Missed with 308 skills listed: it asks for the file instead of reading it.
+    expect(looksLikeConfabulation("Bunu hazırlayabilmem için **data.csv dosyasının içeriğine erişmem gerekiyor**. Dosyayı buraya yüklediğinizde kısa raporu şu yapıda sunabilirim:")).toBe(true);
   });
 
   it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
@@ -337,6 +339,7 @@ describe("looksLikeConfabulation", () => {
     // Suffixed passives describe code paths, not this task.
     expect(looksLikeConfabulation("Kurulum tamamlanamadıysa proxy 502 döner.")).toBe(false);
     expect(looksLikeConfabulation("Dosya oluşturulamadığında hata günlüğe yazılır.")).toBe(false);
+    expect(looksLikeConfabulation("Proxy'nin M365'e erişmesi gerekir; token süresi dolarsa yeniden giriş yapılır.")).toBe(false);
   });
 
   it("does NOT flag genuine final answers or normal prose", () => {

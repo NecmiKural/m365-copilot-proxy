@@ -50,6 +50,7 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
   request, and concurrent sessions with one opening message collided (F63, fixed); each turn landed
   on a random backend and the conversation forked under the model, pinned with a routing header (F64);
+  a pile of global pi skills: fine to ~120, broad "any task" descriptions are the risk (F67);
   a leading "<" streamed twice (F65); file-chip markup in answers (F66)
 
 ---
@@ -3978,3 +3979,42 @@ distinct final answers of the pi transcripts (Oct 2–5): `<File>` 58 times, plu
 file name (`plainFileNames`); code blocks are left alone, and a bare `<name.ext>` is not touched
 (`#include <stdio.h>`). Not applied to a tool-less streamed answer, which goes to the client delta by
 delta before the markup is complete.
+
+### F67 — a pile of global pi skills: cheap up to ~120, a few broad descriptions are the real risk 🟡
+**Question.** What does installing many skills in `~/.pi/agent/skills` do through the proxy? pi puts every
+skill's name, description and path in the system prompt of every session (the instructions load only when
+the model reads `SKILL.md`), so the cost is the listing.
+
+**Size** (pi's own request, captured with a stand-in server, real SKILL.md frontmatter from one machine,
+average description 328 chars): 0 skills 2.9K chars of system prompt, 10 → 10.2K, 30 → 23.5K, 60 → 42K,
+120 → 78.5K, 233 → 151K (first M365 message 154K: framing + tools + system prompt). About 0.65K per skill.
+`disable-model-invocation: true` in the frontmatter takes a skill out of the listing: 120 such skills
+cost nothing (2.9K). The 27-skill bundle the user keeps elsewhere: 23.4K (first message 26.4K).
+
+**Live** (`gpt-5.6-think-deeper`, `relay`, real pi; two tasks, write-code and "write the report the project
+skill describes" (skill-use); two sweeps, the second after the fixes below; throttled runs excluded):
+
+| skills listed | write-code | skill-use |
+|---|---|---|
+| 0 | 7/7 | 6/6 |
+| 27 (the user's bundle, real bodies) | 4/4 | 4/4 |
+| 120 | 4/4 | 4/4 |
+| 308 (233 real descriptions + 75 renamed copies) | 8/8 | **4/8** |
+
+skill-use, 14/14 at up to 120 skills against 4/8 at 308: Fisher p ≈ 0.01. The four failures: one **instant
+rejection** of the ~200K first message (`InternalError`, 0.25 s, no bot message), after which the retry
+sent "Please continue." into a conversation that had never received the task ("What would you like me to
+continue with?"; the server's own count read 1 of 600). **Fixed:** an empty turn with no server turnCount is
+resent, not nudged. The other three began by reading `task-observer`, whose description says "Use during
+ANY multi-step task": two then answered "I need access to data.csv / upload it" (the Turkish form was not
+in the detector; **added**, and it did not turn the other), one ended on an unclosed `read` fence.
+**Caveat:** the 308 pile's bodies were stubs (a title line), so reading a distractor returned nothing; with
+real bodies (the 27 bundle, which includes the real `task-observer`) 8/8 passed, one run reading it.
+2 of the bundle's 4 skill-use runs needed the forcing retry (0 of 6 with no skills): the broad descriptions
+cost turns even when they don't fail.
+
+**Advice.** Up to ~120 skills is fine. Keep descriptions that claim every task out of the automatic
+listing (`task-observer` "ANY multi-step task", `modern-web-guidance` "MANDATORY: Execute FIRST … Do NOT
+skip" and it needs a search tool pi doesn't have, `graphify`, `ponytail`) with `disable-model-invocation:
+true` and call them with `/skill:name`. Don't copy `~/.agents/skills` into `~/.pi/agent/skills` (pi reads
+both; duplicate names keep the first and warn). **Not measured:** real bodies at 308; `gpt-5.5-think-deeper`.
