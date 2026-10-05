@@ -252,6 +252,11 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - **A turn can hold several bot messages; assemble text per message.** Each new message's head
   arrives only as a snapshot with a `cursor`; folding everything into one string drops it (it ate
   a fence's backticks). `TurnTextComposer` in `session.ts` — don't "simplify" it away. #29.
+- **Array/object tool params come back in two shapes; the parser reads both.** The tools block shows
+  `edits: <edits>`. Opus writes inline JSON (`edits: [{…}]`); Sonnet 4.6 writes a YAML block list under
+  an empty `edits:`, which used to arrive as `edits: []` — 44 of its 47 pi `edit` calls, each a wasted
+  round trip (#50). `parseYamlBlockValue` in `fenced.ts` reads the YAML subset models write; keep both
+  paths. The bench can't catch a regression here (no array-typed tools), so test with real pi's `edit`.
 - **Account degradation is THREAD-rate, not message-count** (docs/hypotheses.md §9 F13).
   Microsoft throttles *conversations started*, not messages sent — the per-conversation
   counter resets each thread. A bench that opens one fresh conversation per task burns the

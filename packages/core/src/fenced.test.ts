@@ -565,3 +565,85 @@ describe("header value coercion (strict-harness schema conformance)", () => {
     expect(parse("path: 123").path).toBe("123");
   });
 });
+
+describe("array and object params written as a YAML block (#50)", () => {
+  // pi's `edit` tool: the tools block shows it as `edits: <edits>`.
+  const piEdit: ToolDef = {
+    type: "function",
+    function: {
+      name: "edit",
+      description: "Edit a single file using exact text replacement.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          edits: { type: "array", items: { type: "object", properties: { oldText: { type: "string" }, newText: { type: "string" } } } },
+        },
+        required: ["path", "edits"],
+      },
+    },
+  };
+  const opts: ToolDef = {
+    type: "function",
+    function: { name: "configure", parameters: { type: "object", properties: { target: { type: "string" }, options: { type: "object" } } } },
+  };
+  const piSpecs = buildSpecMap([piEdit, opts, bash]);
+  const argsOf = (text: string) => {
+    const { calls } = parseFencedToolCalls(text, piSpecs);
+    expect(calls).toHaveLength(1);
+    return JSON.parse(calls[0].function.arguments);
+  };
+
+  it("reads Sonnet 4.6's block list, verbatim from real pi (44 of its 47 edits were lost)", () => {
+    const args = argsOf('```edit\npath: /tmp/pi-task-mi5OyW/mathutil.py\nedits:\n  - oldText: "    return sum(nums) / len(nums) + 1"\n    newText: "    return sum(nums) / len(nums)"\n```');
+    expect(args).toEqual({
+      path: "/tmp/pi-task-mi5OyW/mathutil.py",
+      edits: [{ oldText: "    return sum(nums) / len(nums) + 1", newText: "    return sum(nums) / len(nums)" }],
+    });
+  });
+
+  it("still reads the inline JSON Opus writes", () => {
+    const args = argsOf('```edit\npath: calc.py\nedits: [{"oldText": "    return a - b", "newText": "    return a + b"}]\n```');
+    expect(args.edits).toEqual([{ oldText: "    return a - b", newText: "    return a + b" }]);
+  });
+
+  it("reads single-quoted text with quotes and colons inside, and several items", () => {
+    const args = argsOf(`\`\`\`edit\npath: calc.py\nedits:\n  - oldText: '"quotient": a - b,'\n    newText: '"quotient": a / b,'\n  - oldText: 'it''s'\n    newText: "say \\"hi\\"\\tthere"\n\`\`\``);
+    expect(args.edits).toEqual([
+      { oldText: '"quotient": a - b,', newText: '"quotient": a / b,' },
+      { oldText: "it's", newText: 'say "hi"\tthere' },
+    ]);
+  });
+
+  it("reads multi-line text as | and |- block scalars", () => {
+    const args = argsOf("```edit\npath: calc.py\nedits:\n  - oldText: |\n      def add(a, b):\n          return a - b\n    newText: |-\n      def add(a, b):\n\n          return a + b\n```");
+    expect(args.edits).toEqual([
+      { oldText: "def add(a, b):\n    return a - b\n", newText: "def add(a, b):\n\n    return a + b" },
+    ]);
+  });
+
+  it("reads a list whose dashes sit at the key's own column", () => {
+    const args = argsOf("```edit\npath: a.py\nedits:\n- oldText: x = 1\n  newText: x = 2\n```");
+    expect(args.edits).toEqual([{ oldText: "x = 1", newText: "x = 2" }]);
+  });
+
+  it("keeps mapping values as text — no YAML booleans or numbers", () => {
+    const args = argsOf("```edit\npath: a.txt\nedits:\n  - oldText: 3000\n    newText: true\n```");
+    expect(args.edits).toEqual([{ oldText: "3000", newText: "true" }]);
+  });
+
+  it("reads an object-typed param as a mapping, and carries on with the header after it", () => {
+    const args = argsOf("```configure\noptions:\n  mode: fast\n  retries: 3\ntarget: prod\n```");
+    expect(args).toEqual({ options: { mode: "fast", retries: "3" }, target: "prod" });
+  });
+
+  it("falls back to the old reading when the block isn't YAML it can read", () => {
+    const args = argsOf("```edit\npath: a.py\nedits:\n  - oldText: x\n        newText: misaligned\n```");
+    expect(args.edits).toEqual([]);
+  });
+
+  it("leaves a string param's indented lines alone, as before", () => {
+    const args = argsOf("```bash\n  echo indented\n```");
+    expect(args.command).toBe("  echo indented");
+  });
+});
