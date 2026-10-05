@@ -286,6 +286,18 @@ function parseReply(text: string, tools: Parameters<typeof parseToolCalls>[1]): 
   return { parsed, judged: parsed.textContent };
 }
 
+/** M365's web client renders `<File>notlar.docx</File>` as a file chip, and its
+ *  models write that markup into answers: 58 times in the 245 distinct final
+ *  answers of the pi transcripts (Oct 2–5), plus `<document>`, `<Files>`,
+ *  `<file>`, `<FILE>` and "< File>". An API client shows the raw tags, so a prose
+ *  answer gets the bare name. Code blocks are left as they are. */
+export function plainFileNames(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```)/)
+    .map((part, i) => (i % 2 ? part : part.replace(/<\s*(file|files|document)\s*>([^<>\n]{1,200}?)<\/\s*\1\s*>/gi, "$2")))
+    .join("");
+}
+
 // --- Delta message formatting ---
 
 function formatDeltaMessages(messages: ParsedMessage[], history: ParsedMessage[]): string {
@@ -744,7 +756,7 @@ export async function handleChatCompletion(
       conv.pendingNote = notes.length ? notes.join("\n") : null;
       return { kind: "tools", toolCalls: parsed.toolCalls };
     }
-    return { kind: "text", text: fullText };
+    return { kind: "text", text: plainFileNames(fullText) };
   } else {
     // No tools — stream deltas live (onDelta) while buffering for the retry logic.
     const result = await runBuffered(onDelta);
