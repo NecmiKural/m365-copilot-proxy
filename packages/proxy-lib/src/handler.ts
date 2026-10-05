@@ -225,7 +225,17 @@ function simpleHash(str: string): string {
 
 // --- Delta message formatting ---
 
-function formatDeltaMessages(messages: ParsedMessage[]): string {
+/** Format the messages new since the last turn. `history` is the whole request:
+ *  a tool message names its call only by `tool_call_id` (pi sends no `name`),
+ *  so the tool's name comes from the assistant `tool_calls` that issued it —
+ *  every result used to be labelled `name="unknown"` (#50). */
+export function formatDeltaMessages(messages: ParsedMessage[], history: ParsedMessage[] = messages): string {
+  const callNames = new Map<string, string>();
+  for (const m of history) {
+    if (m.role === "assistant" && m.tool_calls) {
+      for (const tc of m.tool_calls) if (tc.id) callNames.set(tc.id, tc.function.name);
+    }
+  }
   const parts: string[] = [];
   for (const m of messages) {
     if (m.role === "assistant") {
@@ -233,7 +243,7 @@ function formatDeltaMessages(messages: ParsedMessage[]): string {
       // Echoing them back as a user message confuses M365.
       continue;
     } else if (m.role === "tool") {
-      const name = m.name || "unknown";
+      const name = m.name || (m.tool_call_id && callNames.get(m.tool_call_id)) || "unknown";
       const callId = m.tool_call_id || "?";
       parts.push(`<tool_response name="${name}" call_id="${callId}">\n${getMessageContent(m)}\n</tool_response>`);
     } else if (m.role === "system") {
@@ -300,11 +310,11 @@ export async function handleChatCompletion(
   // claude-* string into GPT-tone + agent-suppressed — the confab quadrant we
   // observed. One resolved tone drives both.
   let tone = getToneForModel(model);
-  // Framing default follows the MODEL (defaultFramingForModel): Claude Sonnet
-  // (4.6 and 5) and GPT-6 / GPT-6 Sol get the user-voice `relay` (Sonnet reads
-  // the `<system>`-tagged baseline as an injected prompt), Opus (4.5 and 5.5)
-  // its turn-saving sibling `relay_batch` (the `<system>`-tagged framings trip
-  // the jailbreak classifier on it, and its budget counts turns, §24), and the
+  // Framing default follows the MODEL (defaultFramingForModel): the Claude,
+  // GPT-6 and GPT-6 Sol tones get a user-voice relay (Sonnet reads the
+  // `<system>`-tagged baseline as an injected prompt; on Opus it trips the
+  // jailbreak classifier). Opus, Sonnet 4.6 and GPT-6 get the turn-saving
+  // `relay_batch` (§24 F60, §25); Sonnet 5 and GPT-6 Sol plain `relay`. The
   // rest keep the bench-tuned `baseline`.
   // Keyed on the model, not the tone, because one tone can serve two models.
   // M365_FRAMING_* still wins.
@@ -322,7 +332,7 @@ export async function handleChatCompletion(
     log.info(`Chat completion: model=${model}, stream=${body.stream}, messages=${body.messages.length}, turn=${session.turnCount}, mode=full, cid=${convId}`);
   } else {
     const newMessages = body.messages.slice(conv.sentMessageCount);
-    const delta = newMessages.length > 0 ? formatDeltaMessages(newMessages) : "";
+    const delta = newMessages.length > 0 ? formatDeltaMessages(newMessages, body.messages) : "";
     if (delta.length > 0) {
       text = delta;
       // Only a tool result is the thing the note corrects the model about.

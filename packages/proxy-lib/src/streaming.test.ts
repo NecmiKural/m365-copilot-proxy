@@ -70,6 +70,20 @@ const { resetAgentRoutes, resetPriorityAccessState } = await import("@m365-copil
 // don't let one test's refusal 429 the next test's Opus request.
 afterEach(() => resetPriorityAccessState());
 
+/** One request on a fresh pool with a fake clock: an empty upstream turn makes
+ *  the handler wait 2 s before each quick retry, and that wait is the handler's
+ *  own pacing, not what these tests check. */
+async function respond(body: ReturnType<typeof ChatCompletionRequest.parse>): Promise<Response> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const pending = handleChatCompletion(body, new SessionPool());
+    await vi.runAllTimersAsync();
+    return await pending;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 /** Drive one streaming request and collect the ordered content-delta strings. */
 async function streamContents(deltas: string[], fullText?: string): Promise<string[]> {
   scripted.deltas = deltas;
@@ -216,6 +230,13 @@ describe("the only-the-first-call-ran note", () => {
     const sent = await converse(["```bash\nls\n```", "Done."]);
     expect(sent[1]).not.toContain("(Note:");
   });
+
+  it("names the tool on a follow-up turn, though the tool message carries no name (#50)", async () => {
+    // Like pi: the result names its call only by tool_call_id.
+    const sent = await converse(["```bash\nls\n```", "Done."]);
+    expect(sent[1]).toMatch(/<tool_response name="bash" call_id="[^"]+">\nreal output 0\n<\/tool_response>/);
+    expect(sent[1]).not.toContain('name="unknown"');
+  });
 });
 
 describe("a reply that opens with a tool call and then writes an essay", () => {
@@ -300,11 +321,12 @@ describe("Disengage retry keeps a model's <system>-free framing", () => {
   it("retries Sonnet 5 with relay again, never a <system>-tagged framing", async () => {
     const retry = await disengageThenAnswer("claude-sonnet-5");
     expect(retry).not.toContain("<system>");
-    expect(retry).toContain("guide me through this from my terminal");
+    expect(retry).toContain("guide me through this from my terminal, one command at a time");
+    expect(retry).not.toContain("put as much as you can into one block");
   });
 
-  it("sends Opus relay_batch on the first try and keeps it on the retry (§24)", async () => {
-    for (const model of ["claude-opus-4.5", "claude-opus"]) {
+  it("sends Opus, Sonnet 4.6 and GPT-6 relay_batch on the first try and keeps it on the retry (§24, §25)", async () => {
+    for (const model of ["claude-opus-4.5", "claude-opus", "claude-sonnet", "gpt-6-think-deeper"]) {
       const retry = await disengageThenAnswer(model);
       expect(scripted.texts[0]).toContain("put as much as you can into one block");
       expect(scripted.texts[0]).not.toContain("<system>");
@@ -396,7 +418,7 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
       model, stream: false, tools,
       messages: [{ role: "system", content: "sys" }, { role: "user", content: `list files ${Math.random()}` }],
     });
-    return handleChatCompletion(body, new SessionPool());
+    return respond(body);
   }
 
   afterEach(() => {
@@ -468,19 +490,6 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
 
 describe("Opus 4.5 on an account that can't serve it (§24)", () => {
   const DEAD = { fullText: "", result: { value: "InternalError" } };
-
-  // Every attempt here is empty, so the handler waits out both 2 s quick
-  // retries; fake the clock instead of spending 4 s per test.
-  async function respond(body: ReturnType<typeof ChatCompletionRequest.parse>): Promise<Response> {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const pending = handleChatCompletion(body, new SessionPool());
-      await vi.runAllTimersAsync();
-      return await pending;
-    } finally {
-      vi.useRealTimers();
-    }
-  }
 
   afterEach(() => {
     resetAgentRoutes();

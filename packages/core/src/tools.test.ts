@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseToolCalls, formatToolDefinitions, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
+import type { ToolDef } from "./tools.js";
 
 describe("parseToolCalls", () => {
   it("should parse a clean tool call with no extra text", () => {
@@ -366,7 +367,7 @@ describe("tool-result labelling", () => {
 });
 
 describe("fenced tool format (the only format)", () => {
-  const tools = [
+  const tools: ToolDef[] = [
     {
       type: "function" as const,
       function: {
@@ -507,7 +508,7 @@ describe("truncateAtFabricatedToolResponse (a self-written <tool_response> is a 
 });
 
 describe("isProseDocument with the reply text: a reply that OPENS with a tool call is an action", () => {
-  const tools = [
+  const tools: ToolDef[] = [
     { type: "function" as const, function: { name: "bash", description: "run", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } } },
     { type: "function" as const, function: { name: "write_file", description: "write", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] } } },
   ];
@@ -582,7 +583,7 @@ describe("transcript style (which tags wrap the framing and harness system promp
 
   it("never emits a <system> tag for the user-voice variants", async () => {
     const { formatMessages } = await import("./tools.js");
-    for (const v of ["honest", "terse_user", "relay", "relay_nolook", "relay_batch"]) {
+    for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       const out = formatMessages(msgs, tools, undefined, undefined, v);
       expect(out).not.toContain("<system>");
       expect(out).toContain("<harness_system_prompt>\nYou are an autonomous coding agent.\n</harness_system_prompt>");
@@ -600,7 +601,7 @@ describe("transcript style (which tags wrap the framing and harness system promp
 
   it("tells the model its built-in sandbox is the wrong machine in every user-voice variant", async () => {
     const { formatToolDefinitions } = await import("./tools.js");
-    for (const v of ["honest", "terse_user", "relay", "relay_nolook", "relay_batch"]) {
+    for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       expect(formatToolDefinitions(tools, v)).toMatch(/sandbox/);
     }
   });

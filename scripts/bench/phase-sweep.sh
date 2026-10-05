@@ -34,19 +34,27 @@
 #
 # Knobs (env): MODEL and PHASES (required), TAG (sweep), PORT (4141), REPEAT (1,
 #   bench reps per task), TASKS (all bench tasks), PI_N (5), COOLDOWN (60 s
-#   between arms), PHASE_COOLDOWN (60 s), TASK_GAP (0 s between bench tasks;
-#   every task is a fresh conversation, an arm starts ~2 a minute, and the
-#   account throttles on the rate of those — how fast is too fast isn't pinned
-#   down, see hypotheses §24 F58; 30 halves the rate),
+#   between arms), PHASE_COOLDOWN (60 s), TASK_GAP (0 s between bench tasks, on
+#   top of the pacing below),
 #   ARCHIVE (~/.config/opencode-m365/
 #   sweeps/$TAG), PROXY_CMD (the built proxy; `node scripts/bench/_mock-proxy.mjs`
 #   exercises the driver without spending M365 threads), DRY_RUN=1 (validate and
-#   print the plan, spend nothing).
+#   print the plan, spend nothing), and M365_AVOID_THROTTLING / M365_BUDGET_*
+#   (pacing, below).
 #
-# The sweep stops at the first throttled bench task (FAILED says where); the
-# throttle only lifts once the account stops starting conversations. It stops
-# the same way when the model's priority-access budget runs out (Opus 5.5).
-# A real-pi arm doesn't stop early on either; analyze-arms marks its runs.
+# Pacing, only with M365_AVOID_THROTTLING=1: the account throttles once a bucket
+# of ~100 turns, refilled at ~1.6 a minute, runs dry (hypotheses §24 F58).
+# Before every bench task and every pi run the drivers then wait until the
+# proxies' debug logs (this archive included) say there's room for a whole task
+# plus a reserve — scripts/bench/turn-budget.mjs. The sweep runs at the account's
+# pace instead of tripping the throttle, which makes it much slower: ~1.6 turns
+# a minute once the bucket is down to the reserve. Off by default.
+# `node scripts/bench/turn-budget.mjs status` shows where the bucket stands.
+#
+# The sweep stops at the first throttled bench task or pi run (FAILED says where);
+# the throttle only lifts once the account stops starting conversations. It stops
+# the same way when the model's priority-access budget runs out (Opus 5.5); a
+# real-pi arm doesn't see that one, and analyze-arms marks its runs.
 #
 # One sweep per account at a time: the proxy writes its debug log and frames to
 # ~/.config/opencode-m365, and the driver moves them into $ARCHIVE after each
@@ -70,6 +78,9 @@ CFG="$HOME/.config/opencode-m365"
 ARCHIVE="${ARCHIVE:-$CFG/sweeps/$TAG}"
 PROXY_CMD="${PROXY_CMD:-node packages/proxy/bin/m365-proxy.mjs}"
 BASE_ENV=(M365_DEBUG=1 M365_DUMP_FRAMES=1 M365_NO_CONFAB_RETRY=1 M365_NO_INTERACTIVE=1)
+# Pacing (M365_AVOID_THROTTLING=1) reads the debug logs under $CFG; an archive
+# kept elsewhere has to be named.
+export M365_BUDGET_LOGS="$ARCHIVE${M365_BUDGET_LOGS:+:$M365_BUDGET_LOGS}"
 
 ARCHIVE_OURS=""
 die() {
@@ -200,15 +211,17 @@ run_bench_arm() {
 }
 
 run_pi_arm() {
-  local label="$1" task="${2#pi=}"
+  local label="$1" task="${2#pi=}" rc
   : > "$CONTROL"
   N="$PI_N" TASK="$task" PORT="$PORT" MODEL="$MODEL" COOLDOWN="$COOLDOWN" CSV="$ARCHIVE/$label.csv" \
     bash scripts/bench/pi-reliability.sh
+  rc=$?
   # pi-reliability leaves a failed run's dir in /tmp; keep its output with the arm.
   tail -n+2 "$ARCHIVE/$label.csv" 2>/dev/null | while IFS=, read -r run _ outcome _ dir; do
     if [ "$outcome" != SOLVED ] && [ -f "$dir/pi.out" ]; then cp "$dir/pi.out" "$ARCHIVE/$label-run$run-pi.out"; fi
   done
   RESULT="$(tail -n+2 "$ARCHIVE/$label.csv" 2>/dev/null | awk -F, '$3=="SOLVED"{s++}END{printf "SOLVED %d/%d", s, NR}')"
+  if [ "$rc" = 3 ]; then THROTTLED=1; RESULT="$RESULT (stopped: throttled)"; fi
 }
 
 # --- run -------------------------------------------------------------------

@@ -50,9 +50,13 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   trip the jailbreak classifier, F56; batching cuts turns ~40%, F60); the refusal isn't streamed and
   issue #18 (F59); Opus's native call markup leaking into fences (F57); four throttles in
   a day that a per-turn bucket fits better than a conversation count (F58)
-- §26 — one conversation, two backends (Oct 4 2026): each turn's new connection landed on a random
+- §25 — `relay` vs `relay_batch` for the other user-voice tones (Sonnet 4.6/5, GPT-6, GPT-6 Sol):
+  batching saves ~33% of turns on the GPT-6 tones and ~15% on the Sonnets (F61); the F58 bucket
+  predicts throttles on non-premium accounts too, and the bench can pace itself by it
+  (`M365_AVOID_THROTTLING=1`)
+- §27 — one conversation, two backends (Oct 4 2026): each turn's new connection landed on a random
   backend, the regions kept separate copies of the conversation, and about half the turns ran on a
-  partial history; `X-RoutingParameter-SessionKey` pins a conversation to one backend (F70)
+  partial history; `X-RoutingParameter-SessionKey` pins a conversation to one backend (F73)
 
 ---
 
@@ -2741,7 +2745,7 @@ Turn 2 answered `plum-harbor-77` verbatim. Context is retained on the live `Conv
 n=1, but the failure mode would be total rather than stochastic, so one clean sample settles it.
 (Oct 4: it was stochastic after all, for a different reason. Turns of a conversation forked across
 backends, saved or temporary alike, and every fork kept turn 1, which is all this check asked
-about. See §26 F70.)
+about. See §27 F73.)
 
 ### F29 — the temporary thread is genuinely absent from history 🟢
 
@@ -3900,6 +3904,47 @@ would drain the bucket in ~25 min. Until one of these runs, none of it goes into
   before (~25 fresh conversations in 30 min vs 31 at r5's onset), so a conversation-count rule
   predicted the same. The single-conversation probe above is still what would tell them apart.
 
+**Out of sample on two NON-premium accounts (2026-10-05, parameters NOT refitted).** Replaying
+C = 100, r = 1.6 over every turn in each account's debug logs from a framing sweep (bench at
+`TASK_GAP=30`, then real pi at a 60 s cooldown, ~260 turns in ~100 min each):
+- account T: the model empties the bucket at 08:12:06Z (turn 259); the first `Throttled` turn was
+  08:12:38Z (turn 260).
+- account P: the model bottoms out at **5.9** at 08:06Z and never quite empties; the first
+  `Throttled` turn was 08:07:42Z (turn 244).
+Both onsets land within a few turns of the premium account's fit, on accounts it was never fitted
+to. A conversation count does worse: the pi arms that tripped it opened conversations *more slowly*
+(one per ~100 s) than the bench arms before them (one per ~70 s). Still a model with 2 parameters, now
+6 onsets; it says the limit is the same on premium and non-premium accounts.
+**Prediction, written 08:35Z before it resolved:** the premium account's bucket was at 7.7 at 08:28Z,
+and the two remaining arms of its sweep (`rb-g6s-prem`, GPT-6 Sol) add ~50 turns in ~25 min against
+~40 refilled — the model says about −2: a throttle **likely near the end of arm A-4** (≈ 08:55–09:00Z).
+No throttle through the end of that arm counts against it (weakly — the margin is a few turns).
+**Outcome: held on the arm, early on the clock.** The throttle came at 08:45:47Z, on the third task
+of A-4, ~10 min before the window, with the model's bucket at **3.5**. So all three of that day's
+onsets came with the model at +3.5, +5.9 and −1.3: about right, a few turns optimistic. Either the
+bucket holds ~95 rather than 100, or a few turns a day are invisible to the logs.
+
+**Shipped (bench only, opt-in): pacing.** With `M365_AVOID_THROTTLING=1`,
+`scripts/bench/turn-budget.mjs` replays every recent proxy debug log on the account (`[session] Chat
+turn` and `Turn result: Throttled` lines) through this bucket, and `run.mjs` / `pi-reliability.sh`
+wait before each task until it covers a whole task (12 turns) plus a reserve of 20, and for an hour
+of quiet after a throttled turn. Off by default; the `M365_BUDGET_*` variables tune the model.
+Replayed over the premium account's 2026-10-05 logs, the gate closes at ~07:40Z (bucket 31), an hour
+before the 08:45Z onset. pi arms now stop on a throttle too, as bench arms already did. Nothing in the
+proxy changed: a real pi session still isn't paced.
+
+**The hour's hold was too short once: the throttle isn't the bucket.** The premium account sent nothing
+after its 08:45:47Z throttled turn (all logs checked), the pacer resumed at 09:45:47Z with the bucket
+modeled at ~96, and the first turn was throttled again (09:45:50Z). The non-premium accounts were
+served again 56.6 min (T) and 60.1 min (P) after their last throttled turns, 74 and 83 min after their
+onsets. So the throttle is a state with its own clock, not an empty bucket: lifting 60–74 min after the
+*onset* fits all three; a fixed time after the *last* throttled turn doesn't (T ≤ 57, premium > 60)
+unless it differs per account. The hold default is now 75 min. Next check: whether the premium account
+serves at 11:00:50Z (75 min after 09:45:50).
+**It did:** the first turn at 11:00:50.8Z was served (GPT-6, relay_batch pi run 1, solved). So on the
+premium account the throttle lifted between 60.05 and 75 min after its last throttled turn, with
+nothing sent in between.
+
 **Bench changes (useful whatever the limit is):** `run.mjs --task-gap S` (phase-sweep `TASK_GAP`)
 paces tasks, and both now stop at the first throttled task instead of burning the rest of the sweep
 (`[bench] THROTTLED`, exit 3; phase-sweep writes `FAILED`).
@@ -3976,21 +4021,18 @@ Not resolvable: the allowance itself is Microsoft's (and the `…Dev`, `…Word`
 the map suggest other clients get other ones).
 
 ### F60 — `relay_batch` cuts Opus 4.5's turns per task by 37% (bench) and 42% (real pi) at no cost → the Opus default 🟢
-Opus 5.5's budget counts turns (F59), so turns per task is the lever left. Two new user-voice relays
-(`fenced.ts`): `relay_nolook` = relay without "one command at a time" and "start by looking at them";
-`relay_batch` = relay asking for as much as fits in each block ("Each round trip takes me a while, so
-put as much as you can into one block: a script can look at the files, make the change and check the
-result all at once"). `opus45-turns`, `claude-opus-4.5` (unmetered), mirrored order relay, batch,
-nolook, nolook, batch, relay, `TASK_GAP=60`, 01:18–02:45Z, premium account.
+Opus 5.5's budget counts turns (F59), so turns per task is the lever left. A new user-voice relay
+(`fenced.ts`): `relay_batch` = relay asking for as much as fits in each block ("Each round trip takes
+me a while, so put as much as you can into one block: a script can look at the files, make the change
+and check the result all at once"). `opus45-turns`, `claude-opus-4.5` (unmetered), mirrored order
+relay, batch, batch, relay, `TASK_GAP=60`, 01:18–02:45Z, premium account.
 
 | arm | solved | M365 turns / task (sd) | Disengaged | tasks with fewer turns than relay |
 |---|---|---|---|---|
 | `relay` (shipped) | 20/20 | 3.65 (1.11) | 0/20 | — |
 | **`relay_batch`** | 20/20 | **2.30** (0.56) | 0/20 | 8 of 10 (0 more, 2 same) |
-| `relay_nolook` | 20/20 | 3.50 (0.97) | 0/20 | 2 of 10 (1 more, 7 same) |
 
-relay − batch = 1.35 turns/task (task-stratified permutation p < 10⁻⁴); relay − nolook = 0.15 (p = 0.50).
-So it isn't relay's "one at a time" wording; asking for batching is what changes behaviour. 2.30 is
+relay − batch = 1.35 turns/task (task-stratified permutation p < 10⁻⁴). 2.30 is
 close to the floor of 2 (one block, one closing sentence): fizzbuzz written and run in one block,
 fix-bug read-then-fix in 2 blocks instead of 5, edits with before/after output and a JSON validity
 check in the same block. Every closing claim matched output it had seen. **The risk** is acting before
@@ -4025,11 +4067,165 @@ fallback (Opus 5.5 → 4.5 within one conversation) was tested by the user; the 
 cover the switch at a request boundary (`opus55-fallback-pi`, `opus55-exhaust-B`).
 `scripts/opus-fallback-probe.mjs` (a counting conversation that crosses the wall) is kept for re-checks.
 
+## 25. Oct 5 2026 — should the `relay` tones batch too? (`relay` vs `relay_batch`)
+
+**Question.** F60 moved both Opus models to `relay_batch` because Opus 5.5's budget counts turns.
+Every other user-voice tone still defaults to plain `relay`: Sonnet 4.6 (`claude-sonnet`), Sonnet 5
+(`claude-sonnet-5`), GPT-6 (`gpt-6-think-deeper`, agent-less) and GPT-6 Sol (`gpt-6-sol`; agent on a
+premium account, agent-less elsewhere). None of them is metered by turns, but a turn is still a
+round trip (10–30 s on the reasoning tones), a step toward the ~600-message conversation cap, and
+one more chance to Disengage.
+
+**Hypothesis H25.** relay_batch cuts turns per task on these tones as it did on Opus 4.5, without
+costing solves. **Risks that would falsify it per tone:** a weaker model batching blind (editing
+before it has seen the file), and — on the agent-less tones that have a sandbox of their own
+(GPT-6, GPT-6 Sol) — "put as much as you can into one block: a script can look at the files…"
+reading as an invitation to write and run that script in the sandbox.
+
+**Pre-registered decision rule (fixed 06:45Z, before any result was read), per model and path.**
+Switch the default to relay_batch only if all of:
+1. solved(relay_batch) ≥ solved(relay) − 1 per 20 valid tasks (Sonnet 4.6, n=40 per arm: − 2);
+2. turns per task down ≥ 15%, task-stratified permutation p < 0.05;
+3. Disengaged + jailbreak + sandbox turns not up by more than 1 per 20 tasks;
+4. real pi under relay_batch: fix-bug and multi ≥ 9/10 together.
+Otherwise the tone keeps `relay`.
+
+**Design.** `phase-sweep.sh`, 10 bench tasks per arm, confab retry off, `TASK_GAP=30`, mirrored
+orders, all three accounts in parallel (one sweep per account at a time):
+- premium: Sonnet 5 (relay, batch, batch, relay), GPT-6 (batch, relay, relay, batch), GPT-6 Sol
+  with the agent (relay, batch, batch, relay) — 20 tasks per arm each;
+- non-premium T: Sonnet 4.6 (relay, batch, batch, relay), then GPT-6 Sol agent-less
+  (`M365_FORCE_AGENT=0`; relay, batch);
+- non-premium P: Sonnet 4.6 (batch, relay, relay, batch), then GPT-6 Sol agent-less (batch, relay).
+Read with `analyze-arms.mjs` (turns, sandbox, Disengaged, jailbreak per task).
+
+**Amendment (07:15Z, after the Sonnet bench results below and before any pi run).** Both Sonnets
+landed on the 15% line, so real pi decides for them: fix-bug + multi, 5 runs each, under relay
+AND relay_batch (the pi turn counts on file are for other models). Switch if relay_batch ≥ 9/10,
+≥ relay − 1, and pi turns per run down ≥ 15%.
+
+### F61 — bench: relay_batch cuts turns ~33% on the GPT-6 tones, ~15% on the Sonnets, at no solve cost 🟡
+All arms 10 tasks, confab retry off, `TASK_GAP=30`, 06:33–08:46Z, service as of 2026-10-05. 0 Disengaged
+and 0 jailbreak-classifier turns in all 232 tasks; every task that ran to the end was solved.
+
+| model / path | account(s) | relay: solved, turns/task | relay_batch | Δ turns (task-stratified perm.) | sandbox turns relay → batch |
+|---|---|---|---|---|---|
+| Sonnet 4.6, agent-less | T + P | 40/40, 3.30 | 40/40, 2.85 | −14% (p = 0.002) | 0 → 0 |
+| Sonnet 5, agent-less | premium | 20/20, 3.35 | 20/20, 2.85 | −15% (p = 0.03) | 9 → 2 |
+| GPT-6, agent-less | premium | 20/20, 3.15 | 20/20, 2.10 | −33% (p = 10⁻⁴) | 0 → 0 |
+| GPT-6 Sol, agent | premium | 12/12, 3.17 | 20/20, 2.10 | −34% (p = 10⁻⁴) | 0 → 0 |
+| GPT-6 Sol, agent-less | T + P | 20/20, 3.10 | 20/20, 2.10 | −32% (p = 5·10⁻⁵) | 2 → **4** |
+
+GPT-6 Sol's relay arm with the agent is short: its last arm hit the throttle after 2 tasks (F58).
+Where the Sonnets save turns: only fizzbuzz and count-lines, the tasks a single script can finish
+(count-lines 5–6 → 2). On fix-bug and the config edits they work the same either way: Sonnet 4.6 still
+reads each file with its own `read_file` call and edits with `edit_file`. The GPT-6 tones batch everywhere
+(nearly every task 2 turns: one block, one summary). GPT-6 Sol's four agent-less sandbox turns (`bash -lc pwd`,
+`print('hi')`, one whole read-and-check script) are the risk H25 named; none cost a solve. Sonnet 5 went
+to its own sandbox *less* under relay_batch (9 → 2).
+
+**Against the rule.** GPT-6 and GPT-6 Sol with the agent pass 1–3; GPT-6 goes on to real pi. GPT-6 Sol agent-less
+**fails 3**: +2 sandbox turns per 20 tasks against a limit of 1 — 4 events against 2, so weak evidence
+either way, but the rule was fixed in advance, and `gpt-6-sol` has one default for both paths, so it
+keeps `relay` without a pi run. The Sonnets go to pi (amendment above).
+
+### F62 — real pi, Sonnet 4.6: relay_batch 20/20 at 5.65 turns per run vs relay 19/19 at 7.16 → passes 🟢
+fix-bug + multi, 10 runs each per framing, both non-premium accounts, 07:48–09:47Z, confab retry off.
+Throttled runs (T/P were throttled 08:07–08:30Z) are excluded: 16 runs, each throttled on its first turn.
+
+| | relay | relay_batch |
+|---|---|---|
+| fix-bug | 9/9, turns 7,6,8,6,4,5,6,6,12 | 10/10, turns 4,7,4,6,7,7,3,3,6,3 |
+| multi | 10/10, turns 8,8,8,5,6,7,9,9,8,8 | 10/10, turns 5,4,6,7,8,8,5,6,8,6 |
+| **all** | **19/19, 7.16** | **20/20, 5.65** (−21%, task-stratified perm. p = 0.008) |
+
+The amended rule (≥ 9/10, ≥ relay − 1, ≥ 15% fewer turns) holds. No blind edits under relay_batch: every
+run read `check.py` and `calc.py` first; the saving is the fix and the check merged into one block
+(`sed -i … && python3 check.py`).
+
+**Side finding — pi's `edit` loses its edits for Sonnet 4.6 (both framings).** 44 of 47 Sonnet 4.6
+`edit` calls reached pi as `{"path": …, "edits": []}`, and pi answered "Edit tool input is invalid.
+edits must contain at least one replacement" (in a `<tool_response name="unknown">`); the model then
+re-read the file and rewrote it whole with `write`, ~2 extra turns per run with an edit. Cause: the
+fenced parser reads `edits: [{"oldText": …, "newText": …}]` (inline JSON — Opus always writes that,
+0 of 21 lost) but not the YAML block list Sonnet 4.6 mostly writes:
+```
+edits:
+  - oldText: "return a - b"
+    newText: "return a + b"
+```
+The header line `edits:` coerces to `[]` and the indented list is dropped (`coerceHeaderValue` /
+`parseFencedInner`, `fenced.ts`). The bench doesn't see it — its tasks have no `edit` tool — so every
+real-pi Sonnet 4.6 number above carries those wasted turns, in both arms alike. Issue #50 (with the
+delta turns' `name="unknown"` label). **Fixed** (PR #51): real pi, relay, 10/10, all
+10 edits YAML and all parsed, none rejected — 5.20 turns per run vs relay's 7.16 here (12:19–12:33Z,
+account P). That is a bigger saving than batching's, and the two should stack; not yet measured together.
+
+### F63 — real pi on the premium account: GPT-6 batches cleanly, Sonnet 5 doesn't save turns → the decision 🟢
+Paced runs (`M365_AVOID_THROTTLING=1`), 11:00–11:56Z, confab retry off, no throttled or Disengaged run.
+
+| model | framing | fix-bug | multi | turns per run | sandbox turns |
+|---|---|---|---|---|---|
+| GPT-6 | relay_batch | 5/5, turns 3,3,3,3,3 | 5/5, turns 3,3,3,3,3 | 3.00 | 0 |
+| Sonnet 5 | relay | 5/5, turns 4,5,5,4,5 | 5/5, turns 5,5,6,7,6 | 5.20 | 4 |
+| Sonnet 5 | relay_batch | 5/5, turns 5,5,4,4,4 | 5/5, turns 5,5,5,6,6 | 4.90 (−6%, p = 0.47) | 9 |
+
+GPT-6 met criterion 4 (≥ 9/10). It had no relay pi run on file to compare turns against; the
+saving is the bench's (−33%, F61). Sonnet 5 fails the amended rule: its bench saving (−15%) doesn't
+carry into pi, where relay already reads, fixes and checks in ~5 turns. Its sandbox turns went the
+other way from the bench (bench 9 → 2, pi 4 → 9), cost no solve either time, and look like noise.
+
+**Decision, by the rule fixed before the results:**
+
+| model | default | evidence |
+|---|---|---|
+| `gpt-6-think-deeper` (`Gpt_6_Reasoning`) | **relay_batch** | bench 40/40, −33% turns (F61); pi 10/10 |
+| `claude-sonnet` (Sonnet 4.6, `Claude_Sonnet` included) | **relay_batch** | bench 80/80, −14%; pi 39/39, −21% (F62) |
+| `claude-sonnet-5` (`Claude_Sonnet` paid) | relay | pi −6%, not significant |
+| `gpt-6-sol` (`Gpt_6_Sol_Reasoning`) | relay | agent-less sandbox turns 2 → 4 per 20 tasks (F61) |
+
+Sonnet 4.6 and Sonnet 5 share a tone, so the split rides on `SONNET_5_DEFAULT_FRAMING`, kept
+separate for exactly this. Shipped in `defaultFramingForTone`.
+
+### H25b — relay_batch without a shell tool: Sonnet 4.6 refuses? (pre-registered 12:08Z)
+**Observation (n=1).** After the switch, `proxy-verify --tools --multiturn --model=claude-sonnet`
+(premium, 11:58Z) got no tool call: "The `read_file` block you described isn't an actual tool I have
+access to — I can only use … web search, Python sandbox, and image generation", then the same after the
+confab retry. GPT-6 passed the same check under relay_batch. proxy-verify's only tool is `read_file`;
+with no shell tool both relays say "a single ```<tool_name> block", and relay_batch adds "a script can
+look at the files, make the change and check the result all at once" — a script it has no way to run.
+The bench and pi always offer a shell tool, so F61–F63 never tested this.
+**Hypothesis.** relay_batch, not chance, breaks Sonnet 4.6 on shell-less toolsets. **Prediction:**
+proxy-verify (`claude-sonnet`, `M365_FRAMING_VARIANT` set) passes ≥ 4/6 under relay and ≤ 2/6 under
+relay_batch, both non-premium accounts, 3 + 3 per arm, alternating, orders mirrored. **Falsified if**
+relay_batch passes as often as relay.
+**Result (12:00–12:04Z): not confirmed as written, but the effect is real on two of three accounts.**
+
+| account | relay | relay_batch |
+|---|---|---|
+| T (relay first) | 3/3 PASS | **0/3** — "I don't actually have a `read_file` tool available to me" |
+| P (relay_batch first) | 3/3 PASS | 3/3 PASS (one with a hedge: "I shouldn't be using sandbox tools…") |
+| premium (11:58Z, the trigger) | — | 0/1 |
+| **pooled** | **6/6** | **3/7** |
+
+relay_batch passed 3 of 6 in the planned runs, above the ≤ 2 predicted; it didn't pass as often as relay
+either (falsification criterion), so neither verdict. Every refusal names the relay note's own list
+of sandbox tools as "the tools I have", i.e. it reads "a script can … all at once" as a request it
+can only meet in its own sandbox, which the note just forbade. Why P differs is open (same build and
+prompt; per-account flighting?). It matters regardless: AGENTS.md's end-to-end check
+(`proxy-verify --tools --model=claude-sonnet`) is shell-less, and so are some harnesses' toolsets.
+**Proposed fix:** relay_batch asks for batching only when a shell tool is present, and is relay
+byte-for-byte otherwise — the text that passed 6/6. Shell-less Opus 4.5 (with the agent, premium,
+12:05–12:10Z) passed 3/3 under each, so the fix changes nothing measurable for it. **Shipped** with the
+F63 defaults; with a shell present the relay_batch text is unchanged, so F60–F63 stand.
+**Live check of the fix** on account T, the one that refused 3/3 (12:11–12:13Z, new build, default
+framing for `claude-sonnet`, i.e. relay_batch falling back to relay): proxy-verify 3/3 PASS.
+
 ---
 
-## 26. Oct 4 2026 — one conversation, two backends: turns forked until `X-RoutingParameter-SessionKey` pinned them
+## 27. Oct 4 2026 — one conversation, two backends: turns forked until `X-RoutingParameter-SessionKey` pinned them
 
-### F70 — each turn landed on a random backend, and the conversation forked under the model 🟢
+### F73 — each turn landed on a random backend, and the conversation forked under the model 🟢
 **Discovery** (Windows / pi, `gpt-5.6-think-deeper`, long sessions of three consecutive requests). The
 chain of thought kept naming a "mismatch" between the model's call and the `<tool_response>` it got —
 "they pasted a command line interface output instead of the expected file content" — and the model

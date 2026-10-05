@@ -46,13 +46,20 @@ Flags: `--label <name>` (names the output), `--tasks fizzbuzz,fix-bug` (subset),
 `--max-turns 12`, `--repeat 3` (n per task for a real rate), `--image python:3-slim`,
 `--task-gap 30` (seconds between tasks, see below), `--no-stop-on-throttle`.
 
-Every task is a fresh M365 conversation, and the account throttles on the rate of those (F13); an
-arm on its own starts ~2 a minute. How fast is too fast isn't pinned down: `claude-opus-4.5` sweeps
-tripped `PerUserThrottled` at ~45 per 30 minutes three times on 2026-10-04, while earlier Sonnet,
-GPT-6 and GPT-6 Sol sweeps on the same account ran ~50 per 30 minutes without it (hypotheses §24
-F58). `--task-gap 30` (phase-sweep: `TASK_GAP=30`) halves the rate. The first throttled task stops
-the run (`[bench] THROTTLED`, exit 3) and phase-sweep stops the sweep: everything after it would
-fail the same way and keep the throttle alive. Wait it out; a fresh login doesn't clear it. The Opus
+Every task is a fresh M365 conversation, and every turn draws on the account's throttle budget: a
+bucket of ~100 turns that refills at ~1.6 a minute fits all seven `PerUserThrottled` onsets on record,
+premium and non-premium accounts alike (hypotheses §24 F58). The first throttled task stops the
+run (`[bench] THROTTLED`, exit 3; pi-reliability: `[pi-rel] THROTTLED`, exit 3) and phase-sweep stops
+the sweep: everything after it would fail the same way and keep the throttle alive. Wait it out; a
+fresh login doesn't clear it. `--task-gap S` (phase-sweep: `TASK_GAP=S`) slows a run down by a fixed gap.
+
+To avoid the throttle instead, set **`M365_AVOID_THROTTLING=1`** (off by default). The bench then waits
+before every task (and every real-pi run) until the proxy's debug logs say the bucket covers a whole
+task plus a reserve of 20 turns, and for 75 minutes of quiet after a throttled turn (`turn-budget.mjs`).
+A long sweep then runs at the account's pace, ~1.6 turns a minute once the bucket is low. It needs a
+proxy with `M365_DEBUG=1`, which phase-sweep always sets; turns it can't see (the web client, another
+host, a proxy without debug logs) aren't counted. `node scripts/bench/turn-budget.mjs status` shows
+where the bucket stands, and the `M365_BUDGET_*` variables in its header tune the model. The Opus
 priority-access wall (`claude-opus`: 40 turns a day) stops it the same way, as `[bench] PRIORITY
 ACCESS EXHAUSTED` (exit 4); `analyze-arms.mjs` counts the tasks it took as `INVALID(quota)`.
 

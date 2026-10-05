@@ -282,7 +282,7 @@ without NixOS: `nix run github:cramt/m365-copilot-proxy -- 4141`.
 
 | Model ID | M365 Tone | Description |
 |---|---|---|
-| `gpt-6-think-deeper` | Gpt_6_Reasoning | GPT-6 reasoning. **Needs a paid/premium Copilot seat** (see below); 30/30 on the bench (agent-less, `relay` framing) |
+| `gpt-6-think-deeper` | Gpt_6_Reasoning | GPT-6 reasoning. **Needs a paid/premium Copilot seat** (see below); 30/30 on the bench (agent-less, `relay` framing). Defaults to `relay_batch`: 20/20 at 2.1 turns per task (relay: 3.2), 10/10 driving real pi |
 | `gpt-6-sol` | Gpt_6_Sol_Reasoning | GPT-6 Sol ("GPT 6.0 Sol" in the web UI). **Works on every account**, no paid seat needed; uses the tool agent only on a premium account (see below). With the `relay` framing: 30/30 on the bench with the agent, 60/60 without, 21/21 driving real pi |
 | `gpt-5.6-think-deeper` | Gpt_5_6_Reasoning | GPT-5.6 reasoning — 27/30 on the bench, tied with `gpt-5.5-think-deeper` |
 | `gpt-5.6` / `gpt-5.6-quick` | Gpt_5_6_Chat | GPT-5.6 fast ("GPT 5.6 Quick response" in the web UI). **Weak at tool calling** — 7/30 on the bench (see below) |
@@ -291,7 +291,7 @@ without NixOS: `nix run github:cramt/m365-copilot-proxy -- 4141`.
 | `m365-copilot` / `auto` | magic | Auto-routing — high-variance at tool-calling (confabulates; see below) |
 | `quick` | Gpt_5_5_Chat | Alias of `gpt-5.5` (its old `Gpt_Quick` tone was retired — see below) |
 | `think-deeper` | Gpt_5_5_Reasoning | Alias of `gpt-5.5-think-deeper` (its old `Gpt_Reasoning` tone was retired) |
-| `claude` / `claude-sonnet` / `claude-sonnet-4.6` | Claude_Sonnet | Real Anthropic Claude Sonnet 4.6 (agent-less path) — 78/90 on the bench with the `relay` framing (47/76 with `baseline`). `claude-sonnet-4.5` is kept as an alias |
+| `claude` / `claude-sonnet` / `claude-sonnet-4.6` | Claude_Sonnet | Real Anthropic Claude Sonnet 4.6 (agent-less path) — 78/90 on the bench with the `relay` framing (47/76 with `baseline`). Defaults to `relay_batch`: 40/40, and 21% fewer turns driving real pi (20/20). `claude-sonnet-4.5` is kept as an alias |
 | `claude-sonnet-5` | Claude_Sonnet (paid scenario) | Claude Sonnet 5. **Needs a paid/premium Copilot seat** — same tone as above, the scenario picks the model. 27/30 on the bench with the `relay` framing (6/40 with `baseline`; see below) |
 | `claude-sonnet-think-deeper` | Claude_Sonnet_Reasoning | Claude reasoning |
 | `claude-opus` / `claude-opus-5.5` | Claude_Opus (paid scenario) | Claude Opus 5.5. **Needs a paid/premium Copilot seat** and has a small separate quota: 40 turns a day (see below). 10/10 on the bench with `relay`; defaults to `relay_batch`. `claude-opus-5` is kept as an alias |
@@ -356,12 +356,14 @@ entitlement gate; it does not imply a budget. GPT-6 has no priority-access allow
 throttled by the same per-conversation cap and thread-rate governor as every other model, so
 none of the Opus advice about rationing turns applies.
 
-**Tool calls go without the tool agent, and with the `relay` framing.** With the Copilot Studio
+**Tool calls go without the tool agent, and with a `relay` framing.** With the Copilot Studio
 tool agent attached, `Gpt_6_Reasoning` doesn't serve at all (a canned apology, on every account),
 so the proxy sends GPT-6 tool requests agent-less, as it does Claude's (#41). Agent-less, under the
 `baseline` framing GPT-6 worked in M365's own code interpreter instead of calling your tools:
-0/30 on the bench. Under `relay` it scored **30/30** (confab-retry off, 2026-10-01), and 5/5 driving real pi. Both are the
-defaults now; `M365_FORCE_AGENT=1` and `M365_FRAMING_VARIANT` still override them.
+0/30 on the bench. Under `relay` it scored **30/30** (confab-retry off, 2026-10-01), and 5/5 driving
+real pi. The default is now `relay_batch`, which asks it to put as much as it can into each block:
+20/20 on the bench at 2.1 turns per task against relay's 3.2, and 10/10 through real pi at 3 turns
+per run (hypotheses §25). `M365_FORCE_AGENT=1` and `M365_FRAMING_VARIANT` still override both.
 `gpt-5.5-think-deeper` remains the recommended default and the no-model fallback, because it needs
 no entitlement: making GPT-6 the default would hand most seats a model they can't reach.
 
@@ -386,7 +388,8 @@ the proxy treats that as a transient and retries instead of dropping the agent.
 to a file it made. Turning off M365's code interpreter (`M365_NO_CODE_INTERPRETER=1`) doesn't stop
 it. The `relay` framing does: on the bench it solved 60/60 agent-less, against 0–6/10 for every
 other framing, and 30/30 with the agent (the others 3–9/10). Through real pi it solved 21/21 runs
-across both kinds of account. `relay` is the default on both paths.
+across both kinds of account. `relay` is the default on both paths: `relay_batch` saved a third of
+the turns, but without the agent it sent GPT-6 Sol to its sandbox twice as often (hypotheses §25).
 Details: [hypotheses §23](docs/hypotheses.md).
 
 ### Sonnet 5 (`claude-sonnet-5`) — its own sandbox, and the `relay` framing
@@ -398,11 +401,13 @@ Sonnet 5 arrives with **its own tools** (`bash_tool`, `create_file`, …) runnin
 sandbox (`/home/claude`) that cannot see your files, and it reads the proxy's usual
 `<system>`-tagged tool framing as a prompt injection — so with that framing it inspects its own
 empty sandbox and reports that your files don't exist (6/40 on the bench). The proxy therefore
-gives both Sonnet models a different default framing, `relay`: a plain note asking it to guide you through your
-terminal one command at a time, which also tells it the sandbox is the wrong machine. That
-scores **27/30** on the bench (from 5/30) and solved **5/5** fix-bug runs through real pi.
-Sonnet 4.6 uses `relay` too (78/90 vs 47/76). Override with `M365_FRAMING_VARIANT` as usual.
-Details: hypotheses §21.
+gives both Sonnet models a user-voice framing instead. Sonnet 5's default is `relay`: a plain note
+asking it to guide you through your terminal one command at a time, which also tells it the sandbox
+is the wrong machine. That scores **27/30** on the bench (from 5/30) and solved **5/5** fix-bug runs
+through real pi. Sonnet 4.6 beat `baseline` with it too (78/90 vs 47/76), and now defaults to
+`relay_batch`, the same note asking it to put as much as it can into each block: same solves, 21%
+fewer turns through real pi (39/39). On Sonnet 5 that saved only 6% in pi, so it stays on `relay`.
+Override with `M365_FRAMING_VARIANT` as usual. Details: hypotheses §21, §25.
 
 ### Opus (`claude-opus`, `claude-opus-4.5`) — two models, one with a small quota
 
