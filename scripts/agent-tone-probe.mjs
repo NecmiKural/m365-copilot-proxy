@@ -90,7 +90,10 @@ export const DEFAULT_CELLS = [
   // One tone, two models agent-less: Sonnet 4.6 included, Sonnet 5 paid (§21).
   { tone: "Claude_Sonnet", note: "claude-sonnet (Sonnet 4.6 agent-less)", ...INCLUDED },
   { tone: "Claude_Sonnet", note: "claude-sonnet-5 (Sonnet 5 agent-less)", ...PAID },
-  { tone: "Claude_Opus", note: "claude-opus (paid) — may spend priority access" },
+  // One tone, two models with the agent: Opus 4.5 included (premium only; the
+  // agent is its only route), Opus 5.5 paid (§24).
+  { tone: "Claude_Opus", note: "claude-opus-4.5 (Opus 4.5, premium only)", ...INCLUDED },
+  { tone: "Claude_Opus", note: "claude-opus (Opus 5.5, paid) — spends priority access", ...PAID },
   { tone: CONTROL_TONE, note: "CONTROL: invalid tone" },
 ];
 
@@ -388,7 +391,7 @@ async function main(argv) {
     results.push(row);
     for (const line of cellLines(row)) console.log(line);
     if ([agent, baseline].some((t) => t?.result?.value === "Throttled")) {
-      console.log(`\n[agent-tone] THROTTLED (${agent.result?.errorCode ?? baseline?.result?.errorCode}) — stopping; later cells would read as failures. A fresh login clears it (AGENTS.md).`);
+      console.log(`\n[agent-tone] THROTTLED (${agent.result?.errorCode ?? baseline?.result?.errorCode}) — stopping; later cells would read as failures. Wait it out: a fresh login doesn't clear it (the throttle is keyed on the account's oid, AGENTS.md).`);
       stoppedEarly = true;
       break;
     }

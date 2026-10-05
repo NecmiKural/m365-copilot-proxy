@@ -7,7 +7,18 @@
 //
 // Usage:
 //   node scripts/bench/run.mjs --base-url http://localhost:4141/v1 --model m365-copilot \
-//       [--label magic-json] [--tasks fizzbuzz,fix-bug] [--max-turns 12] [--repeat 1]
+//       [--label magic-json] [--tasks fizzbuzz,fix-bug] [--max-turns 12] [--repeat 1] \
+//       [--task-gap 30] [--no-stop-on-throttle]
+//
+// Every task is a fresh M365 conversation, and the account throttles on the RATE
+// of fresh conversations (F13). --task-gap S waits S seconds between tasks to
+// slow that down (claude-opus-4.5 sweeps tripped it at ~45 per 30 min on
+// 2026-10-04, other models' sweeps didn't at ~50 — hypotheses §24 F58). Once a
+// task comes back throttled (HTTP 429 m365_throttled) the run stops: every later
+// task would fail the same way and keep the throttle alive.
+// It prints "[bench] THROTTLED" and exits 3; the scorecard covers the tasks run.
+// An Opus priority-access 429 (priority_access_exhausted) stops it the same
+// way, as "[bench] PRIORITY ACCESS EXHAUSTED", exit 4.
 //
 // ⚠ Executes MODEL-GENERATED shell in a temp dir (model-driven RCE by design).
 //   Tasks are benign; still, run on a throwaway box if paranoid.
@@ -30,6 +41,12 @@ const REPEAT = Number(opt("--repeat", "1"));
 const PICK = opt("--tasks", "");
 const tasks = PICK ? TASKS.filter(t => PICK.split(",").includes(t.name)) : TASKS;
 const IMAGE = opt("--image", "python:3-slim");
+const TASK_GAP_MS = Number(opt("--task-gap", "0")) * 1000;
+const STOP_ON_THROTTLE = !args.includes("--no-stop-on-throttle");
+const THROTTLED = /HTTP 429|m365_throttled/;
+// The Opus priority-access wall is a 429 too, but a different one: it lifts at
+// midnight UTC (weekly: Monday), not after a rest, and only for that model.
+const PRIORITY_EXHAUSTED = /priority_access_exhausted|priority access to/i;
 
 // --- Docker sandbox: model-generated commands run in a --network none container
 // with ONLY the task dir mounted, as the host uid (so file ops stay owner-clean).
@@ -181,14 +198,26 @@ async function runTask(task) {
 }
 
 // --- run ---
-console.log(`[bench] label=${LABEL} model=${MODEL} base=${BASE} tasks=${tasks.map(t=>t.name).join(",")} repeat=${REPEAT}`);
+console.log(`[bench] label=${LABEL} model=${MODEL} base=${BASE} tasks=${tasks.map(t=>t.name).join(",")} repeat=${REPEAT}${TASK_GAP_MS ? ` task-gap=${TASK_GAP_MS / 1000}s` : ""}`);
 const rows = [];
-for (let rep = 0; rep < REPEAT; rep++) {
+let throttled = false;
+let exhausted = false;
+run: for (let rep = 0; rep < REPEAT; rep++) {
   for (const task of tasks) {
+    if (rows.length > 0) await new Promise(rr => setTimeout(rr, Math.max(1500, TASK_GAP_MS)));
     const r = await runTask(task);
     rows.push({ ...r, rep });
     console.log(`  ${r.task.padEnd(14)} ${r.outcome.padEnd(14)} tools=${r.toolTurns} msgs=${r.msgs} ${Math.round(r.elapsedMs/1000)}s ${r.error ? "(" + r.error.slice(0,50) + ")" : ""} ${r.solved ? "" : "answer=" + JSON.stringify(r.finalAnswer)}`);
-    await new Promise(rr => setTimeout(rr, 1500));
+    if (STOP_ON_THROTTLE && r.error && PRIORITY_EXHAUSTED.test(r.error)) {
+      exhausted = true;
+      console.log(`[bench] PRIORITY ACCESS EXHAUSTED — stopping after ${rows.length} task(s); the model's budget is used up until the reset`);
+      break run;
+    }
+    if (STOP_ON_THROTTLE && r.error && THROTTLED.test(r.error)) {
+      throttled = true;
+      console.log(`[bench] THROTTLED — stopping after ${rows.length} task(s); the rest would only fail the same way and keep the throttle alive`);
+      break run;
+    }
   }
 }
 
@@ -201,5 +230,7 @@ const totalMsgs = rows.reduce((s, r) => s + r.msgs, 0);
 console.log(`\n[bench] === SCORECARD: ${LABEL} ===`);
 console.log(`[bench] SOLVED ${solved}/${rows.length} (${pct}%)  |  outcomes: ${Object.entries(byOutcome).map(([k,v])=>`${k}=${v}`).join(" ")}`);
 console.log(`[bench] avg tool-calls/task: ${avgTools}  |  M365 messages spent: ${totalMsgs}`);
-writeFileSync(join(OUT, `${LABEL}-${TS}.json`), JSON.stringify({ label: LABEL, model: MODEL, base: BASE, ts: TS, pct, solved, total: rows.length, byOutcome, avgTools, totalMsgs, system: SYSTEM, rows }, null, 2));
+writeFileSync(join(OUT, `${LABEL}-${TS}.json`), JSON.stringify({ label: LABEL, model: MODEL, base: BASE, ts: TS, pct, solved, total: rows.length, byOutcome, avgTools, totalMsgs, throttled, exhausted, system: SYSTEM, rows }, null, 2));
 console.log(`[bench] → scripts/bench/out/${LABEL}-${TS}.json`);
+if (throttled) process.exit(3);
+if (exhausted) process.exit(4);

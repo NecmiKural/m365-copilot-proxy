@@ -43,7 +43,18 @@ Environment variables set before `nix develop` carry through to the script. Dock
 the host: the bench needs its daemon, and your user in its group.
 
 Flags: `--label <name>` (names the output), `--tasks fizzbuzz,fix-bug` (subset),
-`--max-turns 12`, `--repeat 3` (n per task for a real rate), `--image python:3-slim`.
+`--max-turns 12`, `--repeat 3` (n per task for a real rate), `--image python:3-slim`,
+`--task-gap 30` (seconds between tasks, see below), `--no-stop-on-throttle`.
+
+Every task is a fresh M365 conversation, and the account throttles on the rate of those (F13); an
+arm on its own starts ~2 a minute. How fast is too fast isn't pinned down: `claude-opus-4.5` sweeps
+tripped `PerUserThrottled` at ~45 per 30 minutes three times on 2026-10-04, while earlier Sonnet,
+GPT-6 and GPT-6 Sol sweeps on the same account ran ~50 per 30 minutes without it (hypotheses §24
+F58). `--task-gap 30` (phase-sweep: `TASK_GAP=30`) halves the rate. The first throttled task stops
+the run (`[bench] THROTTLED`, exit 3) and phase-sweep stops the sweep: everything after it would
+fail the same way and keep the throttle alive. Wait it out; a fresh login doesn't clear it. The Opus
+priority-access wall (`claude-opus`: 40 turns a day) stops it the same way, as `[bench] PRIORITY
+ACCESS EXHAUSTED` (exit 4); `analyze-arms.mjs` counts the tasks it took as `INVALID(quota)`.
 
 ## Comparing levers (the whole point)
 
