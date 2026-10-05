@@ -305,6 +305,9 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Şu anda dosya sistemine erişip `notlar.pdf` dosyasını kontrol edemiyorum.")).toBe(true);
     // Missed in the long-session sweep (step 2, baseline).
     expect(looksLikeConfabulation("Bu oturumda dosya sistemi ve komut çalıştırma araçları şu anda erişilebilir değil. Bu nedenle dosyaları güvenilir biçimde düzenleyip testleri gerçekten çalıştırdığımı gösteremem.")).toBe(true);
+    // Missed on the fixed build (pdf, baseline): passive, after one missing library; no file was made.
+    expect(looksLikeConfabulation("PDF oluşturma işlemi tamamlanamadı. WeasyPrint kurulumu, gerekli `libgobject-2.0-0` sistem kitaplığını bulamadı.")).toBe(true);
+    expect(looksLikeConfabulation("notlar.pdf oluşturulamadı.")).toBe(true);
   });
 
   it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
@@ -331,6 +334,9 @@ describe("looksLikeConfabulation", () => {
     // Third person / conditional: the harness or a tool, not the model, can't do it.
     expect(looksLikeConfabulation("Harness dosyayı kontrol edemiyorsa proxy hata döner.")).toBe(false);
     expect(looksLikeConfabulation("Bu araç kullanılamıyorsa kurulum adımlarına bakın.")).toBe(false);
+    // Suffixed passives describe code paths, not this task.
+    expect(looksLikeConfabulation("Kurulum tamamlanamadıysa proxy 502 döner.")).toBe(false);
+    expect(looksLikeConfabulation("Dosya oluşturulamadığında hata günlüğe yazılır.")).toBe(false);
   });
 
   it("does NOT flag genuine final answers or normal prose", () => {
@@ -428,36 +434,6 @@ describe("tool-result labelling", () => {
     const out = formatToolResponse({ role: "tool", tool_call_id: "b1", content: "a.mjs" }, history);
     expect(out).toContain(`command="for f in a.mjs; do printf '%s\\\\n' \\"$f\\"; done"`);
     expect(out).not.toContain("'$f'"); // "$f" and '$f' are different shell commands
-  });
-});
-
-describe("follow-up requests", () => {
-  // Long pi sessions: follow-ups ended with a summary of the FIRST request, and a
-  // run drifted back into it; the framing's "the task" anchors to the first request.
-  it("marks only the newest request when a history holds several (M365_FOLLOWUP_NOTE=1)", async () => {
-    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
-    process.env.M365_FOLLOWUP_NOTE = "1";
-    try {
-      const out = formatMessages([
-        { role: "user", content: "add a remove command" },
-        { role: "assistant", content: "Done." },
-        { role: "user", content: "now add priorities" },
-      ]);
-      expect(out.split(FOLLOW_UP_NOTE)).toHaveLength(2); // exactly one note
-      expect(out.indexOf(FOLLOW_UP_NOTE)).toBeGreaterThan(out.indexOf("Done."));
-      expect(out).toContain(`${FOLLOW_UP_NOTE}\nnow add priorities`);
-      expect(formatMessages([{ role: "user", content: "only one" }])).not.toContain(FOLLOW_UP_NOTE);
-    } finally {
-      delete process.env.M365_FOLLOWUP_NOTE;
-    }
-  });
-
-  it("is off by default until measured", async () => {
-    const { formatMessages, FOLLOW_UP_NOTE } = await import("./tools.js");
-    const out = formatMessages([
-      { role: "user", content: "a" }, { role: "assistant", content: "ok" }, { role: "user", content: "b" },
-    ]);
-    expect(out).not.toContain(FOLLOW_UP_NOTE);
   });
 });
 

@@ -48,7 +48,9 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   framing variants and thread poisoning not supported (F59); documents still open (F60); sessions
   sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
   that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
-  request, and concurrent sessions with one opening message collided (F63, fixed)
+  request, and concurrent sessions with one opening message collided (F63, fixed); each turn landed
+  on a random backend and the conversation forked under the model, pinned with a routing header (F64);
+  a leading "<" streamed twice (F65)
 
 ---
 
@@ -2725,6 +2727,9 @@ N with no idea what turns 1..N-1 said.
 Two turns on one temporary conversation: turn 1 supplies a codeword, turn 2 asks for it back.
 Turn 2 answered `plum-harbor-77` verbatim. Context is retained on the live `ConversationId`.
 n=1, but the failure mode would be total rather than stochastic, so one clean sample settles it.
+(Oct 4: it was stochastic after all, for a different reason. Turns of a conversation forked across
+backends, saved or temporary alike, and every fork kept turn 1, which is all this check asked
+about. See §24 F64.)
 
 ### F29 — the temporary thread is genuinely absent from history 🟢
 
@@ -3815,7 +3820,7 @@ the user because the one forcing retry didn't turn them (the F62 conflict). Cave
 198 are English and about 6 of those are genuine answers (the prompts were Turkish; the rest are
 give-ups, hand-backs and two unparsed tool calls), which is why the English patterns stay narrow.
 
-### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (findings) / 🔴 (the note's effect: unmeasured)
+### F63 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (the anchoring was F64's fork; the note is removed)
 **Long-session test** (Oct 4; real pi, `gpt-5.6-think-deeper`; one pi session per run with three
 consecutive requests — a 4-file feature, a follow-up feature, a PDF — each checked by a hidden
 verifier outside the project, validated beforehand on a reference solution, the untouched template
@@ -3836,6 +3841,9 @@ priorities… concurrent changes", went back to finishing the first request and 
 step failed. Inferred mechanism: every framing says to report "when the task is complete", "the
 task" is the session's first request, and follow-ups arrive as bare `<user>` blocks. **Candidate:**
 `FOLLOW_UP_NOTE` on the newest request, opt-in (`M365_FOLLOWUP_NOTE=1`) — unmeasured, see below.
+**Resolved (Oct 5): the inferred mechanism was wrong.** The follow-up steps ran on forked
+conversations that held part of step 1 (F64), so step 1 looked unfinished. On the fixed build every
+follow-up summarised its own request with the note off (6/6) and on (6/6); the note is removed.
 
 **Labels misdescribed tool calls** (fixed, default). `formatToolResponse` labelled file tools
 `command="todo.mjs"` and swapped `"` for `'` (`"$f"` shown as `'$f'`, a different shell command).
@@ -3866,3 +3874,98 @@ messages); probes still throttled at +50 and +52 min, clear at +70 min; throttle
 of double load. Relay's one-command-per-turn style takes 2–6× the messages per task, which matters
 if the budget is message-weighted. **Probe:** the long-session A/B (note on vs off) as ONE job on a
 fully rested account, with a pre-flight check that no other measurement process is running.
+**Ran** (22:33, rested 12 h, one job): throttled at 22:49 after 4 sessions (~110 messages in 16
+min). Follow-ups on their own topic: note on 1/3, off 1/4 — inconclusive, and confounded: these
+sessions ran on forked conversations (F64).
+
+### F64 — each turn landed on a random backend, and the conversation forked; a routing header pins it 🟢
+**Discovery** (Oct 4, the clean re-run of F63's A/B). The chain of thought kept naming a "mismatch"
+between the model's call and the `<tool_response>` it got — "they pasted a command line interface
+output instead of the expected file content" — and the model read `todo.mjs` four times in one step.
+The final `type:2` item carries the server's own count of the conversation's user messages
+(`turnCount`, `throttling.numUserMessagesInConversation`). Over the 17 turns of that step it ran
+1,2,3,2,4,5,3,6,4,5,6,7,7,8,8,9,9: the turns were landing on two diverging copies of the
+conversation that shared only the first turn.
+
+**Scale** (`scripts/fork-scan.mjs` over the proxy debug logs on this machine, Oct 2–4; turns joined
+across files by ConversationId, so a long session logged one file per request reads as one
+conversation): 77 of 116 conversations with 3+ turns forked, and 455 of 852 turns ran on an older
+copy; in the long sessions 9 of 10 and 86% of turns. It is not timing: in the Oct 4 logs a turn sent
+under 1 s after the previous one closed was off the thread as often as a later one (46% and 46%). On
+off-thread turns the model repeated a tool call it had already made for the same request 21% of the
+time (1% on the full thread) and reasoned about mismatched responses 10% of the time (1%). (The fix
+commit quotes 70/135, 477/852, 18% and 9% from a first version of the scan that counted every
+request's log separately.)
+
+**Probe** (`scripts/fork-probe.mjs`, `gpt-5.6-think-deeper` with the agent; 6 turns each). Every
+message carries a fresh word and asks for all the words so far, so the reply shows what the model
+can see:
+
+| arm | conversations forked | turns off the thread | replies missing a word |
+|---|---|---|---|
+| temporary chat (the default) | 2/3 | 7/18 | 7/18 |
+| saved chat | 3/3 | 11/18 | 11/18 |
+| temporary chat + routing key | **0/4** | **0/24** | **0/24** |
+
+The replies list exactly the words of their copy (turn 4: "willow cobalt", missing turns 2–3; turn
+6: "willow biscuit maple violet", missing 4–5). Saved chat forks too, so `disableMemory=1` is not the
+cause, and F28's two-turn check could not have seen this: every fork here keeps turn 1.
+
+**Mechanism.** Handshake-only connections (no chat message, so no quota and no thread) on one
+ConversationId: `x-calculatedbetarget` named 4–6 different backends in 6 connections, pods in
+Switzerland North and Sweden Central, and no cookie came back. With the header
+`X-RoutingParameter-SessionKey: <ConversationId>`: 1 backend in 6, twice (a different one per
+conversation). The same key as a query parameter does not pin; neither does `X-AnchorMailbox` (OID or
+UPN) or a fixed `chatsessionid`. Inferred: each region keeps its own copy of a live conversation.
+**Fixed:** the proxy sends the header with the conversation id on every turn
+(`buildCopilotWebSocketHeaders`; `M365_NO_SESSION_ROUTING=1` leaves it out).
+
+**What this re-opens.** Before the fix, every multi-turn measurement ran with about half its turns on
+a partial history. Arms were compared fairly (they forked alike), but absolute numbers and some
+mechanisms are suspect: relay's extra turns per task (F62, F63), the follow-up anchoring (F63's
+follow-up steps ran far off the thread — the 18th message on a copy that held 10 — so step 1 looked
+unfinished), mid-task "my tools aren't working" give-ups, and F63 replies blamed on the concurrency
+hazard ("What would you like me to do with this CLI code?" is also what a turn that lost the task
+says).
+
+**Validated in real pi** (Oct 5, 00:41; F63's long-session test on the fixed build, relay, note on vs
+off, 3 sessions each, interleaved, one job): 0 of 6 sessions forked (0 of 125 turns); **18/18 steps
+passed** in both arms; every follow-up summarised its own request (12/12, note or no note); no
+"mismatch" reasoning and no call repeated within a request. 5.9 tool calls and 48 s per step, against
+8.4 and 58 (F63, forked) and 12.8 and 92 (the forked re-run of Oct 4, 22:33). The whole run took 19
+minutes and did not trip the throttle. Two give-up turns, both turned by the forcing retry.
+**GPT-5.5 Think Deeper on the fixed build** (Oct 5, 01:54; real pi, baseline vs relay via
+`M365_FRAMING_FILE`, interleaved; .pdf and .docx in Turkish as F62, write-code and fix-bug in
+English; × 2): baseline **8/8**, relay 8/8, **0 give-up turns in either arm**. Relay took about twice
+the calls (write-code 4 vs 1, pdf 7.5 vs 4). The run first scored baseline 7/8: its "failure" was a
+valid one-page PDF 1.7 (pandoc + xelatex) whose page object sits in a compressed object stream, where
+the verifier's plain-bytes `/Type /Page` search can't see it; the verifier now accepts `/ObjStm`. So
+5.5 keeps `baseline`.
+
+**GPT-5.6 Think Deeper on the fixed build** (Oct 5, 05:39; F62's document sweep with its prompts,
+baseline vs relay, × 4, interleaved, one job): the conflict survives the fork fix.
+
+| arm | task passed | runs with a give-up final | 
+|---|---|---|
+| baseline | 6/8 (pdf 2/4, docx 4/4) | 3/8, all PDF |
+| `relay` | **8/8** | **0/8** |
+
+Baseline's give-ups came after the first obstacle: "PDF oluşturma işlemi tamamlanamadı" when
+WeasyPrint lacked a system library (2 calls, no file); "PDF dosyası oluşturamıyorum veya komut
+çalıştıramıyorum; bu oturumda dosya üretme ve betik yürütme özellikle…" (detected, the retry didn't
+turn it); and "Şu anda dosyayı doğrudan oluşturup doğrulayamıyorum" after a pandoc run that had in
+fact made the file. Fewer than F62's 12/14 on forked conversations, but relay is still the only arm
+without them, so `Gpt_5_6_Reasoning` keeps `relay`. The passive form was invisible to the detector
+(its Turkish verbs are first person); it now catches "tamamlanamadı / oluşturulamadı" as a whole
+word, not "tamamlanamadıysa" or "oluşturulamadığında". Old vs new detector over the 245 distinct
+no-tool replies in the transcripts: 2 new hits, both give-ups; 0 lost; 0 false positives.
+
+### F65 — a "<" at the head of a message came out twice 🟢
+In the 5.5 sweep three baseline answers began `<<notlar.pdf>`, `<<notlar.docx>`,
+`<<document>notlar.docx</document>`. M365 sent the snapshot `"<"` with the message's cursor and then
+the delta `"<document"`: it holds a leading `<` back until it knows the tag, so the first delta
+restates the head. `TurnTextComposer` appended it, and the final snapshot, one character shorter than
+the doubled text, never replaced it (`foldStreamText` ignores a shorter snapshot). Across the Oct 2–5
+debug logs every cursor has `p: -1`; in 9 of 1,061 cursor frames the first delta restated the
+snapshot, each one a `"<"`. **Fixed:** the first delta after a cursor replaces the message text when it
+starts with it; otherwise it appends as before. The new test fails on the old composer.

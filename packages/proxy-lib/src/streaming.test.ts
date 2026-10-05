@@ -643,31 +643,3 @@ describe("a new harness session that shares the first user message", () => {
     scripted.queue = [];
   });
 });
-
-describe("a follow-up request in the same session", () => {
-  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
-  const ask = async (messages: any[], pool: InstanceType<typeof SessionPool>) =>
-    (await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "gpt-5.6-think-deeper", stream: false, tools, messages }), pool)).json()).choices[0].message;
-
-  afterEach(() => { delete process.env.M365_FOLLOWUP_NOTE; });
-
-  it("is marked as the current request in the delta; tool results are not (M365_FOLLOWUP_NOTE=1)", async () => {
-    const { FOLLOW_UP_NOTE } = await import("@m365-copilot/core");
-    process.env.M365_FOLLOWUP_NOTE = "1";
-    scripted.result = null;
-    scripted.texts = [];
-    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }, { fullText: "```bash\nls\n```" }];
-    const pool = new SessionPool();
-    const msgs: any[] = [{ role: "user", content: `add remove ${Math.random()}` }];
-    const m1 = await ask(msgs, pool);
-    msgs.push({ role: "assistant", content: null, tool_calls: m1.tool_calls });
-    msgs.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "todo.mjs" });
-    const m2 = await ask(msgs, pool);                       // tool result only
-    msgs.push({ role: "assistant", content: m2.content });
-    msgs.push({ role: "user", content: "now add priorities" }); // the follow-up
-    await ask(msgs, pool);
-    expect(scripted.texts[1]).not.toContain(FOLLOW_UP_NOTE);
-    expect(scripted.texts[2]).toContain(`${FOLLOW_UP_NOTE}\nnow add priorities`);
-    scripted.queue = [];
-  });
-});

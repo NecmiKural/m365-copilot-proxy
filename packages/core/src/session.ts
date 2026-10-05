@@ -187,10 +187,13 @@ export function cursorMessageId(j: string | undefined): string | null {
 export class TurnTextComposer {
   private texts = new Map<string, string>();
   private target: string | null = null;
+  /** No delta has arrived since the last cursor (see delta). */
+  private afterCursor = false;
 
   /** A cursor frame: subsequent deltas extend message `id`. */
   cursor(id: string): void {
     this.target = id;
+    this.afterCursor = true;
   }
 
   /** A full-text snapshot of one message. Before any cursor has been seen, the
@@ -201,10 +204,20 @@ export class TurnTextComposer {
     this.texts.set(key, foldStreamText(this.texts.get(key) ?? "", text).answer);
   }
 
-  /** A token delta for the message the cursor last named. */
+  /** A token delta for the message the cursor last named.
+   *
+   *  The first delta after a cursor can restate the head snapshot that came with
+   *  it. A message that opens with "<" streams the snapshot "<" and then the delta
+   *  "<document" (M365 holds the "<" back until it knows the tag), so appending
+   *  gave "<<document>notlar.docx…", and the final snapshot, one character
+   *  shorter, never replaced it. 9 of 1,061 cursor frames in the Oct 2–5 debug
+   *  logs, each one a "<"; in the rest the first delta continues the snapshot. */
   delta(text: string): void {
     const key = this.target ?? "";
-    this.texts.set(key, (this.texts.get(key) ?? "") + text);
+    const current = this.texts.get(key) ?? "";
+    const restated = this.afterCursor && current.length > 0 && text.startsWith(current);
+    this.texts.set(key, restated ? text : current + text);
+    this.afterCursor = false;
   }
 
   get text(): string {
@@ -264,6 +277,30 @@ export function buildCopilotWebSocketUrl(
   params: URLSearchParams,
 ): string {
   return `wss://substrate.office.com/m365Copilot/Chathub/${objectId}@${tenantId}?${params}`;
+}
+
+/**
+ * Headers for the Chathub WebSocket upgrade.
+ *
+ * `X-RoutingParameter-SessionKey` pins every turn of a conversation to one
+ * backend. Each turn is a new connection, and without the key the Substrate
+ * front end spreads them over pods in two regions (`x-calculatedbetarget`:
+ * 4–6 distinct in 6 handshakes on one ConversationId, Switzerland North and
+ * Sweden Central), which keep separate copies of the conversation. The model
+ * then answers from whichever copy the turn landed on: in real pi runs 56% of
+ * turns ran on an older copy, missing the model's own earlier calls and their
+ * results (docs §24 F64). With the key: 1 backend in 6. The query-string form
+ * doesn't pin. M365_NO_SESSION_ROUTING=1 leaves it out.
+ */
+export function buildCopilotWebSocketHeaders(conversationId: string): Record<string, string> {
+  return {
+    "Origin": "https://m365.cloud.microsoft",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    ...(process.env.M365_NO_SESSION_ROUTING ? {} : { "X-RoutingParameter-SessionKey": conversationId }),
+  };
 }
 
 /**
@@ -338,6 +375,7 @@ export class CopilotSession {
     const wsUrl = buildCopilotWebSocketUrl(claims.oid, claims.tid, params);
     const agentId = this.agentId;
     const sessionId = this.sessionId;
+    const conversationId = this.conversationId;
     const nativeActions = this.nativeActions;
 
     return new Promise((resolve, reject) => {
@@ -506,15 +544,7 @@ export class CopilotSession {
         },
       };
 
-      const ws = new WebSocket(wsUrl, {
-        headers: {
-          "Origin": "https://m365.cloud.microsoft",
-          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Cache-Control": "no-cache",
-          "Pragma": "no-cache",
-        },
-      });
+      const ws = new WebSocket(wsUrl, { headers: buildCopilotWebSocketHeaders(conversationId) });
 
       let handshakeDone = false;
       let stopped = false;

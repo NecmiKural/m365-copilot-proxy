@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildCopilotWebSocketUrl, cursorMessageId, foldStreamText, TurnTextComposer } from "./session.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { buildCopilotWebSocketHeaders, buildCopilotWebSocketUrl, cursorMessageId, foldStreamText, TurnTextComposer } from "./session.js";
 import { MessageUpdate } from "./schemas.js";
 
 /** Replay a sequence of raw M365 frames (deltas as {d}, snapshots as {s}) through
@@ -134,6 +134,19 @@ describe("temporary-chat WebSocket URL", () => {
   });
 });
 
+describe("Chathub WebSocket headers", () => {
+  afterEach(() => { delete process.env.M365_NO_SESSION_ROUTING; });
+
+  it("pins the conversation to one backend by its ConversationId", () => {
+    expect(buildCopilotWebSocketHeaders("conversation-1")["X-RoutingParameter-SessionKey"]).toBe("conversation-1");
+  });
+
+  it("leaves the routing key out under M365_NO_SESSION_ROUTING", () => {
+    process.env.M365_NO_SESSION_ROUTING = "1";
+    expect(buildCopilotWebSocketHeaders("conversation-1")).not.toHaveProperty("X-RoutingParameter-SessionKey");
+  });
+});
+
 describe("TurnTextComposer (multi-message turns)", () => {
   type F = { cursor?: string } & ({ d: string } | { s: string; id: string });
   /** Replay frames through the composer AND the streaming fold, like session.ts. */
@@ -189,6 +202,17 @@ describe("TurnTextComposer (multi-message turns)", () => {
       { d: " more" },
     ]);
     expect(r.text).toBe("one!\n\ntwo more");
+  });
+
+  it("doesn't double a head that the first delta restates (\"<<document>\")", () => {
+    // Live (GPT-5.5 Think Deeper, Oct 5): the snapshot "<", then the delta "<document".
+    const r = compose([
+      { cursor: cur("m1"), s: "<", id: "m1" },
+      { d: "<document" }, { d: ">notlar.docx</document>" }, { d: " oluşturuldu." },
+      { s: "<document>notlar.docx</document> oluşturuldu.", id: "m1" },
+    ]);
+    expect(r.text).toBe("<document>notlar.docx</document> oluşturuldu.");
+    expect(r.streamed).toBe(r.text);
   });
 
   it("falls back to the snapshot's message when no cursor was ever sent", () => {
