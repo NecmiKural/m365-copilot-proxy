@@ -105,9 +105,8 @@ the solve rate saturates, rank framings by Disengaged turns and turns per task.
 
 **Turns per task is a framing lever too** (hyp §24 F60). Opus 5.5's budget is per turn, so it matters
 there. Asking for batching works: "Each round trip takes me a while, so put as much as you can into one
-block" (`relay_batch`) took Opus 4.5 from 3.65 to 2.30 turns per bench task at 20/20 solved; merely
-deleting relay's "one command at a time" (`relay_nolook`) did nothing (3.50). Say what you want, don't
-just stop asking for the opposite. Real pi agreed: 3.5 turns per run vs 6.0, 10/10 each. It is the
+block" (`relay_batch`) took Opus 4.5 from 3.65 to 2.30 turns per bench task at 20/20 solved.
+Real pi agreed: 3.5 turns per run vs 6.0, 10/10 each. It is the
 Opus default (both models). The cost to watch: a batched block acts before it has seen any output —
 in pi every edit still came after a read.
 
@@ -163,8 +162,8 @@ registered in `packages/core/src/fenced.ts` (`FRAMING_VARIANTS`) and selected pe
 Current strategies: `baseline` (shipped default, unchanged), `minimal`, `recency`,
 `fewshot`, `proof_demand`, `persona`, `react`, `negative`, `terse`, `softened`, `demo_only`,
 `session_facts`, `reply_tool` (synthetic `reply()` tool; also `M365_INJECT_REPLY_TOOL=1`), and the
-Claude Sonnet set: `retag`, `honest`, `terse_user`, `relay`, and two turn-saving relays for metered
-Opus: `relay_batch`, `relay_nolook` (hyp §24 F60). A variant can also change
+Claude Sonnet set: `retag`, `honest`, `terse_user`, `relay`, and the turn-saving relay for metered
+Opus, `relay_batch` (hyp §24 F60). A variant can also change
 the transcript's **tags** (`transcriptStyleForVariant`): the Claude Sonnet set never emits `<system>`;
 the harness's own system prompt becomes `<harness_system_prompt>`.
 

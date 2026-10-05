@@ -354,7 +354,6 @@ const TRANSCRIPT_STYLES: Record<string, TranscriptStyle> = {
   honest: USER_VOICE_STYLE,
   terse_user: USER_VOICE_STYLE,
   relay: USER_VOICE_STYLE,
-  relay_nolook: USER_VOICE_STYLE,
   relay_batch: USER_VOICE_STYLE,
 };
 export function transcriptStyleForVariant(variant: string): TranscriptStyle {
@@ -706,21 +705,10 @@ Each time you want something run or looked at, reply with just the command in a 
 ${toolsBlock(tools)}`;
   },
 
-  // Turn-saving relays (issue #18). Opus 5.5's priority-access budget counts
+  // Turn-saving relay (issue #18). Opus 5.5's priority-access budget counts
   // TURNS (§24 F55). `relay_batch` — relay asking outright for as much as fits
   // in each block — is the Claude_Opus default: 2.30 turns per bench task vs
-  // relay's 3.65, same solve rate (§24 F60). `relay_nolook` — relay minus "one
-  // command at a time" and "start by looking at them" — changed nothing (3.50):
-  // the model has to be asked to batch, not merely not told to go slowly.
-  relay_nolook(tools) {
-    const lang = findShellTool(tools) ? "bash" : "<tool_name>";
-    return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.
-
-Each time you want something run or looked at, reply with just the command in a single \`\`\`${lang} block (or one of the other tool blocks below). I'll run it in my project directory right away and paste the real output back to you as a <tool_response>. The files the task mentions are already there. When the task is complete, tell me in a sentence instead of sending a block.
-
-${toolsBlock(tools)}`;
-  },
-
+  // relay's 3.65, same solve rate (§24 F60).
   relay_batch(tools) {
     const lang = findShellTool(tools) ? "bash" : "<tool_name>";
     return `Before the task, a note on how we'll work: I'd like you to guide me through this from my terminal. Please don't use your own sandbox tools (${BUILT_IN_SANDBOX}) — that's a separate cloud machine (${SANDBOX_PATHS}) and my project isn't on it.

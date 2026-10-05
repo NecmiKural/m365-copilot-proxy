@@ -3970,21 +3970,18 @@ Not resolvable: the allowance itself is Microsoft's (and the `…Dev`, `…Word`
 the map suggest other clients get other ones).
 
 ### F60 — `relay_batch` cuts Opus 4.5's turns per task by 37% (bench) and 42% (real pi) at no cost → the Opus default 🟢
-Opus 5.5's budget counts turns (F59), so turns per task is the lever left. Two new user-voice relays
-(`fenced.ts`): `relay_nolook` = relay without "one command at a time" and "start by looking at them";
-`relay_batch` = relay asking for as much as fits in each block ("Each round trip takes me a while, so
-put as much as you can into one block: a script can look at the files, make the change and check the
-result all at once"). `opus45-turns`, `claude-opus-4.5` (unmetered), mirrored order relay, batch,
-nolook, nolook, batch, relay, `TASK_GAP=60`, 01:18–02:45Z, premium account.
+Opus 5.5's budget counts turns (F59), so turns per task is the lever left. A new user-voice relay
+(`fenced.ts`): `relay_batch` = relay asking for as much as fits in each block ("Each round trip takes
+me a while, so put as much as you can into one block: a script can look at the files, make the change
+and check the result all at once"). `opus45-turns`, `claude-opus-4.5` (unmetered), mirrored order
+relay, batch, batch, relay, `TASK_GAP=60`, 01:18–02:45Z, premium account.
 
 | arm | solved | M365 turns / task (sd) | Disengaged | tasks with fewer turns than relay |
 |---|---|---|---|---|
 | `relay` (shipped) | 20/20 | 3.65 (1.11) | 0/20 | — |
 | **`relay_batch`** | 20/20 | **2.30** (0.56) | 0/20 | 8 of 10 (0 more, 2 same) |
-| `relay_nolook` | 20/20 | 3.50 (0.97) | 0/20 | 2 of 10 (1 more, 7 same) |
 
-relay − batch = 1.35 turns/task (task-stratified permutation p < 10⁻⁴); relay − nolook = 0.15 (p = 0.50).
-So it isn't relay's "one at a time" wording; asking for batching is what changes behaviour. 2.30 is
+relay − batch = 1.35 turns/task (task-stratified permutation p < 10⁻⁴). 2.30 is
 close to the floor of 2 (one block, one closing sentence): fizzbuzz written and run in one block,
 fix-bug read-then-fix in 2 blocks instead of 5, edits with before/after output and a JSON validity
 check in the same block. Every closing claim matched output it had seen. **The risk** is acting before

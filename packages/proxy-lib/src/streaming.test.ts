@@ -70,6 +70,20 @@ const { resetAgentRoutes, resetPriorityAccessState } = await import("@m365-copil
 // don't let one test's refusal 429 the next test's Opus request.
 afterEach(() => resetPriorityAccessState());
 
+/** One request on a fresh pool with a fake clock: an empty upstream turn makes
+ *  the handler wait 2 s before each quick retry, and that wait is the handler's
+ *  own pacing, not what these tests check. */
+async function respond(body: ReturnType<typeof ChatCompletionRequest.parse>): Promise<Response> {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const pending = handleChatCompletion(body, new SessionPool());
+    await vi.runAllTimersAsync();
+    return await pending;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 /** Drive one streaming request and collect the ordered content-delta strings. */
 async function streamContents(deltas: string[], fullText?: string): Promise<string[]> {
   scripted.deltas = deltas;
@@ -396,7 +410,7 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
       model, stream: false, tools,
       messages: [{ role: "system", content: "sys" }, { role: "user", content: `list files ${Math.random()}` }],
     });
-    return handleChatCompletion(body, new SessionPool());
+    return respond(body);
   }
 
   afterEach(() => {
@@ -468,19 +482,6 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
 
 describe("Opus 4.5 on an account that can't serve it (§24)", () => {
   const DEAD = { fullText: "", result: { value: "InternalError" } };
-
-  // Every attempt here is empty, so the handler waits out both 2 s quick
-  // retries; fake the clock instead of spending 4 s per test.
-  async function respond(body: ReturnType<typeof ChatCompletionRequest.parse>): Promise<Response> {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const pending = handleChatCompletion(body, new SessionPool());
-      await vi.runAllTimersAsync();
-      return await pending;
-    } finally {
-      vi.useRealTimers();
-    }
-  }
 
   afterEach(() => {
     resetAgentRoutes();

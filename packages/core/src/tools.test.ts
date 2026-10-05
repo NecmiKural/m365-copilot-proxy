@@ -582,7 +582,7 @@ describe("transcript style (which tags wrap the framing and harness system promp
 
   it("never emits a <system> tag for the user-voice variants", async () => {
     const { formatMessages } = await import("./tools.js");
-    for (const v of ["honest", "terse_user", "relay", "relay_nolook", "relay_batch"]) {
+    for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       const out = formatMessages(msgs, tools, undefined, undefined, v);
       expect(out).not.toContain("<system>");
       expect(out).toContain("<harness_system_prompt>\nYou are an autonomous coding agent.\n</harness_system_prompt>");
@@ -600,7 +600,7 @@ describe("transcript style (which tags wrap the framing and harness system promp
 
   it("tells the model its built-in sandbox is the wrong machine in every user-voice variant", async () => {
     const { formatToolDefinitions } = await import("./tools.js");
-    for (const v of ["honest", "terse_user", "relay", "relay_nolook", "relay_batch"]) {
+    for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       expect(formatToolDefinitions(tools, v)).toMatch(/sandbox/);
     }
   });
