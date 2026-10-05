@@ -50,7 +50,7 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
   request, and concurrent sessions with one opening message collided (F63, fixed); each turn landed
   on a random backend and the conversation forked under the model, pinned with a routing header (F64);
-  a leading "<" streamed twice (F65)
+  a leading "<" streamed twice (F65); file-chip markup in answers (F66)
 
 ---
 
@@ -3969,3 +3969,12 @@ the doubled text, never replaced it (`foldStreamText` ignores a shorter snapshot
 debug logs every cursor has `p: -1`; in 9 of 1,061 cursor frames the first delta restated the
 snapshot, each one a `"<"`. **Fixed:** the first delta after a cursor replaces the message text when it
 starts with it; otherwise it appends as before. The new test fails on the old composer.
+
+### F66 — M365's file-chip markup reached the client 🟢
+The web client renders `<File>notlar.docx</File>` as a file chip, and the GPT models write it into
+their answers; pi showed the raw tags ("<File>notlar.docx</File> başarıyla oluşturuldu"). In the 245
+distinct final answers of the pi transcripts (Oct 2–5): `<File>` 58 times, plus `<document>`,
+`<Files>`, `<file>`, `<FILE>` and "< File>". **Fixed:** a prose answer in tool mode gets the bare
+file name (`plainFileNames`); code blocks are left alone, and a bare `<name.ext>` is not touched
+(`#include <stdio.h>`). Not applied to a tool-less streamed answer, which goes to the client delta by
+delta before the markup is complete.
