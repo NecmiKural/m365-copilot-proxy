@@ -49,7 +49,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   sharing an opening message shared an M365 conversation (F61); the give-up is an instruction conflict
   that `relay` dissolves for GPT-5.6 Think Deeper (F62); long sessions: follow-ups anchor to the first
   request, and concurrent sessions with one opening message collided (F63, fixed); each turn landed
-  on a random backend and the conversation forked under the model, pinned with a routing header (F64)
+  on a random backend and the conversation forked under the model, pinned with a routing header (F64);
+  a leading "<" streamed twice (F65)
 
 ---
 
@@ -3933,13 +3934,38 @@ passed** in both arms; every follow-up summarised its own request (12/12, note o
 "mismatch" reasoning and no call repeated within a request. 5.9 tool calls and 48 s per step, against
 8.4 and 58 (F63, forked) and 12.8 and 92 (the forked re-run of Oct 4, 22:33). The whole run took 19
 minutes and did not trip the throttle. Two give-up turns, both turned by the forcing retry.
-**Still open:** baseline vs relay on the fixed build (relay's give-up evidence in F62 is the chain of
-thought, which forks don't explain, but its size may change).
-
 **GPT-5.5 Think Deeper on the fixed build** (Oct 5, 01:54; real pi, baseline vs relay via
 `M365_FRAMING_FILE`, interleaved; .pdf and .docx in Turkish as F62, write-code and fix-bug in
-English; × 2): baseline 7/8, relay 8/8, **0 give-up turns in either arm**. Relay took about twice the
-calls (write-code 4 vs 1, pdf 7.5 vs 4). The one baseline failure is a 57 KB PDF the verifier found
-no `/Type /Page` in, likely compressed object streams (not yet checked). So 5.5 keeps `baseline`.
-**Probe:** the same sweep on `gpt-5.6-think-deeper`, to see whether its baseline give-ups (F62:
-12/14 runs) survive the fork fix.
+English; × 2): baseline **8/8**, relay 8/8, **0 give-up turns in either arm**. Relay took about twice
+the calls (write-code 4 vs 1, pdf 7.5 vs 4). The run first scored baseline 7/8: its "failure" was a
+valid one-page PDF 1.7 (pandoc + xelatex) whose page object sits in a compressed object stream, where
+the verifier's plain-bytes `/Type /Page` search can't see it; the verifier now accepts `/ObjStm`. So
+5.5 keeps `baseline`.
+
+**GPT-5.6 Think Deeper on the fixed build** (Oct 5, 05:39; F62's document sweep with its prompts,
+baseline vs relay, × 4, interleaved, one job): the conflict survives the fork fix.
+
+| arm | task passed | runs with a give-up final | 
+|---|---|---|
+| baseline | 6/8 (pdf 2/4, docx 4/4) | 3/8, all PDF |
+| `relay` | **8/8** | **0/8** |
+
+Baseline's give-ups came after the first obstacle: "PDF oluşturma işlemi tamamlanamadı" when
+WeasyPrint lacked a system library (2 calls, no file); "PDF dosyası oluşturamıyorum veya komut
+çalıştıramıyorum; bu oturumda dosya üretme ve betik yürütme özellikle…" (detected, the retry didn't
+turn it); and "Şu anda dosyayı doğrudan oluşturup doğrulayamıyorum" after a pandoc run that had in
+fact made the file. Fewer than F62's 12/14 on forked conversations, but relay is still the only arm
+without them, so `Gpt_5_6_Reasoning` keeps `relay`. The passive form was invisible to the detector
+(its Turkish verbs are first person); it now catches "tamamlanamadı / oluşturulamadı" as a whole
+word, not "tamamlanamadıysa" or "oluşturulamadığında". Old vs new detector over the 245 distinct
+no-tool replies in the transcripts: 2 new hits, both give-ups; 0 lost; 0 false positives.
+
+### F65 — a "<" at the head of a message came out twice 🟢
+In the 5.5 sweep three baseline answers began `<<notlar.pdf>`, `<<notlar.docx>`,
+`<<document>notlar.docx</document>`. M365 sent the snapshot `"<"` with the message's cursor and then
+the delta `"<document"`: it holds a leading `<` back until it knows the tag, so the first delta
+restates the head. `TurnTextComposer` appended it, and the final snapshot, one character shorter than
+the doubled text, never replaced it (`foldStreamText` ignores a shorter snapshot). Across the Oct 2–5
+debug logs every cursor has `p: -1`; in 9 of 1,061 cursor frames the first delta restated the
+snapshot, each one a `"<"`. **Fixed:** the first delta after a cursor replaces the message text when it
+starts with it; otherwise it appends as before. The new test fails on the old composer.
