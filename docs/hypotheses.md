@@ -3894,6 +3894,47 @@ would drain the bucket in ~25 min. Until one of these runs, none of it goes into
   before (~25 fresh conversations in 30 min vs 31 at r5's onset), so a conversation-count rule
   predicted the same. The single-conversation probe above is still what would tell them apart.
 
+**Out of sample on two NON-premium accounts (2026-10-05, parameters NOT refitted).** Replaying
+C = 100, r = 1.6 over every turn in each account's debug logs from a framing sweep (bench at
+`TASK_GAP=30`, then real pi at a 60 s cooldown, ~260 turns in ~100 min each):
+- account T: the model empties the bucket at 08:12:06Z (turn 259); the first `Throttled` turn was
+  08:12:38Z (turn 260).
+- account P: the model bottoms out at **5.9** at 08:06Z and never quite empties; the first
+  `Throttled` turn was 08:07:42Z (turn 244).
+Both onsets land within a few turns of the premium account's fit, on accounts it was never fitted
+to. A conversation count does worse: the pi arms that tripped it opened conversations *more slowly*
+(one per ~100 s) than the bench arms before them (one per ~70 s). Still a model with 2 parameters, now
+6 onsets; it says the limit is the same on premium and non-premium accounts.
+**Prediction, written 08:35Z before it resolved:** the premium account's bucket was at 7.7 at 08:28Z,
+and the two remaining arms of its sweep (`rb-g6s-prem`, GPT-6 Sol) add ~50 turns in ~25 min against
+~40 refilled — the model says about −2: a throttle **likely near the end of arm A-4** (≈ 08:55–09:00Z).
+No throttle through the end of that arm counts against it (weakly — the margin is a few turns).
+**Outcome: held on the arm, early on the clock.** The throttle came at 08:45:47Z, on the third task
+of A-4, ~10 min before the window, with the model's bucket at **3.5**. So all three of that day's
+onsets came with the model at +3.5, +5.9 and −1.3: about right, a few turns optimistic. Either the
+bucket holds ~95 rather than 100, or a few turns a day are invisible to the logs.
+
+**Shipped (bench only, opt-in): pacing.** With `M365_AVOID_THROTTLING=1`,
+`scripts/bench/turn-budget.mjs` replays every recent proxy debug log on the account (`[session] Chat
+turn` and `Turn result: Throttled` lines) through this bucket, and `run.mjs` / `pi-reliability.sh`
+wait before each task until it covers a whole task (12 turns) plus a reserve of 20, and for an hour
+of quiet after a throttled turn. Off by default; the `M365_BUDGET_*` variables tune the model.
+Replayed over the premium account's 2026-10-05 logs, the gate closes at ~07:40Z (bucket 31), an hour
+before the 08:45Z onset. pi arms now stop on a throttle too, as bench arms already did. Nothing in the
+proxy changed: a real pi session still isn't paced.
+
+**The hour's hold was too short once: the throttle isn't the bucket.** The premium account sent nothing
+after its 08:45:47Z throttled turn (all logs checked), the pacer resumed at 09:45:47Z with the bucket
+modeled at ~96, and the first turn was throttled again (09:45:50Z). The non-premium accounts were
+served again 56.6 min (T) and 60.1 min (P) after their last throttled turns, 74 and 83 min after their
+onsets. So the throttle is a state with its own clock, not an empty bucket: lifting 60–74 min after the
+*onset* fits all three; a fixed time after the *last* throttled turn doesn't (T ≤ 57, premium > 60)
+unless it differs per account. The hold default is now 75 min. Next check: whether the premium account
+serves at 11:00:50Z (75 min after 09:45:50).
+**It did:** the first turn at 11:00:50.8Z was served (GPT-6, relay_batch pi run 1, solved). So on the
+premium account the throttle lifted between 60.05 and 75 min after its last throttled turn, with
+nothing sent in between.
+
 **Bench changes (useful whatever the limit is):** `run.mjs --task-gap S` (phase-sweep `TASK_GAP`)
 paces tasks, and both now stop at the first throttled task instead of burning the rest of the sweep
 (`[bench] THROTTLED`, exit 3; phase-sweep writes `FAILED`).

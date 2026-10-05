@@ -10,12 +10,14 @@
 //       [--label magic-json] [--tasks fizzbuzz,fix-bug] [--max-turns 12] [--repeat 1] \
 //       [--task-gap 30] [--no-stop-on-throttle]
 //
-// Every task is a fresh M365 conversation, and the account throttles on the RATE
-// of fresh conversations (F13). --task-gap S waits S seconds between tasks to
-// slow that down (claude-opus-4.5 sweeps tripped it at ~45 per 30 min on
-// 2026-10-04, other models' sweeps didn't at ~50 — hypotheses §24 F58). Once a
-// task comes back throttled (HTTP 429 m365_throttled) the run stops: every later
-// task would fail the same way and keep the throttle alive.
+// The account throttles (`PerUserThrottled`) once it has spent more turns than a
+// bucket of ~100, refilled at ~1.6 a minute, allows (hypotheses §24 F58).
+// With M365_AVOID_THROTTLING=1 the bench waits before every task until the
+// proxy's debug logs say the bucket can cover a whole task (--max-turns) plus a
+// reserve — see turn-budget.mjs; it needs the proxy to run with M365_DEBUG=1,
+// which phase-sweep does. Off by default. --task-gap S adds a fixed S seconds
+// between tasks. Once a task comes back throttled (HTTP 429 m365_throttled) the
+// run stops: every later task would fail the same way and keep the throttle alive.
 // It prints "[bench] THROTTLED" and exits 3; the scorecard covers the tasks run.
 // An Opus priority-access 429 (priority_access_exhausted) stops it the same
 // way, as "[bench] PRIORITY ACCESS EXHAUSTED", exit 4.
@@ -30,6 +32,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync, spawnSync } from "node:child_process";
 import { TASKS } from "./tasks.mjs";
+import { waitForBudget } from "./turn-budget.mjs";
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -205,6 +208,7 @@ let exhausted = false;
 run: for (let rep = 0; rep < REPEAT; rep++) {
   for (const task of tasks) {
     if (rows.length > 0) await new Promise(rr => setTimeout(rr, Math.max(1500, TASK_GAP_MS)));
+    await waitForBudget({ need: MAX_TURNS, label: "bench" });
     const r = await runTask(task);
     rows.push({ ...r, rep });
     console.log(`  ${r.task.padEnd(14)} ${r.outcome.padEnd(14)} tools=${r.toolTurns} msgs=${r.msgs} ${Math.round(r.elapsedMs/1000)}s ${r.error ? "(" + r.error.slice(0,50) + ")" : ""} ${r.solved ? "" : "answer=" + JSON.stringify(r.finalAnswer)}`);
