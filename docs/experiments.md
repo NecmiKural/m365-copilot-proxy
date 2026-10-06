@@ -199,9 +199,8 @@ All run with `scripts/_probe-chat.mjs` overrides; no license needed.
   opens. Needs two single-change variants registered in `fenced.ts`: (a) relay with the harness
   block moved first, note still untagged; (b) the `<user>`-tagged note + task first, harness block
   after. Predicted: (a) fails like relay_inline, (b) works like relay.
-- **Run:** proxy with `M365_FRAMING_FILE`, then
-  `ARMS="<a> default <b> <a>" TAG=s5c bash scripts/bench/sonnet5-sweep.sh`, alternating so each
-  variant has a concurrent relay control.
+- **Run:** `ARMS="<a> default <b> <a>" TAG=s5c bash scripts/bench/sonnet5-sweep.sh` (it starts
+  a proxy per arm), alternating so each variant has a concurrent relay control.
   (`scripts/bench/phase-sweep.sh` now does the proxy and archiving too, and
   `scripts/bench/analyze-arms.mjs` reads the result back; see scripts/bench/README.md.)
   **Read:** SOLVED per arm, then `ChainOfThoughtSummary` frames in the archived
