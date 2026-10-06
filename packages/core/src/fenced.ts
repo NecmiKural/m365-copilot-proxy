@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { createLogger } from "./log.js";
-import { getToneForModel, isSonnet5Model } from "./copilot.js";
+import { getToneForModel, isSonnet55Model } from "./copilot.js";
 import type { ParsedToolCall, ToolDef } from "./tools.js";
 
 const log = createLogger("fenced");
@@ -426,13 +426,15 @@ export function currentFramingVariant(toneDefault?: string): string {
  *  every edit still followed a read. Opus 5.5 is benched under relay (10/10),
  *  not yet under relay_batch.
  *
- *  `Claude_Sonnet` (Sonnet 4.6 on the included scenario, Sonnet 5 on the paid
- *  one) is user-voice because both read the `<system>`-tagged baseline as an
- *  injected prompt, and relay beat baseline for each — Sonnet 5 45/50 vs 6/40,
- *  Sonnet 4.6 78/90 vs 47/76 (docs §21). The tone's default is now relay_batch,
- *  for Sonnet 4.6: same solves, 14% fewer turns on the bench (80/80) and 21%
- *  fewer in real pi (39/39), and every pi edit still followed a read (docs §25
- *  F61, F62). Sonnet 5 stays on relay — see SONNET_5_DEFAULT_FRAMING.
+ *  `Claude_Sonnet` (Sonnet 4.6 on the included scenario, Sonnet 5.5 on the
+ *  paid one) and `Claude_Sonnet_5` (Sonnet 5) are user-voice because the
+ *  Sonnets read the `<system>`-tagged baseline as an injected prompt, and relay
+ *  beat baseline for each — Sonnet 5 45/50 vs 6/40, Sonnet 4.6 78/90 vs 47/76
+ *  (docs §21). `Claude_Sonnet` defaults to relay_batch, for Sonnet 4.6: same
+ *  solves, 14% fewer turns on the bench (80/80) and 21% fewer in real pi
+ *  (39/39), and every pi edit still followed a read (docs §25 F61, F62).
+ *  Sonnet 5 stays on relay — see SONNET_5_DEFAULT_FRAMING — and so does
+ *  Sonnet 5.5 (SONNET_5_5_DEFAULT_FRAMING).
  *
  *  `Gpt_6_Reasoning` defaults to relay_batch. It used to keep `baseline` on the
  *  theory that it drives M365's GPT agent path — but it never served WITH the
@@ -459,6 +461,7 @@ export function currentFramingVariant(toneDefault?: string): string {
 export function defaultFramingForTone(tone?: string): string | undefined {
   if (tone === "Claude_Opus") return "relay_batch";
   if (tone === "Claude_Sonnet") return "relay_batch";
+  if (tone === "Claude_Sonnet_5") return SONNET_5_DEFAULT_FRAMING;
   if (tone === "Gpt_6_Reasoning") return "relay_batch";
   if (tone === "Gpt_6_Sol_Reasoning") return "relay";
   return undefined;
@@ -466,10 +469,10 @@ export function defaultFramingForTone(tone?: string): string | undefined {
 
 /** The framing a MODEL ID should default to. Differs from defaultFramingForTone
  *  only where one tone serves two models: `Claude_Sonnet` is Sonnet 4.6 on the
- *  included scenario and Sonnet 5 on the paid one, so a Sonnet-5-only framing
- *  has to key on the model ID (see SONNET_5_DEFAULT_FRAMING). */
+ *  included scenario and Sonnet 5.5 on the paid one, so a Sonnet-5.5-only
+ *  framing has to key on the model ID (see SONNET_5_5_DEFAULT_FRAMING). */
 export function defaultFramingForModel(model: string): string | undefined {
-  if (isSonnet5Model(model)) return SONNET_5_DEFAULT_FRAMING;
+  if (isSonnet55Model(model)) return SONNET_5_5_DEFAULT_FRAMING;
   return defaultFramingForTone(getToneForModel(model));
 }
 
@@ -478,10 +481,15 @@ export function defaultFramingForModel(model: string): string | undefined {
 // assistant role, rather than being told it is an agent with a second tool
 // format. Under `baseline` it reads the framing as a prompt injection and works
 // in its own sandbox instead (6/40); relay: 45/50, and 5/5 through real pi.
-// It does NOT follow its tone to relay_batch: 15% fewer turns on the bench, but
-// 6% in real pi (4.90 vs 5.20 per run, 10/10 each, p = 0.47), where relay
+// It does NOT follow Sonnet 4.6 to relay_batch: 15% fewer turns on the bench,
+// but 6% in real pi (4.90 vs 5.20 per run, 10/10 each, p = 0.47), where relay
 // already reads, fixes and checks in ~5 turns (docs §25 F63).
 const SONNET_5_DEFAULT_FRAMING = "relay";
+
+// Sonnet 5.5 inherits Sonnet 5's `relay`, unbenched: it runs `pwd` in the same
+// remote sandbox (`/home/claude`, docs §26), which relay names as the wrong
+// machine. Whether relay_batch saves turns on its metered budget is open (§26).
+const SONNET_5_5_DEFAULT_FRAMING = "relay";
 
 /** How formatMessages wraps the framing block and the harness's own system
  *  messages. Historically both went in `<system>` tags. Claude Sonnet 5 reads a
@@ -801,8 +809,9 @@ A session usually opens by looking at the files (\`ls -la\`, then \`cat\` the re
 ${toolsBlock(tools)}`;
   },
 
-  // --- Sonnet 5 candidates (docs §21). Sonnet 5 (Claude_Sonnet on the paid
-  // scenario) has its own function-calling tools in a remote sandbox, and reads
+  // --- Sonnet 5 candidates (docs §21). Sonnet 5 (Claude_Sonnet_5 on the paid
+  // scenario; it was Claude_Sonnet's until Sonnet 5.5 took that over, §26) has
+  // its own function-calling tools in a remote sandbox, and reads
   // the framing below as an injection: a `<system>` block inside a user turn,
   // redefining its identity ("execution core … not a chat assistant") and its
   // tool format. Its CoT says so in most first turns. Each candidate attacks a

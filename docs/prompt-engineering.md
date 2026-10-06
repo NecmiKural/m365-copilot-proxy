@@ -49,7 +49,8 @@ These are what actually move compliance. In rough order of importance:
 ## Claude Sonnet: don't *cage* it, don't *label* things `<system>`
 
 Everything above was learned on models with no tools of their own. Sonnet 5 (`Claude_Sonnet` on
-the paid scenario) **has** real ones, in a remote sandbox, so the question is not "will it act"
+the paid scenario at the time, `Claude_Sonnet_5` since 2026-10-06 — Sonnet 5.5 has the same sandbox,
+hyp §26) **has** real ones, in a remote sandbox, so the question is not "will it act"
 but "on which machine" — and our framing decides that. Conclusive (hyp §21, p = 3×10⁻¹³):
 
 - **A `<system>` block inside the user turn reads as a forged system prompt.** Its reasoning says
@@ -178,7 +179,9 @@ the harness's own system prompt becomes `<harness_system_prompt>`.
 
 **The default is model-aware** (`defaultFramingForModel`, falling back to `defaultFramingForTone`).
 `Claude_Opus` (Opus 4.5 and 5.5), `Claude_Sonnet` (as Sonnet 4.6) and `Gpt_6_Reasoning` →
-`relay_batch`; Sonnet 5 (`claude-sonnet-5`, same tone, keyed on the model ID) and
+`relay_batch`; Sonnet 5 (`claude-sonnet-5`, its own `Claude_Sonnet_5` tone since 2026-10-06),
+Sonnet 5.5 (`claude-sonnet-5.5`, `Claude_Sonnet` on the paid scenario, keyed on the model ID;
+inherits Sonnet 5's relay, unbenched, hyp §26) and
 `Gpt_6_Sol_Reasoning` → `relay`. **Every other model keeps `baseline` byte-for-byte** (including
 `claude-sonnet-think-deeper`, unmeasured under relay), so no GPT-5.x bench number moves, and
 `M365_FRAMING_*` still wins. Opus used to default to `minimal`, to spend less of its priority-access
@@ -196,7 +199,7 @@ COOLDOWN=45 BLOCK_COOLDOWN=60 bash scripts/bench/sweep2.sh
 node scripts/bench/analyze-sweep.mjs s2
 ```
 
-For the full 10-task bench per arm, with a fresh proxy per phase (so a phase can also change
+For the full 10-task bench per arm, with a fresh proxy per arm (so a phase can also change
 the proxy's env: agent off, code interpreter off) and real-pi arms, use `phase-sweep.sh`, then
 read the archive back with `analyze-arms.mjs`. It reports per arm which path served each task,
 sandbox and Disengaged turns, and drops tasks lost to the network or a throttle
@@ -208,14 +211,13 @@ MODEL=gpt-6-sol TAG=mysweep PHASES='A:baseline,relay,demo_only|B@M365_FORCE_AGEN
 nix develop --command node scripts/bench/analyze-arms.mjs ~/.config/opencode-m365/sweeps/mysweep --compare relay demo_only
 ```
 
-The older single-proxy route also archives each arm's debug log + frame dumps for
+The older single-phase route also archives each arm's debug log + frame dumps for
 forensics — read the `ChainOfThoughtSummary` frames, they say *why* a framing was refused:
 
 ```sh
-M365_FRAMING_FILE=/tmp/m365-framing M365_DUMP_FRAMES=1 M365_DEBUG=1 M365_NO_CONFAB_RETRY=1 \
-  node packages/proxy/bin/m365-proxy.mjs 4141 &
-# `default` = empty control file = the model's shipped default; arms may repeat
-ARMS="default retag relay default" MODEL=claude-sonnet-5 TAG=mysweep bash scripts/bench/sonnet5-sweep.sh
+# starts a proxy per arm; `default` = the model's shipped default; arms may repeat
+M365_NO_CONFAB_RETRY=1 ARMS="default retag relay default" MODEL=claude-sonnet-5 TAG=mysweep \
+  bash scripts/bench/sonnet5-sweep.sh
 ```
 
 ## Results

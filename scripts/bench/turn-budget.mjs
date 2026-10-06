@@ -12,12 +12,12 @@
 //
 // The proxy writes one `[session] Chat turn` line per upstream turn, and a
 // `Turn result: Throttled` line per throttled turn, to its debug log when
-// M365_DEBUG=1 — phase-sweep always sets it, and moves each arm's log into the
-// sweep archive. This replays every recently modified debug log under
-// ~/.config/opencode-m365 (archives included) through the bucket. Turns it
-// can't see don't count: a proxy run without M365_DEBUG, the web client, another
-// host on the same account. The reserve absorbs some of that; a sudden throttle
-// still stops the bench as before.
+// M365_DEBUG=1 — phase-sweep always sets it, and has each arm's proxy write its
+// log straight into the sweep archive. This replays every recently modified debug
+// log under ~/.config/opencode-m365 (archives included), plus the M365_LOG_FILE
+// this process sees, through the bucket. Turns it can't see don't count: a proxy
+// run without M365_DEBUG, the web client, another host on the same account. The
+// reserve absorbs some of that; a sudden throttle still stops the bench as before.
 //
 // After a throttled turn it also waits for HOLD minutes of quiet: the throttle
 // lifts with idle time, not with the bucket — on 2026-10-05 the premium account
@@ -32,7 +32,8 @@
 // Env: M365_AVOID_THROTTLING=1 (turn the waiting on), M365_BUDGET_CAPACITY (100
 //   turns), M365_BUDGET_REFILL (1.6 turns/min), M365_BUDGET_RESERVE (20 turns kept
 //   back), M365_BUDGET_HOLD_MIN (75), M365_BUDGET_LOGS (more log files or dirs,
-//   `:`-separated; phase-sweep adds its archive).
+//   `:`-separated; phase-sweep adds its archive), M365_LOG_FILE (as the proxy
+//   reads it: relative to ~/.config/opencode-m365).
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -41,6 +42,7 @@ import { pathToFileURL } from "node:url";
 const num = (v, d) => (v !== undefined && v !== "" && Number.isFinite(Number(v)) ? Number(v) : d);
 
 export function budgetConfig(env = process.env) {
+  const cfgDir = join(homedir(), ".config", "opencode-m365");
   return {
     capacity: num(env.M365_BUDGET_CAPACITY, 100),
     refillPerMin: num(env.M365_BUDGET_REFILL, 1.6),
@@ -50,7 +52,11 @@ export function budgetConfig(env = process.env) {
     // replay that starts full this far back is exact for anything quieter.
     windowMin: 360,
     enabled: !!env.M365_AVOID_THROTTLING && env.M365_AVOID_THROTTLING !== "0",
-    dirs: [join(homedir(), ".config", "opencode-m365"), ...(env.M365_BUDGET_LOGS ?? "").split(":").filter(Boolean)],
+    dirs: [
+      cfgDir,
+      ...(env.M365_LOG_FILE ? [resolve(cfgDir, env.M365_LOG_FILE)] : []),
+      ...(env.M365_BUDGET_LOGS ?? "").split(":").filter(Boolean),
+    ],
   };
 }
 
@@ -67,13 +73,13 @@ export function parseEvents(text) {
   return out;
 }
 
-/** Debug logs under `dirs` (files allowed too) modified since `sinceMs`. */
+/** Debug logs under `dirs` modified since `sinceMs`. A file named in `dirs` counts whatever its name. */
 export function findLogs(dirs, sinceMs, depth = 3) {
   const out = [];
   const walk = (p, d) => {
     let st;
     try { st = statSync(p); } catch { return; }
-    if (st.isFile()) { if (LOG_FILE.test(basename(p)) && st.mtimeMs >= sinceMs) out.push(p); return; }
+    if (st.isFile()) { if ((d === 0 || LOG_FILE.test(basename(p))) && st.mtimeMs >= sinceMs) out.push(p); return; }
     if (!st.isDirectory() || d > depth) return;
     let names = [];
     try { names = readdirSync(p); } catch { return; }

@@ -21,8 +21,9 @@
 // as a property of the CONNECTION, not of the tone.
 //
 // Usage: M365_NO_INTERACTIVE=1 CHROMIUM_PATH=$(which chromium) node scripts/tone-probe.mjs
-// Cost: 1 message per cell. Opus cells spend the scarce priority-access budget
-// (see docs §15) — drop them from the list when sweeping something else.
+// Cost: 1 message per cell. Opus and Sonnet 5.5 cells spend their scarce
+// priority-access budgets (see docs §15, §26) — drop them from the list when
+// sweeping something else.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -45,11 +46,14 @@ const TONES = [
   { tone: "Gpt_5_6_Chat", note: "included scenario: expect DeepLeo — BotConnection here means re-gated", ...INCLUDED },
   { tone: "Gpt_5_6_Chat", note: "PAID scenario: expect DeepLeo (it served here even while gated)", ...PAID },
   { tone: "Gpt_6_Chat", note: "REJECTED outright — validator error, not the 5.6 deflection" },
-  // One tone, TWO models: Sonnet 4.6 on included, Sonnet 5 on paid (2026-09-28,
-  // docs §21). Both cells read LIVE with this `pong` prompt — LIVE says a model
-  // answered, not which one; a self-ID prompt is what tells them apart.
+  // One tone, TWO models: Sonnet 4.6 on included, Sonnet 5.5 on paid (it was
+  // Sonnet 5 until 2026-10-06, docs §26). Sonnet 5 moved to `Claude_Sonnet_5`,
+  // which is Sonnet 4.6 on included. All cells read LIVE with this `pong`
+  // prompt — LIVE says a model answered, not which one; a self-ID prompt is
+  // what tells them apart.
   { tone: "Claude_Sonnet", note: "included scenario: Claude Sonnet 4.6", ...INCLUDED },
-  { tone: "Claude_Sonnet", note: "PAID scenario: Claude Sonnet 5 (model ID claude-sonnet-5)", ...PAID },
+  { tone: "Claude_Sonnet", note: "PAID scenario: Claude Sonnet 5.5 (model ID claude-sonnet-5.5) — spends its priority access", ...PAID },
+  { tone: "Claude_Sonnet_5", note: "PAID scenario: Claude Sonnet 5 (model ID claude-sonnet-5)", ...PAID },
   { tone: "Anthropic_Claude", note: "speculative Claude" },
   { tone: "Claude_Reasoning", note: "accepted but actually GPT-5 — don't use" },
 

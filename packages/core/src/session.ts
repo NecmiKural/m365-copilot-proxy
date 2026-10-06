@@ -1,7 +1,6 @@
 import WebSocket from "ws";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import {
   SignalRHandshakeResponse,
   DeltaUpdate,
@@ -23,8 +22,8 @@ import {
   shouldAutoConfirm,
   ACTION_ALLOWED_MESSAGE_TYPES,
 } from "./native-actions.js";
-import { createLogger, trunc } from "./log.js";
-import { parseMetering, opusAllowance } from "./priority-access.js";
+import { createLogger, trunc, FRAME_DIR } from "./log.js";
+import { parseMetering, meteredAllowance, METERED_BUDGETS, type MeteredBudget } from "./priority-access.js";
 
 const RS = "\x1E";
 const log = createLogger("session");
@@ -73,16 +72,16 @@ const IMAGE_GEN_OPTIONS_SETS = [
 
 // --- Optional per-request frame dumping for reverse engineering ---
 // Enabled by M365_DUMP_FRAMES=1. Every SignalR frame received is appended to a
-// per-request NDJSON file under ~/.config/opencode-m365/frames/. Cheap to run
-// in production; gives us forensic data when M365 starts emitting new fields.
+// per-request NDJSON file under FRAME_DIR (~/.config/opencode-m365/frames/, or
+// M365_FRAME_DIR). Cheap to run in production; gives us forensic data when M365
+// starts emitting new fields.
 const DUMP_FRAMES = !!process.env.M365_DUMP_FRAMES;
-const DUMP_DIR = join(homedir(), ".config", "opencode-m365", "frames");
 function dumpFrame(requestId: string, parsed: unknown, direction: "recv" | "send") {
   if (!DUMP_FRAMES) return;
   try {
-    mkdirSync(DUMP_DIR, { recursive: true });
+    mkdirSync(FRAME_DIR, { recursive: true });
     appendFileSync(
-      join(DUMP_DIR, `${requestId}.ndjson`),
+      join(FRAME_DIR, `${requestId}.ndjson`),
       JSON.stringify({ t: Date.now(), dir: direction, frame: parsed }) + "\n",
     );
   } catch {
@@ -313,7 +312,7 @@ export class CopilotSession {
     // MODEL (not the tone alone). `scenario` is not cosmetic: agent-less, the
     // default `OfficeWebIncludedCopilot` will not serve `Claude_Opus` (canned
     // BotConnection apology), while `OfficeWebPaidCopilot` does — and the same
-    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5 on the other, the
+    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5.5 on the other, the
     // same `Claude_Opus` tone Opus 4.5 (agent, premium) and Opus 5.5.
     // See getScenarioForModel / docs §5.
     const tone = getToneForModel(model);
@@ -826,8 +825,10 @@ export class CopilotSession {
             if (item.throttling) {
               throttleInfo = { current: item.throttling.numUserMessagesInConversation, max: item.throttling.maxNumUserMessagesInConversation };
               metering = parseMetering(item.throttling.metering);
-              const opus = opusAllowance(metering);
-              if (opus) log.info(`Opus priority access left: ${opus.daily ?? "?"} today, ${opus.weekly ?? "?"} this week`);
+              for (const [budget, { label }] of Object.entries(METERED_BUDGETS)) {
+                const left = meteredAllowance(metering, budget as MeteredBudget);
+                if (left) log.info(`${label} priority access left: ${left.daily ?? "?"} today, ${left.weekly ?? "?"} this week`);
+              }
             }
             let resumedHere = false;
             for (const m of item.messages ?? []) {

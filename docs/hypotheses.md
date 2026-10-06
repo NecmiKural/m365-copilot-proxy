@@ -54,10 +54,14 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   batching saves ~33% of turns on the GPT-6 tones and ~15% on the Sonnets (F61); the F58 bucket
   predicts throttles on non-premium accounts too, and the bench can pace itself by it
   (`M365_AVOID_THROTTLING=1`)
-- §26 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F64), nested fences
-  executed (F65), an ~8.2k-char command-line cap (F66), give-ups the retry never saw (F67–F69);
-  framing variants and thread poisoning not supported (F70); documents still open (F71); sessions
-  sharing an opening message shared an M365 conversation (F72)
+- §26 — `Claude_Sonnet` @ paid is now Sonnet 5.5 and Sonnet 5 has its own tone, `Claude_Sonnet_5`
+  (F64); Sonnet 5.5 has its own priority-access budget, 80/day and 150/week (F65), and Sonnet 5's
+  `/home/claude` sandbox (F66); a `GPT61Sol*` budget with no tone we can find (H26a); whether
+  relay_batch would save Sonnet 5.5's budget (H26b, open)
+- §27 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F67), nested fences
+  executed (F68), an ~8.2k-char command-line cap (F69), give-ups the retry never saw (F70–F72);
+  framing variants and thread poisoning not supported (F73); documents still open (F74); sessions
+  sharing an opening message shared an M365 conversation (F75)
 
 ---
 
@@ -4179,10 +4183,10 @@ other way from the bench (bench 9 → 2, pi 4 → 9), cost no solve either time,
 |---|---|---|
 | `gpt-6-think-deeper` (`Gpt_6_Reasoning`) | **relay_batch** | bench 40/40, −33% turns (F61); pi 10/10 |
 | `claude-sonnet` (Sonnet 4.6, `Claude_Sonnet` included) | **relay_batch** | bench 80/80, −14%; pi 39/39, −21% (F62) |
-| `claude-sonnet-5` (`Claude_Sonnet` paid) | relay | pi −6%, not significant |
+| `claude-sonnet-5` (`Claude_Sonnet` paid; `Claude_Sonnet_5` since §26) | relay | pi −6%, not significant |
 | `gpt-6-sol` (`Gpt_6_Sol_Reasoning`) | relay | agent-less sandbox turns 2 → 4 per 20 tasks (F61) |
 
-Sonnet 4.6 and Sonnet 5 share a tone, so the split rides on `SONNET_5_DEFAULT_FRAMING`, kept
+Sonnet 4.6 and Sonnet 5 share a tone (they did until §26), so the split rides on `SONNET_5_DEFAULT_FRAMING`, kept
 separate for exactly this. Shipped in `defaultFramingForTone`.
 
 ### H25b — relay_batch without a shell tool: Sonnet 4.6 refuses? (pre-registered 12:08Z)
@@ -4219,7 +4223,108 @@ F63 defaults; with a shell present the relay_batch text is unchanged, so F60–F
 **Live check of the fix** on account T, the one that refused 3/3 (12:11–12:13Z, new build, default
 framing for `claude-sonnet`, i.e. relay_batch falling back to relay): proxy-verify 3/3 PASS.
 
-## 26. Oct 2 2026 — Windows / pi as a general agent (#6, #7): six proxy-side causes, and what is still open
+---
+
+## 26. Oct 6 2026 — `Claude_Sonnet` @ paid becomes Sonnet 5.5; Sonnet 5 moves to `Claude_Sonnet_5`
+
+**Trigger.** On 2026-10-06 the paid route of `Claude_Sonnet` stopped answering as Sonnet 5, and a new
+tone, `Claude_Sonnet_5`, appeared. Nothing on the wire announced it. `tone-probe.mjs` and
+`agent-tone-probe.mjs` were run with a self-ID prompt — *"Reply with only your model name and version,
+a semicolon, the full company that made you, a semicolon, and your knowledge cutoff date (YYYY-mm) or
+"unknown"."* — on the premium account and on a non-premium one (03:28–03:36Z and 04:22Z). Raw dumps:
+`scripts/tone-out/2026-10-06T03-*`, `scripts/agent-tone-out/2026-10-06T03-*`.
+
+### F64 — `Claude_Sonnet` is Sonnet 4.6 (included) / Sonnet 5.5 (paid); `Claude_Sonnet_5` is Sonnet 4.6 / Sonnet 5 🟢
+Self-IDs, premium account; every cell `contentOrigin: DeepLeo`, the agent cells `3PDeclarativeAgent`:
+
+| tone @ scenario | agent-less (`tone-probe`) | with the tool agent (`agent-tone-probe`) |
+|---|---|---|
+| `Claude_Sonnet` @ included | Sonnet 4.6 ×2 | Sonnet 4.6 ×2 |
+| `Claude_Sonnet` @ paid | **Sonnet 5.5** ×2, unidentified ×1 | **Sonnet 5.5** ×3 |
+| `Claude_Sonnet_5` @ included | Sonnet 4.6 ×2 | Sonnet 4.6 ×2 |
+| `Claude_Sonnet_5` @ paid | **Sonnet 5** ×2 | **Sonnet 5** ×1, unidentified ×1 |
+
+The unidentified replies named only the host ("Microsoft Copilot; Microsoft Corporation; 2026-01",
+"Microsoft Enterprise Copilot; Microsoft; 2026-01"). Sonnet 5.5 likes that wrapper even when it does
+name itself — "Microsoft Enterprise Copilot (based on Claude Sonnet 5.5)", "Claude Sonnet 5.5 (in
+Microsoft Enterprise Copilot); Anthropic, PBC" — and both new-generation models give a 2026-01 cutoff,
+Sonnet 4.6 2025-08. Sonnet 5.5 is the slowest of the three (7.5–12.1 s against 4.2–7.5 s for Sonnet 5
+and 3.8–5.9 s for Sonnet 4.6, one-line answers).
+
+Non-premium account: both tones @ included are Sonnet 4.6 agent-less (1/1 each) and the dead route with
+the agent (`BotConnection`, `result: InternalError`, ~2.6 s, 1/1 each), like `Claude_Sonnet` in F44.
+
+So the tones split as F35's "one tone, two models" did: the included scenario serves
+Sonnet 4.6 on both, the paid scenario serves the newer model. **Shipped:** `claude-sonnet-5.5` →
+`Claude_Sonnet` + paid (`PAID_SCENARIO_MODELS`, plus unmapped `sonnet-5.5` / `sonnet-5-5` strings);
+`claude-sonnet-5` → `Claude_Sonnet_5`, which joins `PAID_SCENARIO_TONES` (nothing maps it for 4.6, which
+`claude-sonnet` already reaches). Both go agent-less with tools, like every Sonnet. A pinned model ID is
+only as stable as the tone behind it; the second hint was the metering map (F65).
+
+### F65 — Sonnet 5.5 has its own priority-access budget: 80 turns a day, 150 a week 🟢
+The paid scenario's `throttling.metering` (§24 F55) gained `ClaudeSonnet55QueryDaily` and
+`ClaudeSonnet55QueryWeekly`. Read after each turn, premium account, 2026-10-06 (a Tuesday):
+
+| Sonnet 5.5 turns so far | daily / weekly after | what ran |
+|---|---|---|
+| 1 | 79 / 149 | agent-tone-probe 03:28Z |
+| 4 | 76 / 146 | agent-tone-probe 03:30Z (two tone-probe turns in between) |
+| 5 | 75 / 145 | agent-tone-probe 03:34Z |
+| 6 | 74 / 144 | tone-probe 03:35Z (read at 05:51Z off another tone's turn) |
+| 7 | 73 / 143 | `sonnet5-native-tools-probe` 06:09Z (F66) |
+| 8, 9 | 72 / 142, 71 / 141 | `proxy-verify --multiturn --model=claude-sonnet-5.5`, both turns of one conversation |
+
+Exactly one unit per turn, agent or not, and a follow-up in the same conversation costs one too. Turns
+that lowered **neither**: `Claude_Sonnet_5` @ paid (the agent-tone-probe cells right after a Sonnet 5.5
+cell, and both `claude-sonnet-5` proxy-verify runs), `Gpt_6_Sol_Reasoning` @ paid and `Gpt_5_5_Chat` @
+paid (1 each). Starting values 80 / 150 —
+the week's budget was untouched on a Tuesday, which fits the model having just arrived. Separate from
+Opus's (`ClaudeOpusQuery75` / `ClaudeOpusQueryDaily`, which read 0 / 5 at the time and didn't move).
+Not yet observed: the refusal itself and the resets. The detector keys on `result.value: "OutOfCredits"`,
+which is model-agnostic; the reset times are assumed to match Opus's (midnight UTC, Monday).
+
+**Shipped:** `METERED_BUDGETS` (`priority-access.ts`) lists both budgets; `meteredBudgetOf(model)` maps a
+model to one (Opus 5.5 → `opus`, Sonnet 5.5 → `sonnet-5.5`, null off the paid scenario); walls are
+remembered per budget, so Opus running out says nothing about Sonnet 5.5; `usage` carries
+`x_m365_sonnet55_daily_remaining` / `_weekly_remaining`; `M365_SONNET_FALLBACK_MODEL` (e.g.
+`claude-sonnet-5`) mirrors `M365_OPUS_FALLBACK_MODEL`. The session log prints each budget after every
+paid turn ("Sonnet 5.5 priority access left: 72 today, 142 this week").
+
+### F66 — Sonnet 5.5 has Sonnet 5's sandbox → relay 🟡 (n=1)
+`TONE=Claude_Sonnet node scripts/sonnet5-native-tools-probe.mjs pwd-proxy` (06:09Z): a native `Progress`
+frame running `pwd`, reply "`pwd` printed exactly: /home/claude" — the same `/home/claude` sandbox as
+Sonnet 5 (§21 F36). So the `<system>`-tag reading that sent Sonnet 5 to its sandbox (F37) is the risk
+here too; untested on 5.5, but cheap to avoid. **Shipped:** `SONNET_5_5_DEFAULT_FRAMING = "relay"`, by
+model ID (`claude-sonnet` keeps `relay_batch` on the same tone).
+
+Live checks (premium, 06:19–06:21Z, proxy-verify `--tools --multiturn`, whose only tool is `read_file`):
+`claude-sonnet-5.5` 1/1 PASS (tool call 9.2 s, answer 5.5 s; routed `Claude_Sonnet` +
+`OfficeWebPaidCopilot`, agent-less). `claude-sonnet-5` 1/2: the first run answered "I don't actually have
+a `read_file` tool — my tools only operate on my own sandbox…" and offered a ```` ```bash ```` block
+instead, the second passed. That is H25b's refusal shape under plain relay, on a shell-less toolset; n=2,
+not chased.
+
+### H26a — a GPT-6.1 Sol budget with no tone we can find 🔴
+The same metering map carries `GPT61SolQueryWeekly` (75) and `GPT61SolQueryDaily` (40) — Opus's
+numbers — on every paid turn. Eight guessed tone names were rejected outright (`type:3` "Failed to invoke
+'Chat'", premium, paid scenario unless noted): `Gpt_6_1_Sol_Reasoning` (both scenarios),
+`Gpt_6_1_Sol_Chat`, `Gpt_6_1_Reasoning`, `Gpt_6_1_Sol`, `Gpt_6_Sol_1_Reasoning`, `Gpt_6_1_Sol_Thinking`,
+`Gpt_Sol_Reasoning`, `Gpt_6_1_Chat`. `Gpt_6_Sol_Reasoning` @ paid still self-IDs as the GPT-6 reasoning
+model and lowers neither key. **Hypothesis:** a GPT-6.1 Sol tone is rolling out and its budget key
+shipped before this account was flighted for the model (or its tone has a name we didn't guess).
+**Probe:** the web client's tone list (§12.6) once "GPT 6.1 Sol"
+shows in its picker, then `tone-probe.mjs` + `agent-tone-probe.mjs` on both accounts. `_probe-chat.mjs`
+now returns `throttle.metering`, so any probe can watch for the keys moving.
+
+### H26b — does relay_batch save Sonnet 5.5's budget? 🔴
+Its budget counts turns, which is why Opus moved to relay_batch (F60). On Sonnet 5 batching saved 15% of
+bench turns but only 6% in pi (F63). **Probe:** real pi, fix-bug + multi, relay vs relay_batch, 5 runs
+each (~60–80 of the 80 daily units — split across two days). Switch if the §25 amendment's rule passes
+(relay_batch ≥ 9/10, ≥ relay − 1, pi turns per run down ≥ 15%).
+
+---
+
+## 27. Oct 2 2026 — Windows / pi as a general agent (#6, #7): six proxy-side causes, and what is still open
 
 **Question.** #7's fix (673911b) was reasoned, not measured: no Windows host had run it. On a real
 Windows 11 machine with real pi and `gpt-5.6-think-deeper`, does a pi session work as a general
@@ -4231,9 +4336,9 @@ causes are the proxy's?
 `results.json` of a six-task suite (`%TEMP%\m365-agent-suite-*`); sweeps, a mock OpenAI endpoint and
 probes (`%TEMP%\m365-tooltest`). Service version not captured (`M365_DEBUG` truncates frames).
 Methods note for anyone sweeping single turns: **vary the first user message** — `SessionPool`
-fingerprints a conversation by it, so identical prompts land in one M365 conversation (F70).
+fingerprints a conversation by it, so identical prompts land in one M365 conversation (F73).
 
-### F64 — a Windows host is not a PowerShell shell: the platform note sent pi's bash PowerShell 🟢
+### F67 — a Windows host is not a PowerShell shell: the platform note sent pi's bash PowerShell 🟢
 pi on Windows gives a tool named `bash` ("Execute a bash command…") backed by Git Bash. The #7 note
 said it "runs PowerShell" and to emit ```powershell, so every shell turn came back as
 `/usr/bin/bash: line 2: Write-Output: command not found` (trace, 1/1) and the model gave up after
@@ -4243,14 +4348,14 @@ one or two. That is also #7's original report read the other way: "only works wh
 with `find`/`grep`; "count the .ts files and write the number" wrote 43 (actual 43).
 **Falsify:** a harness whose tool is named `bash` but runs PowerShell (set `M365_HOST_SHELL`).
 
-### F65 — the fence regex closed on the first ```, so nested fences executed 🟢
+### F68 — the fence regex closed on the first ```, so nested fences executed 🟢
 A ```markdown answer holding N illustrative ```bash examples parsed as N−1 executable calls
 (deterministic; 3 examples → 2 calls), and a heredoc writing Markdown with a code block reached the
 shell as `cat > ozet.md <<'EOF'\n# Title` (unterminated). `scanFences` counts depth; only depth-0
 blocks are tool candidates. 0 of ~1 MB of logged model output glues a closer to code, so the
 own-line rule costs nothing observed.
 
-### F66 — pi's shell tool cuts commands past ~8,190 characters silently 🟢 (model-free)
+### F69 — pi's shell tool cuts commands past ~8,190 characters silently 🟢 (model-free)
 A mock OpenAI endpoint returning scripted tool calls to real pi: a 12,070-char heredoc wrote 8,164
 bytes, the trailing `wc`/`echo` never ran, and bash only said "here-document … delimited by
 end-of-file"; 7,000 chars and 6,000 double quotes were intact (the cap is on characters, not escaped
@@ -4260,7 +4365,7 @@ before the heredoc). A platform-note line telling the model to use the write too
 it still wrote one 13.6 KB heredoc), so the proxy rewrites an over-cap quoted heredoc write to the
 harness write tool (`longHeredocAsWrite`). After: the summary task wrote 13,418 chars, complete.
 
-### F67 — every follow-up tool result went out as `name="unknown"` 🟢; that it caused the give-ups ⚫ not supported
+### F70 — every follow-up tool result went out as `name="unknown"` 🟢; that it caused the give-ups ⚫ not supported
 `formatMessages` names a result after its call (fixed earlier for the misread it causes); the
 handler's delta path — every pi turn from turn 2 on — kept `m.name || "unknown"`. Fixed: one
 `formatToolResponse` for both. The hypothesis that the label caused the mid-task "bash is not
@@ -4270,7 +4375,7 @@ after the fix, pdf and docx still gave up the same way (3 of 4 runs).
 name="bash" call_id="…">` for deltas. Kept here: the one shared renderer, so the delta reads like the
 first turn, `tool="bash" command="…"`, and #51's test now expects that.)
 
-### F68 — give-ups the forcing retry never saw: Turkish ones, and ones dressed as a document 🟢
+### F71 — give-ups the forcing retry never saw: Turkish ones, and ones dressed as a document 🟢
 (1) Every confabulation pattern was English; a Turkish user's give-ups went straight through.
 (2) "…devre dışı olduğu için oluşturamıyorum" + two "run these yourself" ```bash blocks parsed as
 tool calls, so the retry (gated on no calls) was skipped, then the document guard returned it as
@@ -4279,14 +4384,14 @@ patterns are first-person / session-scoped so a Turkish summary of this repo doe
 Live detections after the change rescued fix-bug, skill-use, docx (2×), pdf (1×) and a turn-1
 summary refusal; one summary retry also failed.
 
-### F69 — the forcing prompt contradicted the transcript mid-task 🟡
+### F72 — the forcing prompt contradicted the transcript mid-task 🟡
 `CONFAB_FORCE_PROMPT` says "you have not run any command yet"; after a real tool result the model
 answered "so I can't run `ls -la` or `cat`" (2/2 observed retries). With `everActed`, the retry now
 says the tools work and a missing program is something to install. Indicative only: the first pdf
 pass of the night came after it (a 39.6 KB PDF via Edge headless print-to-pdf, Segoe UI / Consolas
 embedded, every Turkish glyph of the source mapped). n too small for a rate.
 
-### F70 — framing variants and "a refusal poisons the thread": both ⚫ at the scale tested
+### F73 — framing variants and "a refusal poisons the thread": both ⚫ at the scale tested
 An n=1-per-arm read suggested `relay`/`honest`/`minimal` beat `baseline` for GPT-5.6 tool calls. A
 5-per-arm sweep that reused one first message put all 30 trials in **one** conversation
 (`x_m365_conversation_messages` 3→4→5…) and scored 1/30. With a nonce per trial and interleaved
@@ -4294,9 +4399,9 @@ arms: `baseline` 5/5, `relay` 5/5, `honest` 5/5 — no framing effect on the tur
 poisons the thread" (re-send in a fresh conversation on a give-up): in-thread 5/6 vs fresh 6/6, not a
 result; left as the opt-in lever it was on the fork, not shipped.
 
-### F71 — the general suite: coding works, documents don't yet 🟡
+### F74 — the general suite: coding works, documents don't yet 🟡
 Real pi, `gpt-5.6-think-deeper`, one objective verifier per task, across the night's builds after
-F64: write code (Turkish slugify, with the `İ` trap) 3/3 · fix two seeded bugs 3/3 · use a project
+F67: write code (Turkish slugify, with the `İ` trap) 3/3 · fix two seeded bugs 3/3 · use a project
 skill 2/2 · repo Q&A 2/3 (one answer from context, wrong file) · .docx 3/6 · PDF 1/10. Two caveats:
 project skills are trust-gated and `-p` mode skips them (`--approve` for automation — the first two
 skill runs were a test bug, not a model failure); and the last three PDF runs were turn-1 refusals
@@ -4304,11 +4409,11 @@ in a row after well over 100 threads that night — plausibly account degradatio
 **Update (Oct 4, rested account):** the "obstacle" reading was partly my harness. pandoc 3.12 and
 MiKTeX `xelatex` had been installed since Sep 29, but the shell the suite ran from had a stale PATH,
 so its agents never saw them; and one of the night's docx runs `pip install`ed python-docx, changing
-the environment for later runs. Day-to-day numbers are therefore not comparable. See F72 for what the
+the environment for later runs. Day-to-day numbers are therefore not comparable. See F75 for what the
 probe actually found.
 
-### F72 — sessions that share an opening message shared one M365 conversation 🟢
-The F71 probe (Oct 4, one day of rest, 3 arms × {pdf, docx} × 5, interleaved; arms: control, the
+### F75 — sessions that share an opening message shared one M365 conversation 🟢
+The F74 probe (Oct 4, one day of rest, 3 arms × {pdf, docx} × 5, interleaved; arms: control, the
 document recipes in the platform note, the same recipes as a project skill) scored control 7/10, note
 3/10, skill 4/10 — and **by position in the sweep** 7/10 → 4/10 → 3/10, every arm falling together.
 The failed runs' text explains it: in **empty** directories the model wrote "notlar.docx was already
@@ -4319,7 +4424,7 @@ and on a match the handler called `session.reset()` — which drops the `Copilot
 keeps the `conversationId` — so the full prompt went into the previous run's M365 thread. At equal
 length nothing reset at all, the delta was empty, and `"Please continue."` went there. Real-use
 shape: two pi sessions opened with the same prompt within 30 minutes, even in different directories.
-This is also what F70's 1/30 was, read as a measurement artifact at the time. Fixed:
+This is also what F73's 1/30 was, read as a measurement artifact at the time. Fixed:
 `messages.length <= sentMessageCount` → `newConversation()` (a harness only ever appends, and the
 full prompt re-sends the whole history). Regression tests fail on the old handler.
 The document-recipe arms did not help (note 3/10 with 7 turn-1 give-ups vs control 2; p ≈ 0.07 on
@@ -4327,5 +4432,5 @@ the give-ups, not significant) and were not shipped. **Live after the fix** (sam
 **17/20** (pdf 8/10, docx 9/10) vs control 7/10 before; by position 9/10 then 8/10 — the decline is
 gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prompt), and 0 outputs
 referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
-(F68/F69), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
+(F71/F72), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.

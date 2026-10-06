@@ -1,4 +1,5 @@
 import { JwtClaims } from "./schemas.js";
+import type { MeteredBudget } from "./priority-access.js";
 
 // Model name → tone mapping.
 // The server VALIDATES tones (an unknown tone errors with "Failed to invoke
@@ -7,9 +8,10 @@ import { JwtClaims } from "./schemas.js";
 // H8.6) — a genuine non-Microsoft model at zero marginal cost.
 //
 // A tone is not always one model: `Claude_Sonnet` serves Claude Sonnet 4.6 on
-// the included scenario and Claude Sonnet 5 on the paid one (tone-probe
-// 2026-09-28, docs §21). The scenario therefore has to be derivable from the
-// MODEL ID as well as the tone — see PAID_SCENARIO_MODELS below.
+// the included scenario and Claude Sonnet 5.5 on the paid one (tone-probe
+// 2026-10-06, docs §26; it was Sonnet 5 until then). The scenario therefore has
+// to be derivable from the MODEL ID as well as the tone — see
+// PAID_SCENARIO_MODELS below.
 //
 // Microsoft retired the `*_Quick` tones: `Gpt_Quick` and `Gpt_5_{2,3,4}_Quick`
 // are now REJECTED by the validator, and the `*_Chat` tones replaced them
@@ -36,9 +38,15 @@ const MODEL_TONES: Record<string, string> = {
   "claude-sonnet": "Claude_Sonnet",
   "claude-sonnet-4.5": "Claude_Sonnet",
   "claude-sonnet-4.6": "Claude_Sonnet",
-  // Same tone, paid scenario: Claude Sonnet 5 (self-IDs "Claude Sonnet 5",
-  // knowledge cutoff 2026-01). The scenario comes from PAID_SCENARIO_MODELS.
-  "claude-sonnet-5": "Claude_Sonnet",
+  // Same tone, paid scenario: Claude Sonnet 5.5 (self-IDs "Claude Sonnet 5.5",
+  // knowledge cutoff 2026-01, since 2026-10-06). The scenario comes from
+  // PAID_SCENARIO_MODELS. Metered, like Opus 5.5 (METERED_BUDGETS).
+  "claude-sonnet-5.5": "Claude_Sonnet",
+  // Sonnet 5 moved to a tone of its own when Sonnet 5.5 took over the paid
+  // scenario of `Claude_Sonnet`: `Claude_Sonnet_5` is Sonnet 5 on the paid
+  // scenario (self-IDs "Claude Sonnet 5", cutoff 2026-01) and Sonnet 4.6 on the
+  // included one, so it's in PAID_SCENARIO_TONES. Not metered.
+  "claude-sonnet-5": "Claude_Sonnet_5",
   "claude-sonnet-think-deeper": "Claude_Sonnet_Reasoning",
   // `Claude_Opus` is one tone and two models, like `Claude_Sonnet`, but the
   // other way round: the TONE is paid (PAID_SCENARIO_TONES) and one model ID
@@ -141,8 +149,13 @@ export function getToneForModel(model: string): string {
   // survives whatever version suffix a client decides to send. The scenario is
   // attached automatically (getScenarioForModel): paid (Opus 5.5) unless the
   // string names Opus 4.5 (`claude-opus-4-5-…`), which goes to the included one.
+  // Likewise an unmapped Sonnet 5 string (`claude-sonnet-5[1m]`, a dated
+  // `claude-sonnet-5-…`) goes to Sonnet 5's own tone; Sonnet 5.5 strings stay on
+  // `Claude_Sonnet` and get the paid scenario from isSonnet55Model.
   if (/opus/i.test(model)) return "Claude_Opus";
-  if (/^claude/i.test(model)) return "Claude_Sonnet";
+  if (/^claude/i.test(model)) {
+    return SONNET_5_PATTERN.test(model) && !SONNET_5_5_PATTERN.test(model) ? "Claude_Sonnet_5" : "Claude_Sonnet";
+  }
   return MODEL_TONES["m365-copilot"];
 }
 
@@ -183,9 +196,14 @@ const PAID_LICENSE_TYPE = "Premium";
  *
  * A model ID can opt out: `claude-opus-4.5` is the same tone on the included
  * scenario (INCLUDED_SCENARIO_MODELS), and isn't metered.
+ *
+ * `Claude_Sonnet_5` is here because its own model, Sonnet 5, only serves on the
+ * paid scenario; on the included one the tone is Sonnet 4.6, which
+ * `claude-sonnet` already reaches (tone-probe 2026-10-06, docs §26).
  */
 export const PAID_SCENARIO_TONES: ReadonlySet<string> = new Set([
   "Claude_Opus",
+  "Claude_Sonnet_5",
   "Gpt_6_Reasoning",
 ]);
 
@@ -193,24 +211,33 @@ export const PAID_SCENARIO_TONES: ReadonlySet<string> = new Set([
  * Model IDs that need the paid scenario even though their TONE does not.
  *
  * `Claude_Sonnet` is one tone and two models: Sonnet 4.6 on the included
- * scenario, Sonnet 5 on the paid one. PAID_SCENARIO_TONES can't express that
- * (it would drag `claude-sonnet` onto Sonnet 5 too), so the choice lives on
+ * scenario, Sonnet 5.5 on the paid one. PAID_SCENARIO_TONES can't express that
+ * (it would drag `claude-sonnet` onto Sonnet 5.5 too), so the choice lives on
  * the model ID. Unmapped strings a client may send for the same model
- * (`claude-sonnet-5[1m]`, a dated `claude-sonnet-5-…`) are caught by
- * SONNET_5_PATTERN rather than silently served by Sonnet 4.6.
+ * (`claude-sonnet-5.5[1m]`, a dated `claude-sonnet-5-5-…`) are caught by
+ * SONNET_5_5_PATTERN rather than silently served by Sonnet 4.6.
  */
 export const PAID_SCENARIO_MODELS: ReadonlySet<string> = new Set([
-  "claude-sonnet-5",
+  "claude-sonnet-5.5",
 ]);
+// `sonnet-5.5`, `sonnet-5-5`, `sonnet5_5`, `sonnet 5.5`, and anything after it —
+// but not a dated `sonnet-5-2026…` and not a hypothetical `sonnet-5.50`.
+const SONNET_5_5_PATTERN = /sonnet[-_ ]?5[-_. ]5(?!\d)/i;
 // `sonnet-5`, `sonnet5`, `sonnet_5`, `sonnet 5`, and anything after it — but
-// not `sonnet-4.5` / `sonnet-4-5` (the digit after the separator is 4) and not
-// a hypothetical `sonnet-50`.
-const SONNET_5_PATTERN = /sonnet[-_ ]?5(?!\d)/i;
+// not `sonnet-4.5` / `sonnet-4-5` (the digit after the separator is 4), not a
+// hypothetical `sonnet-50`, and not a dotted minor version (`sonnet-5.1`), which
+// is some other model. Matches `sonnet-5-5` too: test SONNET_5_5_PATTERN first.
+const SONNET_5_PATTERN = /sonnet[-_ ]?5(?!\d|\.\d)/i;
 
-/** True when this model ID is Claude Sonnet 5, i.e. `Claude_Sonnet` + paid scenario. */
-export function isSonnet5Model(model: string): boolean {
+/** True when this model ID is Claude Sonnet 5.5, i.e. `Claude_Sonnet` + paid scenario. */
+export function isSonnet55Model(model: string): boolean {
   return PAID_SCENARIO_MODELS.has(model) ||
-    (getToneForModel(model) === "Claude_Sonnet" && SONNET_5_PATTERN.test(model));
+    (getToneForModel(model) === "Claude_Sonnet" && SONNET_5_5_PATTERN.test(model));
+}
+
+/** True when this model ID is Claude Sonnet 5, i.e. the `Claude_Sonnet_5` tone. */
+export function isSonnet5Model(model: string): boolean {
+  return getToneForModel(model) === "Claude_Sonnet_5";
 }
 
 /**
@@ -392,7 +419,7 @@ function routing(paid: boolean): ScenarioRouting {
  * Env overrides (`M365_SCENARIO` / `M365_LICENSE_TYPE`) win, so a tenant whose
  * entitlement is named differently can still be driven without a code change.
  * Prefer getScenarioForModel when a model ID is at hand: a tone alone can't
- * tell Sonnet 4.6 from Sonnet 5.
+ * tell Sonnet 4.6 from Sonnet 5.5.
  */
 export function getScenarioForTone(tone: string): ScenarioRouting {
   return routing(PAID_SCENARIO_TONES.has(tone));
@@ -400,34 +427,47 @@ export function getScenarioForTone(tone: string): ScenarioRouting {
 
 /**
  * The scenario a MODEL ID must be requested under: paid when its tone is
- * entitlement-gated (Opus, GPT-6) or when the ID itself selects the paid
- * model behind a shared tone (Sonnet 5); included when the ID selects the
- * included model behind a paid tone (Opus 4.5). This is what session.ts
+ * entitlement-gated (Opus, Sonnet 5, GPT-6) or when the ID itself selects the
+ * paid model behind a shared tone (Sonnet 5.5); included when the ID selects
+ * the included model behind a paid tone (Opus 4.5). This is what session.ts
  * routes on.
  */
 export function getScenarioForModel(model: string): ScenarioRouting {
   if (isOpus45Model(model)) return routing(false);
-  return routing(PAID_SCENARIO_TONES.has(getToneForModel(model)) || isSonnet5Model(model));
+  return routing(PAID_SCENARIO_TONES.has(getToneForModel(model)) || isSonnet55Model(model));
 }
 
 /**
- * Whether this model's turns draw on the Opus priority-access budget: Opus on
- * the paid scenario (Opus 5.5). Opus 4.5 on the included scenario doesn't.
+ * The priority-access budget this model's turns draw on, or null when it isn't
+ * metered: Opus on the paid scenario (Opus 5.5) and `Claude_Sonnet` on the paid
+ * scenario (Sonnet 5.5). Opus 4.5, Sonnet 4.6 and Sonnet 5 aren't metered.
+ * Follows the scenario the request will really use, `M365_SCENARIO` included.
  */
-export function isMeteredOpusModel(model: string): boolean {
-  return getToneForModel(model) === "Claude_Opus" && getScenarioForModel(model).scenario === PAID_SCENARIO;
+export function meteredBudgetOf(model: string): MeteredBudget | null {
+  if (getScenarioForModel(model).scenario !== PAID_SCENARIO) return null;
+  const tone = getToneForModel(model);
+  if (tone === "Claude_Opus") return "opus";
+  if (tone === "Claude_Sonnet") return "sonnet-5.5";
+  return null;
 }
 
+/** The env var naming each budget's fallback model. */
+export const PRIORITY_ACCESS_FALLBACK_ENV: Readonly<Record<MeteredBudget, string>> = {
+  opus: "M365_OPUS_FALLBACK_MODEL",
+  "sonnet-5.5": "M365_SONNET_FALLBACK_MODEL",
+};
+
 /**
- * `M365_OPUS_FALLBACK_MODEL`: the model to serve a metered Opus request with
- * once the priority-access budget is used up (typically `claude-opus-4.5`,
- * which isn't metered), instead of a 429. Opt-in, because it swaps the model:
- * the response's `model` field then names the one that answered. Ignored when
- * it names a metered model itself.
+ * The model to serve a metered request with once its priority-access budget is
+ * used up, instead of a 429: `M365_OPUS_FALLBACK_MODEL` for Opus 5.5 (typically
+ * `claude-opus-4.5`), `M365_SONNET_FALLBACK_MODEL` for Sonnet 5.5 (typically
+ * `claude-sonnet-5`). Opt-in, because it swaps the model: the response's
+ * `model` field then names the one that answered. Ignored when it names a
+ * metered model itself.
  */
-export function opusFallbackModel(): string | null {
-  const v = process.env.M365_OPUS_FALLBACK_MODEL?.trim();
-  if (!v || isMeteredOpusModel(v)) return null;
+export function priorityAccessFallbackModel(budget: MeteredBudget): string | null {
+  const v = process.env[PRIORITY_ACCESS_FALLBACK_ENV[budget]]?.trim();
+  if (!v || meteredBudgetOf(v)) return null;
   return v;
 }
 
