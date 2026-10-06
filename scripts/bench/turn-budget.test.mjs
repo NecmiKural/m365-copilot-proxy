@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { budgetConfig, decide, parseEvents, replay, waitForBudget } from "./turn-budget.mjs";
+import { budgetConfig, decide, findLogs, parseEvents, replay, waitForBudget } from "./turn-budget.mjs";
 
 const T0 = Date.parse("2026-10-05T08:00:00.000Z");
 const iso = (ms) => new Date(ms).toISOString();
@@ -80,5 +80,18 @@ describe("turn-budget", () => {
     expect(budgetConfig({ M365_AVOID_THROTTLING: "1" }).enabled).toBe(true);
     const res = await waitForBudget({ cfg: { ...cfg, enabled: false }, sleep: () => { throw new Error("slept"); } });
     expect(res.waitedMs).toBe(0);
+  });
+
+  it("reads the proxy's M365_LOG_FILE, relative to the config dir, whatever it is named", () => {
+    const cfgDir = join(homedir(), ".config", "opencode-m365");
+    expect(budgetConfig({ M365_LOG_FILE: "my/log.log" }).dirs).toContain(join(cfgDir, "my", "log.log"));
+    expect(budgetConfig({ M365_LOG_FILE: "/abs/x.log" }).dirs).toContain("/abs/x.log");
+    const dir = mkdtempSync(join(tmpdir(), "turn-budget-"));
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, "proxy.log"), turnLine(T0) + "\n");
+    writeFileSync(join(dir, "sub", "other.log"), turnLine(T0) + "\n");
+    writeFileSync(join(dir, "sub", "a-debug.log"), turnLine(T0) + "\n");
+    expect(findLogs([join(dir, "proxy.log")], 0)).toEqual([join(dir, "proxy.log")]);
+    expect(findLogs([dir], 0)).toEqual([join(dir, "sub", "a-debug.log")]);
   });
 });

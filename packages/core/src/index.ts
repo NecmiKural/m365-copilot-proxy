@@ -127,4 +127,4 @@ export {
   type ParseResult,
 } from "./tools.js";
 
-export { createLogger, trunc, LOG_PATH } from "./log.js";
+export { createLogger, trunc, LOG_PATH, FRAME_DIR } from "./log.js";

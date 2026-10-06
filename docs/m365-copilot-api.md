@@ -660,7 +660,8 @@ Run unsandboxed with `CHROMIUM_PATH` set and `M365_NO_INTERACTIVE=1`. They reuse
 
 When set, `CopilotSession` appends every WS frame (both `send` and `recv`,
 both raw chat invocation and bot updates) to
-`~/.config/opencode-m365/frames/<requestId>.ndjson`. Use this in production
+`~/.config/opencode-m365/frames/<requestId>.ndjson` (`M365_FRAME_DIR` names
+another directory, relative to `~/.config/opencode-m365/`). Use this in production
 to catch a regression mid-flight: ship the suspect NDJSON to a dev box and
 diff against a known-good capture. Negligible overhead since the data is
 already in memory.
