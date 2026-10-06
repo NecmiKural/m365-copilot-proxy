@@ -184,12 +184,15 @@ All run with `scripts/_probe-chat.mjs` overrides; no license needed.
 
 ## E. Claude Sonnet 5 (paid scenario — §21)
 
+Sonnet 5 is the `Claude_Sonnet_5` tone since 2026-10-06; `Claude_Sonnet` on the paid scenario is now
+Sonnet 5.5, which has the same sandbox and a metered budget (80/day) — §26.
+
 ### E-S1 — What gates Sonnet 5's own sandbox tools? (F36)
 - **Hypothesis:** some client-side field turns `bash_tool`/`create_file` off. Falsified so far for
   optionsSets, plugins, variants and `allowedMessageTypes`; next candidates: `gptDefinitions`,
   `clientOverrides.capabilities`, a different `clientInfo.clientPlatform`.
 - **Run:** `node scripts/sonnet5-native-tools-probe.mjs pwd-proxy,pwd-none,pwd-bare,pwd-noprogress`
-  (add a cell per candidate). **Read:** `native tool calls: N` and whether the reply says
+  (add a cell per candidate; `TONE=Claude_Sonnet` probes Sonnet 5.5 and spends its budget). **Read:** `native tool calls: N` and whether the reply says
   `/home/claude`. **Cost:** 1 fresh thread per cell — needs a paid seat.
 
 ### E-S2 — Framing sweep for Sonnet 5 (F37, F43)

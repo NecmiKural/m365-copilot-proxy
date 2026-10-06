@@ -54,6 +54,10 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   batching saves ~33% of turns on the GPT-6 tones and ~15% on the Sonnets (F61); the F58 bucket
   predicts throttles on non-premium accounts too, and the bench can pace itself by it
   (`M365_AVOID_THROTTLING=1`)
+- §26 — `Claude_Sonnet` @ paid is now Sonnet 5.5 and Sonnet 5 has its own tone, `Claude_Sonnet_5`
+  (F64); Sonnet 5.5 has its own priority-access budget, 80/day and 150/week (F65), and Sonnet 5's
+  `/home/claude` sandbox (F66); a `GPT61Sol*` budget with no tone we can find (H26a); whether
+  relay_batch would save Sonnet 5.5's budget (H26b, open)
 
 ---
 
@@ -4175,10 +4179,10 @@ other way from the bench (bench 9 → 2, pi 4 → 9), cost no solve either time,
 |---|---|---|
 | `gpt-6-think-deeper` (`Gpt_6_Reasoning`) | **relay_batch** | bench 40/40, −33% turns (F61); pi 10/10 |
 | `claude-sonnet` (Sonnet 4.6, `Claude_Sonnet` included) | **relay_batch** | bench 80/80, −14%; pi 39/39, −21% (F62) |
-| `claude-sonnet-5` (`Claude_Sonnet` paid) | relay | pi −6%, not significant |
+| `claude-sonnet-5` (`Claude_Sonnet` paid; `Claude_Sonnet_5` since §26) | relay | pi −6%, not significant |
 | `gpt-6-sol` (`Gpt_6_Sol_Reasoning`) | relay | agent-less sandbox turns 2 → 4 per 20 tasks (F61) |
 
-Sonnet 4.6 and Sonnet 5 share a tone, so the split rides on `SONNET_5_DEFAULT_FRAMING`, kept
+Sonnet 4.6 and Sonnet 5 share a tone (they did until §26), so the split rides on `SONNET_5_DEFAULT_FRAMING`, kept
 separate for exactly this. Shipped in `defaultFramingForTone`.
 
 ### H25b — relay_batch without a shell tool: Sonnet 4.6 refuses? (pre-registered 12:08Z)
@@ -4214,3 +4218,102 @@ byte-for-byte otherwise — the text that passed 6/6. Shell-less Opus 4.5 (with 
 F63 defaults; with a shell present the relay_batch text is unchanged, so F60–F63 stand.
 **Live check of the fix** on account T, the one that refused 3/3 (12:11–12:13Z, new build, default
 framing for `claude-sonnet`, i.e. relay_batch falling back to relay): proxy-verify 3/3 PASS.
+
+---
+
+## 26. Oct 6 2026 — `Claude_Sonnet` @ paid becomes Sonnet 5.5; Sonnet 5 moves to `Claude_Sonnet_5`
+
+**Trigger.** On 2026-10-06 the paid route of `Claude_Sonnet` stopped answering as Sonnet 5, and a new
+tone, `Claude_Sonnet_5`, appeared. Nothing on the wire announced it. `tone-probe.mjs` and
+`agent-tone-probe.mjs` were run with a self-ID prompt — *"Reply with only your model name and version,
+a semicolon, the full company that made you, a semicolon, and your knowledge cutoff date (YYYY-mm) or
+"unknown"."* — on the premium account and on a non-premium one (03:28–03:36Z and 04:22Z). Raw dumps:
+`scripts/tone-out/2026-10-06T03-*`, `scripts/agent-tone-out/2026-10-06T03-*`.
+
+### F64 — `Claude_Sonnet` is Sonnet 4.6 (included) / Sonnet 5.5 (paid); `Claude_Sonnet_5` is Sonnet 4.6 / Sonnet 5 🟢
+Self-IDs, premium account; every cell `contentOrigin: DeepLeo`, the agent cells `3PDeclarativeAgent`:
+
+| tone @ scenario | agent-less (`tone-probe`) | with the tool agent (`agent-tone-probe`) |
+|---|---|---|
+| `Claude_Sonnet` @ included | Sonnet 4.6 ×2 | Sonnet 4.6 ×2 |
+| `Claude_Sonnet` @ paid | **Sonnet 5.5** ×2, unidentified ×1 | **Sonnet 5.5** ×3 |
+| `Claude_Sonnet_5` @ included | Sonnet 4.6 ×2 | Sonnet 4.6 ×2 |
+| `Claude_Sonnet_5` @ paid | **Sonnet 5** ×2 | **Sonnet 5** ×1, unidentified ×1 |
+
+The unidentified replies named only the host ("Microsoft Copilot; Microsoft Corporation; 2026-01",
+"Microsoft Enterprise Copilot; Microsoft; 2026-01"). Sonnet 5.5 likes that wrapper even when it does
+name itself — "Microsoft Enterprise Copilot (based on Claude Sonnet 5.5)", "Claude Sonnet 5.5 (in
+Microsoft Enterprise Copilot); Anthropic, PBC" — and both new-generation models give a 2026-01 cutoff,
+Sonnet 4.6 2025-08. Sonnet 5.5 is the slowest of the three (7.5–12.1 s against 4.2–7.5 s for Sonnet 5
+and 3.8–5.9 s for Sonnet 4.6, one-line answers).
+
+Non-premium account: both tones @ included are Sonnet 4.6 agent-less (1/1 each) and the dead route with
+the agent (`BotConnection`, `result: InternalError`, ~2.6 s, 1/1 each), like `Claude_Sonnet` in F44.
+
+So the tones split as F35's "one tone, two models" did: the included scenario serves
+Sonnet 4.6 on both, the paid scenario serves the newer model. **Shipped:** `claude-sonnet-5.5` →
+`Claude_Sonnet` + paid (`PAID_SCENARIO_MODELS`, plus unmapped `sonnet-5.5` / `sonnet-5-5` strings);
+`claude-sonnet-5` → `Claude_Sonnet_5`, which joins `PAID_SCENARIO_TONES` (nothing maps it for 4.6, which
+`claude-sonnet` already reaches). Both go agent-less with tools, like every Sonnet. A pinned model ID is
+only as stable as the tone behind it; the second hint was the metering map (F65).
+
+### F65 — Sonnet 5.5 has its own priority-access budget: 80 turns a day, 150 a week 🟢
+The paid scenario's `throttling.metering` (§24 F55) gained `ClaudeSonnet55QueryDaily` and
+`ClaudeSonnet55QueryWeekly`. Read after each turn, premium account, 2026-10-06 (a Tuesday):
+
+| Sonnet 5.5 turns so far | daily / weekly after | what ran |
+|---|---|---|
+| 1 | 79 / 149 | agent-tone-probe 03:28Z |
+| 4 | 76 / 146 | agent-tone-probe 03:30Z (two tone-probe turns in between) |
+| 5 | 75 / 145 | agent-tone-probe 03:34Z |
+| 6 | 74 / 144 | tone-probe 03:35Z (read at 05:51Z off another tone's turn) |
+| 7 | 73 / 143 | `sonnet5-native-tools-probe` 06:09Z (F66) |
+| 8, 9 | 72 / 142, 71 / 141 | `proxy-verify --multiturn --model=claude-sonnet-5.5`, both turns of one conversation |
+
+Exactly one unit per turn, agent or not, and a follow-up in the same conversation costs one too. Turns
+that lowered **neither**: `Claude_Sonnet_5` @ paid (the agent-tone-probe cells right after a Sonnet 5.5
+cell, and both `claude-sonnet-5` proxy-verify runs), `Gpt_6_Sol_Reasoning` @ paid and `Gpt_5_5_Chat` @
+paid (1 each). Starting values 80 / 150 —
+the week's budget was untouched on a Tuesday, which fits the model having just arrived. Separate from
+Opus's (`ClaudeOpusQuery75` / `ClaudeOpusQueryDaily`, which read 0 / 5 at the time and didn't move).
+Not yet observed: the refusal itself and the resets. The detector keys on `result.value: "OutOfCredits"`,
+which is model-agnostic; the reset times are assumed to match Opus's (midnight UTC, Monday).
+
+**Shipped:** `METERED_BUDGETS` (`priority-access.ts`) lists both budgets; `meteredBudgetOf(model)` maps a
+model to one (Opus 5.5 → `opus`, Sonnet 5.5 → `sonnet-5.5`, null off the paid scenario); walls are
+remembered per budget, so Opus running out says nothing about Sonnet 5.5; `usage` carries
+`x_m365_sonnet55_daily_remaining` / `_weekly_remaining`; `M365_SONNET_FALLBACK_MODEL` (e.g.
+`claude-sonnet-5`) mirrors `M365_OPUS_FALLBACK_MODEL`. The session log prints each budget after every
+paid turn ("Sonnet 5.5 priority access left: 72 today, 142 this week").
+
+### F66 — Sonnet 5.5 has Sonnet 5's sandbox → relay 🟡 (n=1)
+`TONE=Claude_Sonnet node scripts/sonnet5-native-tools-probe.mjs pwd-proxy` (06:09Z): a native `Progress`
+frame running `pwd`, reply "`pwd` printed exactly: /home/claude" — the same `/home/claude` sandbox as
+Sonnet 5 (§21 F36). So the `<system>`-tag reading that sent Sonnet 5 to its sandbox (F37) is the risk
+here too; untested on 5.5, but cheap to avoid. **Shipped:** `SONNET_5_5_DEFAULT_FRAMING = "relay"`, by
+model ID (`claude-sonnet` keeps `relay_batch` on the same tone).
+
+Live checks (premium, 06:19–06:21Z, proxy-verify `--tools --multiturn`, whose only tool is `read_file`):
+`claude-sonnet-5.5` 1/1 PASS (tool call 9.2 s, answer 5.5 s; routed `Claude_Sonnet` +
+`OfficeWebPaidCopilot`, agent-less). `claude-sonnet-5` 1/2: the first run answered "I don't actually have
+a `read_file` tool — my tools only operate on my own sandbox…" and offered a ```` ```bash ```` block
+instead, the second passed. That is H25b's refusal shape under plain relay, on a shell-less toolset; n=2,
+not chased.
+
+### H26a — a GPT-6.1 Sol budget with no tone we can find 🔴
+The same metering map carries `GPT61SolQueryWeekly` (75) and `GPT61SolQueryDaily` (40) — Opus's
+numbers — on every paid turn. Eight guessed tone names were rejected outright (`type:3` "Failed to invoke
+'Chat'", premium, paid scenario unless noted): `Gpt_6_1_Sol_Reasoning` (both scenarios),
+`Gpt_6_1_Sol_Chat`, `Gpt_6_1_Reasoning`, `Gpt_6_1_Sol`, `Gpt_6_Sol_1_Reasoning`, `Gpt_6_1_Sol_Thinking`,
+`Gpt_Sol_Reasoning`, `Gpt_6_1_Chat`. `Gpt_6_Sol_Reasoning` @ paid still self-IDs as the GPT-6 reasoning
+model and lowers neither key. **Hypothesis:** a GPT-6.1 Sol tone is rolling out and its budget key
+shipped before this account was flighted for the model (or its tone has a name we didn't guess).
+**Probe:** the web client's tone list (§12.6) once "GPT 6.1 Sol"
+shows in its picker, then `tone-probe.mjs` + `agent-tone-probe.mjs` on both accounts. `_probe-chat.mjs`
+now returns `throttle.metering`, so any probe can watch for the keys moving.
+
+### H26b — does relay_batch save Sonnet 5.5's budget? 🔴
+Its budget counts turns, which is why Opus moved to relay_batch (F60). On Sonnet 5 batching saved 15% of
+bench turns but only 6% in pi (F63). **Probe:** real pi, fix-bug + multi, relay vs relay_batch, 5 runs
+each (~60–80 of the 80 daily units — split across two days). Switch if the §25 amendment's rule passes
+(relay_batch ≥ 9/10, ≥ relay − 1, pi turns per run down ≥ 15%).

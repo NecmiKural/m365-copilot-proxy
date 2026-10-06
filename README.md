@@ -292,7 +292,8 @@ without NixOS: `nix run github:cramt/m365-copilot-proxy -- 4141`.
 | `quick` | Gpt_5_5_Chat | Alias of `gpt-5.5` (its old `Gpt_Quick` tone was retired — see below) |
 | `think-deeper` | Gpt_5_5_Reasoning | Alias of `gpt-5.5-think-deeper` (its old `Gpt_Reasoning` tone was retired) |
 | `claude` / `claude-sonnet` / `claude-sonnet-4.6` | Claude_Sonnet | Real Anthropic Claude Sonnet 4.6 (agent-less path) — 78/90 on the bench with the `relay` framing (47/76 with `baseline`). Defaults to `relay_batch`: 40/40, and 21% fewer turns driving real pi (20/20). `claude-sonnet-4.5` is kept as an alias |
-| `claude-sonnet-5` | Claude_Sonnet (paid scenario) | Claude Sonnet 5. **Needs a paid/premium Copilot seat** — same tone as above, the scenario picks the model. 27/30 on the bench with the `relay` framing (6/40 with `baseline`; see below) |
+| `claude-sonnet-5.5` | Claude_Sonnet (paid scenario) | Claude Sonnet 5.5. **Needs a paid/premium Copilot seat** — same tone as above, the scenario picks the model — and has a separate quota: 80 turns a day, 150 a week (see below). Defaults to `relay`, inherited from Sonnet 5 (not benchmarked yet) |
+| `claude-sonnet-5` | Claude_Sonnet_5 (paid scenario) | Claude Sonnet 5. **Needs a paid/premium Copilot seat**; no separate quota. 27/30 on the bench with the `relay` framing (6/40 with `baseline`; see below) |
 | `claude-sonnet-think-deeper` | Claude_Sonnet_Reasoning | Claude reasoning |
 | `claude-opus` / `claude-opus-5.5` | Claude_Opus (paid scenario) | Claude Opus 5.5. **Needs a paid/premium Copilot seat** and has a small separate quota: 40 turns a day (see below). 10/10 on the bench with `relay`; defaults to `relay_batch`. `claude-opus-5` is kept as an alias |
 | `claude-opus-4.5` | Claude_Opus (included scenario, tool agent) | Claude Opus 4.5. **Premium accounts only**, but **no** priority-access quota. With its default `relay_batch` framing: 20/20 on the bench at 2.3 turns per task, 10/10 driving real pi |
@@ -392,22 +393,32 @@ across both kinds of account. `relay` is the default on both paths: `relay_batch
 the turns, but without the agent it sent GPT-6 Sol to its sandbox twice as often (hypotheses §25).
 Details: [hypotheses §23](docs/hypotheses.md).
 
-### Sonnet 5 (`claude-sonnet-5`) — its own sandbox, and the `relay` framing
+### Sonnet 5 and 5.5 (`claude-sonnet-5`, `claude-sonnet-5.5`) — their own sandbox, and the `relay` framing
 
-`Claude_Sonnet` is Sonnet 4.6 on the included scenario and **Sonnet 5** on the paid one, so
-`claude-sonnet-5` needs a paid/premium seat, like Opus. It is not separately metered.
+`Claude_Sonnet` is Sonnet 4.6 on the included scenario and **Sonnet 5.5** on the paid one, and
+Sonnet 5 has its own tone, `Claude_Sonnet_5`, which is likewise Sonnet 4.6 unless the scenario is
+paid. So both need a paid/premium seat, like Opus. Microsoft made that switch on 2026-10-06: before
+it, the paid `Claude_Sonnet` was Sonnet 5, which is why `claude-sonnet-5` now maps to the new tone.
+
+**Sonnet 5.5 is metered: 80 turns a day, 150 a week**, separately from Opus, one per turn (in a
+coding loop, one per tool call). The proxy handles it like the Opus quota below:
+`usage.x_m365_sonnet55_daily_remaining` / `x_m365_sonnet55_weekly_remaining` on every response, a
+429 once it's used up, and an opt-in fallback, `M365_SONNET_FALLBACK_MODEL` (e.g. `claude-sonnet-5`,
+which isn't metered). Sonnet 5 has no such quota.
 
 Sonnet 5 arrives with **its own tools** (`bash_tool`, `create_file`, …) running in a remote
 sandbox (`/home/claude`) that cannot see your files, and it reads the proxy's usual
 `<system>`-tagged tool framing as a prompt injection — so with that framing it inspects its own
-empty sandbox and reports that your files don't exist (6/40 on the bench). The proxy therefore
-gives both Sonnet models a user-voice framing instead. Sonnet 5's default is `relay`: a plain note
+empty sandbox and reports that your files don't exist (6/40 on the bench). Sonnet 5.5 has the same
+sandbox. The proxy therefore gives every Sonnet model a user-voice framing instead. Sonnet 5's
+default is `relay`: a plain note
 asking it to guide you through your terminal one command at a time, which also tells it the sandbox
 is the wrong machine. That scores **27/30** on the bench (from 5/30) and solved **5/5** fix-bug runs
 through real pi. Sonnet 4.6 beat `baseline` with it too (78/90 vs 47/76), and now defaults to
 `relay_batch`, the same note asking it to put as much as it can into each block: same solves, 21%
 fewer turns through real pi (39/39). On Sonnet 5 that saved only 6% in pi, so it stays on `relay`.
-Override with `M365_FRAMING_VARIANT` as usual. Details: hypotheses §21, §25.
+Sonnet 5.5 starts on `relay` too, until it has been benchmarked.
+Override with `M365_FRAMING_VARIANT` as usual. Details: hypotheses §21, §25, §26.
 
 ### Opus (`claude-opus`, `claude-opus-4.5`) — two models, one with a small quota
 
@@ -552,7 +563,8 @@ Three token scopes are acquired:
 | `M365_LOGIN_LOCALE` / `M365_LOGIN_TIMEZONE` | Browser locale and timezone presented during login (defaults `en-GB` / `Europe/Copenhagen`). These are part of the anti-bot-scoring fingerprint ([§11 F25](docs/hypotheses.md)) — set them to match your own machine if AAD starts treating your automated login as a bot. |
 | `M365_FORCE_AGENT` | Override which tool requests carry the Copilot Studio tool agent. `1` attaches it to every tool request (and turns off the `gpt-6-sol` fallback below); `0` never attaches it. Unset, the proxy decides per model: GPT-5.x, `m365-copilot` and both Opus models take it, the other Claude models and `gpt-6-think-deeper` don't, and `gpt-6-sol` takes it only on a premium account, which the proxy learns from the first request. `claude-opus-4.5` carries it on tool-less requests too, since that's its only route (`0` turns that off as well). On a non-premium account `0` saves the `gpt-6-sol` probe turn (~3 s) per proxy start. |
 | `M365_OPUS_FALLBACK_MODEL` | Model to serve `claude-opus` (Opus 5.5) requests with once its priority-access budget is used up, instead of returning a 429 — typically `claude-opus-4.5`, which isn't metered (premium accounts only). Applies until the budget resets; the response's `model` field names the model that answered. Unset by default. |
-| `M365_SCENARIO` / `M365_LICENSE_TYPE` | Override the entitlement the WebSocket is opened under (defaults: `OfficeWebIncludedCopilot` / `Starter`, switching to `OfficeWebPaidCopilot` / `Premium` for the entitlement-gated models — `claude-opus`, `gpt-6-think-deeper` and `claude-sonnet-5`; `claude-opus-4.5` stays on the included one). `scenario` is what gates the model list (and picks Sonnet 4.6 vs 5 for the `Claude_Sonnet` tone, Opus 4.5 vs 5.5 for `Claude_Opus`); `licenseType` rides along and unlocks nothing by itself. |
+| `M365_SONNET_FALLBACK_MODEL` | The same for `claude-sonnet-5.5` (Sonnet 5.5) once its priority-access budget is used up — e.g. `claude-sonnet-5` (unmetered) or `claude-sonnet` (Sonnet 4.6, any account). A fallback naming a metered model is ignored. Unset by default. |
+| `M365_SCENARIO` / `M365_LICENSE_TYPE` | Override the entitlement the WebSocket is opened under (defaults: `OfficeWebIncludedCopilot` / `Starter`, switching to `OfficeWebPaidCopilot` / `Premium` for the entitlement-gated models — `claude-opus`, `gpt-6-think-deeper`, `claude-sonnet-5` and `claude-sonnet-5.5`; `claude-opus-4.5` stays on the included one). `scenario` is what gates the model list (and picks Sonnet 4.6 vs 5.5 for the `Claude_Sonnet` tone, Sonnet 4.6 vs 5 for `Claude_Sonnet_5`, Opus 4.5 vs 5.5 for `Claude_Opus`); `licenseType` rides along and unlocks nothing by itself. |
 | `M365_CACHE_FILE` | Override MSAL token cache location |
 | `M365_SECRETS_FILE` | Override credentials file location |
 | `CHROMIUM_PATH` | Path to Chromium binary for automated login |
@@ -624,6 +636,7 @@ pnpm run test:live    # Run live integration tests against M365
 - The `think-deeper` / `*_Reasoning` models take 10-30s per response
 - Hard quota of ~600 messages **per conversation** (mitigated by session reuse + delta sends)
 - `claude-opus` needs a paid/premium seat and has its own small priority-access quota (40 turns a day, 75 a week; every tool call is a turn) that resets at midnight UTC (weekly on Monday); exhaustion surfaces as a 429, or as a switch to `M365_OPUS_FALLBACK_MODEL`. `claude-opus-4.5` needs a premium account too, but has no such quota
+- `claude-sonnet-5.5` needs a paid/premium seat and has a priority-access quota of its own (80 turns a day, 150 a week), handled the same way (`M365_SONNET_FALLBACK_MODEL`). `claude-sonnet-5` needs the seat but has no quota
 - Streaming: **tool-less** responses stream incrementally (deltas forwarded as they arrive). **Tool-calling** turns are still buffered server-side — the raw text has to be parsed for tool-call fences before it can be emitted — so those arrive as a single chunk at the end (with an immediate HTTP 200 + heartbeats so the client never times out waiting)
 
 ## License
