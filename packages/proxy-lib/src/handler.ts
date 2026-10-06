@@ -16,9 +16,12 @@ import {
   priorityAccessExhaustionOf,
   notePriorityAccessExhausted,
   activePriorityAccessExhaustion,
-  opusAllowance,
-  isMeteredOpusModel,
-  opusFallbackModel,
+  meteredAllowance,
+  METERED_BUDGETS,
+  type MeteredBudget,
+  meteredBudgetOf,
+  priorityAccessFallbackModel,
+  PRIORITY_ACCESS_FALLBACK_ENV,
   couldBePriorityAccessPrefix,
   secondsUntilReset,
   type PriorityAccessExhaustion,
@@ -271,20 +274,22 @@ export async function handleChatCompletion(
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
   const requestedModel = body.model;
 
-  // Opus priority access (§15, §24 F55, issue #18). Once the budget is used up
-  // every metered Opus turn is refused until the reset, so don't start one:
-  // serve the opt-in fallback model (M365_OPUS_FALLBACK_MODEL, e.g. the
-  // unmetered claude-opus-4.5), or answer the 429 here. A refused turn costs no
-  // allowance, but it does cost an M365 turn and often a fresh conversation —
-  // what the account's thread-rate throttle counts.
-  const knownExhaustion = isMeteredOpusModel(requestedModel) ? activePriorityAccessExhaustion() : null;
-  const fallbackModel = knownExhaustion ? opusFallbackModel() : null;
+  // Priority access (§15, §24 F55, §26, issue #18). Once a budget is used up
+  // every turn on it is refused until the reset, so don't start one: serve the
+  // opt-in fallback model (M365_OPUS_FALLBACK_MODEL, e.g. the unmetered
+  // claude-opus-4.5; M365_SONNET_FALLBACK_MODEL for Sonnet 5.5), or answer the
+  // 429 here. A refused turn costs no allowance, but it does cost an M365 turn
+  // and often a fresh conversation — what the account's thread-rate throttle
+  // counts.
+  const requestedBudget = meteredBudgetOf(requestedModel);
+  const knownExhaustion = activePriorityAccessExhaustion(requestedBudget ?? requestedModel);
+  const fallbackModel = knownExhaustion && requestedBudget ? priorityAccessFallbackModel(requestedBudget) : null;
   if (knownExhaustion && !fallbackModel) {
     log.info(`Priority access exhausted (${knownExhaustion.window}) until ${knownExhaustion.resetsAt.toISOString()} — 429 without contacting M365`);
     return priorityAccessResponse(knownExhaustion, requestedModel);
   }
   let model = fallbackModel ?? requestedModel;
-  if (fallbackModel) log.info(`Priority access exhausted until ${knownExhaustion!.resetsAt.toISOString()} — serving ${requestedModel} with ${fallbackModel} (M365_OPUS_FALLBACK_MODEL)`);
+  if (fallbackModel) log.info(`Priority access exhausted until ${knownExhaustion!.resetsAt.toISOString()} — serving ${requestedModel} with ${fallbackModel} (${PRIORITY_ACCESS_FALLBACK_ENV[requestedBudget!]})`);
   if (conv.servedModel && conv.servedModel !== model) {
     // The conversation was being served by another model (e.g. Opus 5.5 before
     // the fallback): continue in a fresh M365 conversation with the full history.
@@ -314,7 +319,7 @@ export async function handleChatCompletion(
   // GPT-6 and GPT-6 Sol tones get a user-voice relay (Sonnet reads the
   // `<system>`-tagged baseline as an injected prompt; on Opus it trips the
   // jailbreak classifier). Opus, Sonnet 4.6 and GPT-6 get the turn-saving
-  // `relay_batch` (§24 F60, §25); Sonnet 5 and GPT-6 Sol plain `relay`. The
+  // `relay_batch` (§24 F60, §25); Sonnet 5, Sonnet 5.5 and GPT-6 Sol plain `relay`. The
   // rest keep the bench-tuned `baseline`.
   // Keyed on the model, not the tone, because one tone can serve two models.
   // M365_FRAMING_* still wins.
@@ -379,7 +384,7 @@ export async function handleChatCompletion(
     let agentRefreshed = false;
     let disengageRetried = false;
     let agentFallbackDone = false;
-    let opusFallbackDone = false;
+    let priorityFallbackDone = false;
     let originalText = text;
     // Self-imposed pacing while the account is degraded (thread-rate throttle). A
     // no-op when healthy; during backoff it sleeps a jittered delay so we stop
@@ -475,22 +480,24 @@ export async function handleChatCompletion(
         continue;
       }
 
-      // The Opus priority-access cap arrives as a turn whose text is a refusal
-      // ("You've used your available priority access…") and whose final result
-      // is `OutOfCredits` (§24 F55). Left alone, the client would receive a
-      // refusal dressed as an answer — the same hazard class as the image-quota
-      // text (§14 H14.4). Surface it as a 429 with the reset time instead, or,
-      // when M365_OPUS_FALLBACK_MODEL is set, re-send the whole request to that
-      // model in a fresh conversation (issue #18). Either way remember it, so the
-      // next requests don't spend M365 turns on refusals until the reset.
+      // A priority-access cap (Opus 5.5, Sonnet 5.5) arrives as a turn whose
+      // text is a refusal ("You've used your available priority access…") and
+      // whose final result is `OutOfCredits` (§24 F55). Left alone, the client
+      // would receive a refusal dressed as an answer — the same hazard class as
+      // the image-quota text (§14 H14.4). Surface it as a 429 with the reset
+      // time instead, or, when the budget's fallback model is set
+      // (M365_OPUS_FALLBACK_MODEL / M365_SONNET_FALLBACK_MODEL), re-send the
+      // whole request to that model in a fresh conversation (issue #18). Either
+      // way remember it, so the next requests don't spend M365 turns on
+      // refusals until the reset.
       const exhausted = priorityAccessExhaustionOf(copilotStream.result, fullText);
       if (exhausted) {
-        const metered = isMeteredOpusModel(model);
-        if (metered || copilotStream.result?.value === "OutOfCredits") notePriorityAccessExhausted(exhausted);
-        const fallback = metered && !opusFallbackDone ? opusFallbackModel() : null;
+        const budget = meteredBudgetOf(model);
+        if (budget || copilotStream.result?.value === "OutOfCredits") notePriorityAccessExhausted(budget ?? model, exhausted);
+        const fallback = budget && !priorityFallbackDone ? priorityAccessFallbackModel(budget) : null;
         if (fallback) {
-          opusFallbackDone = true;
-          log.info(`Priority access exhausted (${exhausted.window}) — re-sending to ${fallback} (M365_OPUS_FALLBACK_MODEL) in a fresh conversation`);
+          priorityFallbackDone = true;
+          log.info(`Priority access exhausted (${exhausted.window}) — re-sending to ${fallback} (${PRIORITY_ACCESS_FALLBACK_ENV[budget!]}) in a fresh conversation`);
           model = fallback;
           tone = getToneForModel(model);
           framingVariant = currentFramingVariant(defaultFramingForModel(model));
@@ -913,11 +920,14 @@ function buildUsage(
     if (typeof scores.dea_violation === "number") base.x_m365_dea_score = scores.dea_violation;
     if (typeof scores.BotOffense === "number") base.x_m365_offense_score = scores.BotOffense;
   }
-  // Opus priority access left after this turn (paid-scenario turns only, §24
-  // F55): one unit per turn, so a client can see the wall coming (issue #18).
-  const opus = opusAllowance(metering);
-  if (opus?.daily !== undefined) base.x_m365_opus_daily_remaining = opus.daily;
-  if (opus?.weekly !== undefined) base.x_m365_opus_weekly_remaining = opus.weekly;
+  // Priority access left after this turn (paid-scenario turns only, §24 F55,
+  // §26): one unit per turn, so a client can see the wall coming (issue #18).
+  // `x_m365_opus_*` for Opus 5.5, `x_m365_sonnet55_*` for Sonnet 5.5.
+  for (const [budget, { usageKey }] of Object.entries(METERED_BUDGETS)) {
+    const left = meteredAllowance(metering, budget as MeteredBudget);
+    if (left?.daily !== undefined) base[`x_m365_${usageKey}_daily_remaining`] = left.daily;
+    if (left?.weekly !== undefined) base[`x_m365_${usageKey}_weekly_remaining`] = left.weekly;
+  }
   return base;
 }
 
@@ -930,7 +940,7 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
   });
 }
 
-/** The Opus priority-access budget ran out. A real 429 (with `Retry-After` and
+/** A priority-access budget (Opus 5.5, Sonnet 5.5) ran out. A real 429 (with `Retry-After` and
  *  the UTC reset instant) so a client backs off to the refill instead of
  *  retrying into a wall — and so an agent loop doesn't treat the refusal text as
  *  the model's answer. Resets at midnight UTC; the weekly budget on Monday. */

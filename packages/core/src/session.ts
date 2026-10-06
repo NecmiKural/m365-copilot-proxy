@@ -23,7 +23,7 @@ import {
   ACTION_ALLOWED_MESSAGE_TYPES,
 } from "./native-actions.js";
 import { createLogger, trunc, FRAME_DIR } from "./log.js";
-import { parseMetering, opusAllowance } from "./priority-access.js";
+import { parseMetering, meteredAllowance, METERED_BUDGETS, type MeteredBudget } from "./priority-access.js";
 
 const RS = "\x1E";
 const log = createLogger("session");
@@ -312,7 +312,7 @@ export class CopilotSession {
     // MODEL (not the tone alone). `scenario` is not cosmetic: agent-less, the
     // default `OfficeWebIncludedCopilot` will not serve `Claude_Opus` (canned
     // BotConnection apology), while `OfficeWebPaidCopilot` does — and the same
-    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5 on the other, the
+    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5.5 on the other, the
     // same `Claude_Opus` tone Opus 4.5 (agent, premium) and Opus 5.5.
     // See getScenarioForModel / docs §5.
     const tone = getToneForModel(model);
@@ -825,8 +825,10 @@ export class CopilotSession {
             if (item.throttling) {
               throttleInfo = { current: item.throttling.numUserMessagesInConversation, max: item.throttling.maxNumUserMessagesInConversation };
               metering = parseMetering(item.throttling.metering);
-              const opus = opusAllowance(metering);
-              if (opus) log.info(`Opus priority access left: ${opus.daily ?? "?"} today, ${opus.weekly ?? "?"} this week`);
+              for (const [budget, { label }] of Object.entries(METERED_BUDGETS)) {
+                const left = meteredAllowance(metering, budget as MeteredBudget);
+                if (left) log.info(`${label} priority access left: ${left.daily ?? "?"} today, ${left.weekly ?? "?"} this week`);
+              }
             }
             let resumedHere = false;
             for (const m of item.messages ?? []) {

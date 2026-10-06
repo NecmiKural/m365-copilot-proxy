@@ -48,8 +48,8 @@
 //   --baseline  also run every cell agent-less and compare self-IDs (2x cost)
 // Cost: 1 message AND 1 fresh conversation per cell (2 with --baseline), so it
 // spends the thread-rate budget (F13) — don't loop it. The sweep stops at the
-// first Throttled turn. Claude_Opus@paid can spend Opus priority access (§15)
-// if the agent lets the tone through.
+// first Throttled turn. Claude_Opus@paid and Claude_Sonnet@paid (Sonnet 5.5)
+// can spend priority access (§15, §26) if the agent lets the tone through.
 //
 // Everything but the sweep is exported, so a saved run can be re-classified and
 // re-summarized without spending threads:
@@ -87,9 +87,11 @@ export const DEFAULT_CELLS = [
   // Serves with the agent on a premium account, dead route on a non-premium
   // one (#23) — the proxy learns which at runtime (PREMIUM_ONLY_AGENT_TONES).
   { tone: "Gpt_6_Sol_Reasoning", note: "gpt-6-sol — agent only on a premium account" },
-  // One tone, two models agent-less: Sonnet 4.6 included, Sonnet 5 paid (§21).
+  // One tone, two models agent-less: Sonnet 4.6 included, Sonnet 5.5 paid
+  // (§26). Sonnet 5 has its own tone now, paid only (included is Sonnet 4.6).
   { tone: "Claude_Sonnet", note: "claude-sonnet (Sonnet 4.6 agent-less)", ...INCLUDED },
-  { tone: "Claude_Sonnet", note: "claude-sonnet-5 (Sonnet 5 agent-less)", ...PAID },
+  { tone: "Claude_Sonnet", note: "claude-sonnet-5.5 (Sonnet 5.5 agent-less) — spends priority access", ...PAID },
+  { tone: "Claude_Sonnet_5", note: "claude-sonnet-5 (Sonnet 5 agent-less)", ...PAID },
   // One tone, two models with the agent: Opus 4.5 included (premium only; the
   // agent is its only route), Opus 5.5 paid (§24).
   { tone: "Claude_Opus", note: "claude-opus-4.5 (Opus 4.5, premium only)", ...INCLUDED },

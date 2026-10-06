@@ -49,7 +49,8 @@ These are what actually move compliance. In rough order of importance:
 ## Claude Sonnet: don't *cage* it, don't *label* things `<system>`
 
 Everything above was learned on models with no tools of their own. Sonnet 5 (`Claude_Sonnet` on
-the paid scenario) **has** real ones, in a remote sandbox, so the question is not "will it act"
+the paid scenario at the time, `Claude_Sonnet_5` since 2026-10-06 — Sonnet 5.5 has the same sandbox,
+hyp §26) **has** real ones, in a remote sandbox, so the question is not "will it act"
 but "on which machine" — and our framing decides that. Conclusive (hyp §21, p = 3×10⁻¹³):
 
 - **A `<system>` block inside the user turn reads as a forged system prompt.** Its reasoning says
@@ -178,7 +179,9 @@ the harness's own system prompt becomes `<harness_system_prompt>`.
 
 **The default is model-aware** (`defaultFramingForModel`, falling back to `defaultFramingForTone`).
 `Claude_Opus` (Opus 4.5 and 5.5), `Claude_Sonnet` (as Sonnet 4.6) and `Gpt_6_Reasoning` →
-`relay_batch`; Sonnet 5 (`claude-sonnet-5`, same tone, keyed on the model ID) and
+`relay_batch`; Sonnet 5 (`claude-sonnet-5`, its own `Claude_Sonnet_5` tone since 2026-10-06),
+Sonnet 5.5 (`claude-sonnet-5.5`, `Claude_Sonnet` on the paid scenario, keyed on the model ID;
+inherits Sonnet 5's relay, unbenched, hyp §26) and
 `Gpt_6_Sol_Reasoning` → `relay`. **Every other model keeps `baseline` byte-for-byte** (including
 `claude-sonnet-think-deeper`, unmeasured under relay), so no GPT-5.x bench number moves, and
 `M365_FRAMING_*` still wins. Opus used to default to `minimal`, to spend less of its priority-access

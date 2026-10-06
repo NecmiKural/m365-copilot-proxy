@@ -528,7 +528,7 @@ describe("Opus 4.5 on an account that can't serve it (§24)", () => {
   });
 });
 
-describe("Opus priority access: OutOfCredits, remembering it, metering, the opt-in fallback (#18)", () => {
+describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, metering, the opt-in fallback (#18)", () => {
   const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
   const WEEKLY = "You\u2019ve used your available priority access to the Opus model for the week. You can choose another available model or wait until Monday to use the Opus model again.";
   const REFUSAL = { fullText: WEEKLY, result: { value: "OutOfCredits", message: WEEKLY } };
@@ -552,6 +552,7 @@ describe("Opus priority access: OutOfCredits, remembering it, metering, the opt-
     resetPriorityAccessState();
     scripted.queue = [];
     delete process.env.M365_OPUS_FALLBACK_MODEL;
+    delete process.env.M365_SONNET_FALLBACK_MODEL;
     pool = new SessionPool();
   });
 
@@ -649,5 +650,53 @@ describe("Opus priority access: OutOfCredits, remembering it, metering, the opt-
     expect(text).toContain("Hello from 4.5");
     expect(text).not.toContain("priority access");
     expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.5"]);
+  });
+
+  // Sonnet 5.5 has a budget of its own (§26): ClaudeSonnet55QueryDaily/Weekly.
+  const SONNET_DAILY = "You\u2019ve used your available priority access to the Sonnet model for today. You can choose another available model or wait until tomorrow to use the Sonnet model again.";
+  const SONNET_REFUSAL = { fullText: SONNET_DAILY, result: { value: "OutOfCredits", message: SONNET_DAILY } };
+
+  it("surfaces Sonnet 5.5's allowances in usage, next to Opus's", async () => {
+    scripted.queue = [{ fullText: "```bash\nls\n```", metering: { ClaudeOpusQueryDaily: 12, ClaudeOpusQuery75: 30, ClaudeSonnet55QueryDaily: 79, ClaudeSonnet55QueryWeekly: 149 } }];
+    const usage = (await (await send("claude-sonnet-5.5")).json()).usage;
+    expect(usage.x_m365_sonnet55_daily_remaining).toBe(79);
+    expect(usage.x_m365_sonnet55_weekly_remaining).toBe(149);
+    expect(usage.x_m365_opus_daily_remaining).toBe(12);
+  });
+
+  it("keeps the Sonnet 5.5 and Opus walls apart", async () => {
+    scripted.queue = [SONNET_REFUSAL];
+    const res = await send("claude-sonnet-5.5");
+    expect(res.status).toBe(429);
+    expect((await res.json()).error.param).toBe("day");
+    // Sonnet 5.5 is answered locally until the reset…
+    expect((await send("claude-sonnet-5.5", "another task")).status).toBe(429);
+    expect(scripted.models).toEqual([]);
+    // …while Opus 5.5, Sonnet 5 and Sonnet 4.6 still go upstream.
+    for (const model of ["claude-opus", "claude-sonnet-5", "claude-sonnet"]) {
+      scripted.queue = [CALL];
+      expect((await send(model, `task for ${model}`)).status).toBe(200);
+      expect(scripted.models).toEqual([model]);
+    }
+  });
+
+  it("with M365_SONNET_FALLBACK_MODEL, re-sends a Sonnet 5.5 request to it", async () => {
+    process.env.M365_SONNET_FALLBACK_MODEL = "claude-sonnet-5";
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5"; // the other budget's, unused here
+    scripted.queue = [SONNET_REFUSAL, { fullText: "```bash\nls\n```" }];
+    const res = await send("claude-sonnet-5.5");
+    expect(res.status).toBe(200);
+    expect((await res.json()).model).toBe("claude-sonnet-5");
+    expect(scripted.models).toEqual(["claude-sonnet-5.5", "claude-sonnet-5"]);
+    expect(scripted.agentFlags).toEqual([false, false]);
+  });
+
+  it("remembers an unexpected OutOfCredits under that model alone", async () => {
+    scripted.queue = [{ fullText: "Out of credits.", result: { value: "OutOfCredits", message: "Out of credits." } }];
+    expect((await send("gpt-6-sol")).status).toBe(429);
+    expect((await send("gpt-6-sol", "again")).status).toBe(429);
+    expect(scripted.models).toEqual([]);
+    scripted.queue = [CALL];
+    expect((await send("claude-opus", "opus task")).status).toBe(200);
   });
 });

@@ -199,11 +199,15 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   read the result (`priorityAccessExhaustionOf`), not the text. The proxy 429s, remembers the wall
   until the reset (midnight UTC; weekly: Monday) and, with `M365_OPUS_FALLBACK_MODEL=claude-opus-4.5`,
   serves Opus 4.5 instead. Every paid turn carries `throttling.metering` (surfaced in `usage`).
-  Don't burn it on sweeps. See docs/hypotheses.md §15, §24 F55, F59 (issue #18).
+  **Sonnet 5.5 has the same kind of budget, its own** (80/day `ClaudeSonnet55QueryDaily`, 150/week
+  `ClaudeSonnet55QueryWeekly`; `M365_SONNET_FALLBACK_MODEL`). Budgets live in `METERED_BUDGETS`
+  (`priority-access.ts`) and `meteredBudgetOf()` maps a model to one; walls are remembered per budget.
+  A new `*Query*` key in `metering` is how a new metered model shows up — add a budget, don't hard-code Opus.
+  Don't burn it on sweeps. See docs/hypotheses.md §15, §24 F55, F59 (issue #18), §26.
 - **`claude-opus-4.5` is the same tone on the included scenario — reachable only through the tool
   agent, only on a premium account, and unmetered.** Agent-less it is the dead route everywhere, so
   `modelRequiresAgent` attaches the agent even to tool-less requests, and there is no agent-less
-  fallback (it is NOT in `PREMIUM_ONLY_AGENT_TONES`). Routing is the mirror of Sonnet 5: the tone is
+  fallback (it is NOT in `PREMIUM_ONLY_AGENT_TONES`). Routing is the mirror of Sonnet 5.5: the tone is
   paid and the model ID opts back into the included scenario (`INCLUDED_SCENARIO_MODELS`, plus
   `opus-4-5`-style strings). Its system prompt calls it "Claude Opus 5"; trust its "Opus 4.5" and
   its `ChainOfThoughtSummary`, not the name in the prompt. Both Opus models carry the agent on tool
@@ -213,25 +217,32 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   as you can into one block" cut turns per task 37% (F60), which is what Opus 5.5's budget counts. Opus sometimes ends a tool fence with its native call
   markup (`</invoke>`, `</parameter>`…); the parser strips it (F57), don't "simplify" that away. Only a premium account can
   bench it. See docs/hypotheses.md §24.
-- **Entitlement-gated ≠ metered.** `gpt-6-think-deeper` (`Gpt_6_Reasoning`) needs the same paid
-  scenario as Opus but carries **no** priority-access budget and throttles like everything else,
+- **Entitlement-gated ≠ metered.** `gpt-6-think-deeper` (`Gpt_6_Reasoning`) and `claude-sonnet-5`
+  (`Claude_Sonnet_5`) need the same paid
+  scenario as Opus but carry **no** priority-access budget and throttle like everything else,
   so `PAID_SCENARIO_TONES` is about reaching a model, not about what it costs. Don't key metering
-  or framing decisions off that set — the quota detector reads the refusal text and the framing
+  or framing decisions off that set — metering is `meteredBudgetOf()`, the quota detector reads
+  `OutOfCredits`, and the framing
   default is per-model (Opus `relay_batch` for its turn-counted budget and the jailbreak classifier,
   §24 F56/F60; GPT-6 a user-voice relay for its sandbox, batched since §25 — see the agent bullet
   below). See docs/hypotheses.md §17, §22, §25.
-- **One tone can be two models — `Claude_Sonnet` is Sonnet 4.6 (included) and Sonnet 5 (paid).**
+- **One tone can be two models — `Claude_Sonnet` is Sonnet 4.6 (included) and Sonnet 5.5 (paid);
+  `Claude_Sonnet_5` is Sonnet 4.6 (included) and Sonnet 5 (paid).** Microsoft swapped the paid
+  `Claude_Sonnet` from Sonnet 5 to 5.5 on 2026-10-06 and moved Sonnet 5 to the new tone, unannounced
+  (self-ID + a new `metering` key gave it away), so re-run the self-ID probes now and then.
   So routing follows the **model ID** (`getScenarioForModel`, `PAID_SCENARIO_MODELS`), and so does
   the framing default (`defaultFramingForModel`). Never add `Claude_Sonnet` to
-  `PAID_SCENARIO_TONES` — that silently turns `claude-sonnet` into Sonnet 5. A liveness probe can't
-  see this (both are `DeepLeo`); only self-ID can. See docs/hypotheses.md §21, #37.
-- **Sonnet 5 has its own tools in a remote sandbox and reads `<system>` tags as an injection.**
+  `PAID_SCENARIO_TONES` — that silently turns `claude-sonnet` into Sonnet 5.5 (and spends its
+  budget). `Claude_Sonnet_5` is in that set because nothing maps it for 4.6. A liveness probe can't
+  see this (all are `DeepLeo`); only self-ID can. See docs/hypotheses.md §21, §26, #37.
+- **Sonnet 5 has its own tools in a remote sandbox (Sonnet 5.5 too) and reads `<system>` tags as an injection.**
   Nothing client-side disables `bash_tool`/`create_file` (`/home/claude`), and a `<system>` block in
   the user turn makes it disregard the framing and work there ("no such file"). Its default is the
   user-voice `relay` framing (45/50 vs 6/40; 5/5 in real pi). Sonnet 4.6 beat baseline with relay too
   (78/90 vs 47/76) and now defaults to `relay_batch` (same solves, −21% turns in real pi, §25 F62);
   batching saved Sonnet 5 only 6% in pi, so `SONNET_5_DEFAULT_FRAMING` keeps it on relay (F63) — the
-  one place the two Sonnets differ. `relay_batch` is plain relay when the toolset has no shell: asked
+  one place the Sonnets differ; Sonnet 5.5 (same `/home/claude` sandbox, §26) inherits relay via
+  `SONNET_5_5_DEFAULT_FRAMING`, unbenched. `relay_batch` is plain relay when the toolset has no shell: asked
   for a script it couldn't run, Sonnet 4.6 claimed it had only its sandbox tools (§25 H25b) — and
   `proxy-verify --tools` is shell-less. Don't move `Claude_Sonnet` back to a `<system>`-tagged variant, and don't wrap the note
   in `<user>` tags either: tags are just text to it, and the variant that did (`relay_inline`,
