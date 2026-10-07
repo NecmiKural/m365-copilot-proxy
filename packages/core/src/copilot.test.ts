@@ -230,6 +230,28 @@ describe("GPT-6 Sol routing (#23)", () => {
   });
 });
 
+describe("GPT-6.1 Sol routing (§27)", () => {
+  afterEach(() => {
+    resetAgentRoutes();
+  });
+
+  it("maps gpt-6.1-sol to Gpt_61_Sol_Reasoning on the INCLUDED scenario — every account, unmetered", () => {
+    expect(getToneForModel("gpt-6.1-sol")).toBe("Gpt_61_Sol_Reasoning");
+    expect(getAvailableModels()).toContain("gpt-6.1-sol");
+    expect(PAID_SCENARIO_TONES.has("Gpt_61_Sol_Reasoning")).toBe(false);
+    expect(getScenarioForModel("gpt-6.1-sol")).toEqual(INCLUDED);
+    expect(meteredBudgetOf("gpt-6.1-sol")).toBeNull();
+  });
+
+  it("takes the agent only on a premium account, learned per tone", () => {
+    expect(PREMIUM_ONLY_AGENT_TONES.has("Gpt_61_Sol_Reasoning")).toBe(true);
+    expect(toneUsesToolAgent("Gpt_61_Sol_Reasoning")).toBe(true);
+    noteAgentRouteDead("Gpt_61_Sol_Reasoning");
+    expect(toneUsesToolAgent("Gpt_61_Sol_Reasoning")).toBe(false);
+    expect(toneUsesToolAgent("Gpt_6_Sol_Reasoning")).toBe(true);
+  });
+});
+
 describe("Opus routing", () => {
   afterEach(() => {
     delete process.env.M365_SCENARIO;

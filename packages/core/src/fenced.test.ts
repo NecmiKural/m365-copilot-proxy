@@ -432,13 +432,22 @@ describe("defaultFramingForTone", () => {
     expect(defaultFramingForModel("gpt-6-think-deeper")).toBe("relay_batch");
   });
 
-  it("gives GPT-6 Sol relay on both of its paths, agent and agent-less (#23)", () => {
+  it("gives GPT-6 Sol relay_batch on both of its paths, agent and agent-less (#23, docs §28)", () => {
     // One default for both: agent-less (non-premium) it has its own sandbox and
-    // only relay kept it out (60/60 vs ≤6/10); with the agent (premium) relay
-    // 30/30 vs 3–9/10 for the rest (docs §23). relay_batch sent it to that
-    // sandbox twice as often agent-less (§25 F61), so not that one either.
-    expect(defaultFramingForTone("Gpt_6_Sol_Reasoning")).toBe("relay");
-    expect(defaultFramingForModel("gpt-6-sol")).toBe("relay");
+    // only the user-voice relay kept it out (60/60 vs ≤6/10); with the agent
+    // (premium) relay 30/30 vs 3–9/10 for the rest (docs §23). relay_batch keeps
+    // that voice, cuts turns by a third, and on the retest didn't send it to the
+    // sandbox any more often than relay (§28; F61's 4 vs 2 was noise).
+    expect(defaultFramingForTone("Gpt_6_Sol_Reasoning")).toBe("relay_batch");
+    expect(defaultFramingForModel("gpt-6-sol")).toBe("relay_batch");
+  });
+
+  it("gives GPT-6.1 Sol relay_batch on both of its paths (docs §27, §29)", () => {
+    // Only the user-voice framings keep it out of its sandbox agent-less, as with
+    // GPT-6 Sol, and relay_batch never sent it there (0 of 80 tasks and pi runs)
+    // and saved turns on both paths, bench and real pi alike.
+    expect(defaultFramingForTone("Gpt_61_Sol_Reasoning")).toBe("relay_batch");
+    expect(defaultFramingForModel("gpt-6.1-sol")).toBe("relay_batch");
   });
 
   it("keeps the minimal variant materially shorter than baseline (not a default any more, still selectable)", () => {
