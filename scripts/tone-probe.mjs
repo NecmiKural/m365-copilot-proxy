@@ -78,6 +78,12 @@ const TONES = [
   { tone: "Gpt_6_Sol_Reasoning", note: "gpt-6-sol — included scenario: expect DeepLeo on every account", ...INCLUDED },
   { tone: "Gpt_6_Sol_Chat", note: "unmapped: self-IDs as the GPT-5 chat model", ...INCLUDED },
 
+  // GPT-6.1 Sol ("GPT-6.1 Sol" in the web client, §27). Same shape as GPT-6
+  // Sol: LIVE on the included scenario on every account. The paid scenario
+  // serves it on a premium account too but spends the GPT61Sol priority-access
+  // budget (40/day, 75/week), so there's no paid cell here.
+  { tone: "Gpt_61_Sol_Reasoning", note: "gpt-6.1-sol — included scenario: expect DeepLeo on every account", ...INCLUDED },
+
   // Claude_Fable: present in the real web client's tone list (§12.6 decompile)
   // alongside Claude_Sonnet, so it is a registered route rather than a guess.
   // It is accepted here and answers — but it self-identifies as GPT-5, not as

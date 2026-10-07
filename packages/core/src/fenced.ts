@@ -446,16 +446,30 @@ export function currentFramingVariant(toneDefault?: string): string {
  *  framing and cuts its turns by a third: 3.15 → 2.10 per bench task (40/40, no
  *  sandbox turns either way), 3 turns per real-pi run, 10/10 (docs §25 F61, F63).
  *
- *  `Gpt_6_Sol_Reasoning` (gpt-6-sol) defaults to `relay` on BOTH of its paths
- *  (#23, docs §23). Agent-less (any non-premium account) it has a sandbox of its
- *  own (`bash -lc …` in /mnt/data, /home/oai) that M365_NO_CODE_INTERPRETER
- *  doesn't remove; every other framing sent it there on ~every first turn and
- *  scored 0–6/10, relay 60/60. With the agent (premium) there's no sandbox, but
- *  the other framings confabulate "I can't access your working directory" or
- *  trip the JailBreak Classifier: 3–9/10, relay 30/30. Real pi: 21/21.
- *  relay_batch saved a third of its turns on both paths, but agent-less it went
- *  to that sandbox twice as often (4 vs 2 turns in 20 tasks), so it stays on
- *  relay (docs §25 F61).
+ *  `Gpt_6_Sol_Reasoning` (gpt-6-sol) defaults to `relay_batch` on BOTH of its
+ *  paths (#23, docs §23, §28). Agent-less (any non-premium account) it has a
+ *  sandbox of its own (`bash -lc …` in /mnt/data, /home/oai) that
+ *  M365_NO_CODE_INTERPRETER doesn't remove; the `<system>`-tagged framings sent it
+ *  there on ~every first turn and scored 0–6/10, relay 60/60. With the agent
+ *  (premium) there's no sandbox, but those framings confabulate "I can't access
+ *  your working directory" or trip the JailBreak Classifier: 3–9/10, relay 30/30.
+ *  relay_batch keeps relay's framing and cuts its turns by a third on both paths
+ *  (bench 3.1 → 2.1 per task, 60/60 vs 60/60 agent-less, 40/40 vs 32/32 with the
+ *  agent), and by 19–25% in real pi (30/30). F61 kept it on relay because
+ *  agent-less it went to its sandbox on 4 turns against relay's 2; the retest
+ *  found no gap (13 vs 15 in 40 tasks; pooled, 17 and 17), so it switched (docs §28).
+ *
+ *  `Gpt_61_Sol_Reasoning` (gpt-6.1-sol) defaults to `relay_batch` on both of its
+ *  paths (docs §27). Same split as GPT-6 Sol: agent-less the `<system>`-tagged
+ *  framings send it to its sandbox (baseline 0/20, minimal 2/20) and the user-voice
+ *  ones don't; with the agent everything solves, and only relay, relay_batch and
+ *  honest never tripped the JailBreak Classifier. relay_batch didn't go to the
+ *  sandbox more than relay (0 and 0), and it cut turns on both
+ *  paths: bench −17% with the agent, −36% without (40/40 vs 39/40), real pi
+ *  −29% / −47% (30/30 each). Side by side agent-less it solves and spends turns
+ *  like GPT-6 Sol under every framing, but it obeys the user-voice note about
+ *  its sandbox: under relay_batch it never went in (0 of 80 bench tasks and pi
+ *  runs, GPT-6 Sol 25 of 100), under honest 3 of 40 (GPT-6 Sol 17 of 20; docs §29).
  *
  *  Every other tone keeps the bench-tuned `baseline` byte-for-byte. */
 export function defaultFramingForTone(tone?: string): string | undefined {
@@ -463,7 +477,8 @@ export function defaultFramingForTone(tone?: string): string | undefined {
   if (tone === "Claude_Sonnet") return "relay_batch";
   if (tone === "Claude_Sonnet_5") return SONNET_5_DEFAULT_FRAMING;
   if (tone === "Gpt_6_Reasoning") return "relay_batch";
-  if (tone === "Gpt_6_Sol_Reasoning") return "relay";
+  if (tone === "Gpt_6_Sol_Reasoning") return "relay_batch";
+  if (tone === "Gpt_61_Sol_Reasoning") return "relay_batch";
   return undefined;
 }
 

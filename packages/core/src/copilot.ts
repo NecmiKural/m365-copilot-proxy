@@ -116,6 +116,19 @@ const MODEL_TONES: Record<string, string> = {
   // as the GPT-5 chat model on both accounts, agent or not, so it isn't mapped.
   "gpt-6-sol": "Gpt_6_Sol_Reasoning",
 
+  // GPT-6.1 Sol ("GPT-6.1 Sol" in the web client). Routed like GPT-6 Sol: the
+  // included scenario, where it serves on premium and non-premium accounts
+  // alike, and the tool agent only on a premium account (PREMIUM_ONLY_AGENT_TONES;
+  // tone-probe + agent-tone-probe 2026-10-06, docs §27). The paid scenario
+  // serves it too, but every paid turn spends the `GPT61Sol` priority-access
+  // budget (40 a day, 75 a week); included turns don't, so it stays out of
+  // PAID_SCENARIO_TONES. Self-IDs as "GPT-6 reasoning model" on both scenarios,
+  // like GPT-6 Sol, but isn't GPT-6 Sol renamed: agent-less it keeps out of its
+  // sandbox when told to and GPT-6 Sol doesn't (docs §29). The tone name has no
+  // separator between 6 and 1, and every
+  // sibling (`Gpt_61_Sol`, `Gpt_61_Sol_Chat`, `Gpt_61_Reasoning`, …) is rejected.
+  "gpt-6.1-sol": "Gpt_61_Sol_Reasoning",
+
   // GPT-5.4. Bare `gpt-5.4` has always been the reasoning tone (unlike its
   // siblings); only the `-quick` alias moved, from the retired `Gpt_5_4_Quick`.
   "gpt-5.4": "Gpt_5_4_Reasoning",
@@ -313,6 +326,9 @@ export const AGENT_CLAUDE_TONES: ReadonlySet<string> = new Set([
  * - `Gpt_6_Sol_Reasoning`: agent attached, premium serves GPT-6 on both
  *   scenarios (4/4), non-premium is dead (2/2) (#23, agent-tone-probe
  *   2026-10-02).
+ * - `Gpt_61_Sol_Reasoning`: the same split — agent attached, premium serves on
+ *   both scenarios (8/8), non-premium is dead on both accounts (3/3)
+ *   (agent-tone-probe 2026-10-06, docs §27).
  *
  * Nothing on the token says which kind of account this is, so the proxy finds
  * out by trying: the first tool request on such a tone carries the agent, and
@@ -329,6 +345,7 @@ export const AGENT_CLAUDE_TONES: ReadonlySet<string> = new Set([
  */
 export const PREMIUM_ONLY_AGENT_TONES: ReadonlySet<string> = new Set([
   "Gpt_6_Sol_Reasoning",
+  "Gpt_61_Sol_Reasoning",
 ]);
 
 // What this process has learned about the agent route, per tone. The proxy

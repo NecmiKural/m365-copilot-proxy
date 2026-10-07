@@ -56,12 +56,21 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   (`M365_AVOID_THROTTLING=1`)
 - §26 — `Claude_Sonnet` @ paid is now Sonnet 5.5 and Sonnet 5 has its own tone, `Claude_Sonnet_5`
   (F64); Sonnet 5.5 has its own priority-access budget, 80/day and 150/week (F65), and Sonnet 5's
-  `/home/claude` sandbox (F66); a `GPT61Sol*` budget with no tone we can find (H26a); whether
-  relay_batch would save Sonnet 5.5's budget (H26b, open)
-- §27 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F67), nested fences
-  executed (F68), an ~8.2k-char command-line cap (F69), give-ups the retry never saw (F70–F72);
-  framing variants and thread poisoning not supported (F73); documents still open (F74); sessions
-  sharing an opening message shared an M365 conversation (F75)
+  `/home/claude` sandbox (F66); a `GPT61Sol*` budget with no tone we can find (H26a, resolved in §27);
+  whether relay_batch would save Sonnet 5.5's budget (H26b, open)
+- §27 — GPT-6.1 Sol (`Gpt_61_Sol_Reasoning`, `gpt-6.1-sol`): ungated on the included scenario, the
+  agent only on a premium account (F68), the paid scenario spends the `GPT61Sol*` budget (F67), and
+  only the user-voice framings work agent-less (F69); `relay_batch` is its default on both paths (F70);
+  whether the included scenario serves the same model as the paid one (H27a, open)
+- §28 — GPT-6 Sol, `relay` vs `relay_batch` again, with real pi: F61's sandbox gap was noise (15 → 13
+  turns in 40 tasks; pooled 17 and 17), relay_batch passes on both paths and is its default now (F71)
+- §29 — agent-less GPT-6.1 Sol vs GPT-6 Sol: the same solves and turns under every framing, but only
+  GPT-6.1 Sol keeps out of its sandbox under the user-voice ones (relay_batch 0/40 tasks vs 6/20, honest
+  3/40 vs 17/20); the included scenario's GPT-6.1 Sol isn't GPT-6 Sol renamed (F72, bears on H27a)
+- §30 — Windows / pi as a general agent (Oct 2 2026): a host is not a shell (F73), nested fences
+  executed (F74), an ~8.2k-char command-line cap (F75), give-ups the retry never saw (F76–F78);
+  framing variants and thread poisoning not supported (F79); documents still open (F80); sessions
+  sharing an opening message shared an M365 conversation (F81)
 
 ---
 
@@ -3619,7 +3628,8 @@ tools" as the wrong machine.
 default. It stays on for premium because it removes the sandbox entirely (0 vs 2 of 33 turns), and
 because every other framing degrades far less with it (3–9/10 vs 0–6/10), which matters to anyone
 who overrides the framing.
-**Shipped:** `defaultFramingForTone("Gpt_6_Sol_Reasoning") = "relay"`, one default for both paths.
+**Shipped:** `defaultFramingForTone("Gpt_6_Sol_Reasoning") = "relay"`, one default for both paths
+(since §28 F71: `relay_batch`, the same user voice in fewer turns).
 
 ### F52 — the premium account produces the dead route's exact wire state too, as a one-off 🟢 (fixed)
 In the confirmation round (`g6s-paid2`, premium, agent attached, `demo_only` arm 2, 13:32Z) one
@@ -4129,7 +4139,8 @@ to its own sandbox *less* under relay_batch (9 → 2).
 **Against the rule.** GPT-6 and GPT-6 Sol with the agent pass 1–3; GPT-6 goes on to real pi. GPT-6 Sol agent-less
 **fails 3**: +2 sandbox turns per 20 tasks against a limit of 1 — 4 events against 2, so weak evidence
 either way, but the rule was fixed in advance, and `gpt-6-sol` has one default for both paths, so it
-keeps `relay` without a pi run. The Sonnets go to pi (amendment above).
+keeps `relay` without a pi run. The Sonnets go to pi (amendment above). *(Retested in §28 F71 on 40 tasks
+per framing plus real pi: 15 → 13 sandbox turns, and `gpt-6-sol` switched to relay_batch.)*
 
 ### F62 — real pi, Sonnet 4.6: relay_batch 20/20 at 5.65 turns per run vs relay 19/19 at 7.16 → passes 🟢
 fix-bug + multi, 10 runs each per framing, both non-premium accounts, 07:48–09:47Z, confab retry off.
@@ -4184,7 +4195,7 @@ other way from the bench (bench 9 → 2, pi 4 → 9), cost no solve either time,
 | `gpt-6-think-deeper` (`Gpt_6_Reasoning`) | **relay_batch** | bench 40/40, −33% turns (F61); pi 10/10 |
 | `claude-sonnet` (Sonnet 4.6, `Claude_Sonnet` included) | **relay_batch** | bench 80/80, −14%; pi 39/39, −21% (F62) |
 | `claude-sonnet-5` (`Claude_Sonnet` paid; `Claude_Sonnet_5` since §26) | relay | pi −6%, not significant |
-| `gpt-6-sol` (`Gpt_6_Sol_Reasoning`) | relay | agent-less sandbox turns 2 → 4 per 20 tasks (F61) |
+| `gpt-6-sol` (`Gpt_6_Sol_Reasoning`) | relay → **relay_batch** (§28) | agent-less sandbox turns 2 → 4 per 20 tasks (F61); retest 15 → 13 per 40, pi 30/30 (F71) |
 
 Sonnet 4.6 and Sonnet 5 share a tone (they did until §26), so the split rides on `SONNET_5_DEFAULT_FRAMING`, kept
 separate for exactly this. Shipped in `defaultFramingForTone`.
@@ -4304,7 +4315,10 @@ a `read_file` tool — my tools only operate on my own sandbox…" and offered a
 instead, the second passed. That is H25b's refusal shape under plain relay, on a shell-less toolset; n=2,
 not chased.
 
-### H26a — a GPT-6.1 Sol budget with no tone we can find 🔴
+### H26a — a GPT-6.1 Sol budget with no tone we can find 🟢 (resolved, §27 F67)
+**Resolved 2026-10-06:** the tone is `Gpt_61_Sol_Reasoning` (no separator between 6 and 1), and each of
+its paid-scenario turns lowers both keys by 1; included-scenario turns don't. See §27.
+
 The same metering map carries `GPT61SolQueryWeekly` (75) and `GPT61SolQueryDaily` (40) — Opus's
 numbers — on every paid turn. Eight guessed tone names were rejected outright (`type:3` "Failed to invoke
 'Chat'", premium, paid scenario unless noted): `Gpt_6_1_Sol_Reasoning` (both scenarios),
@@ -4324,7 +4338,275 @@ each (~60–80 of the 80 daily units — split across two days). Switch if the �
 
 ---
 
-## 27. Oct 2 2026 — Windows / pi as a general agent (#6, #7): six proxy-side causes, and what is still open
+## 27. Oct 6 2026 — GPT-6.1 Sol (`Gpt_61_Sol_Reasoning`): ungated, the agent only on premium, a budget on the paid scenario
+
+**Question.** A new tone, `Gpt_61_Sol_Reasoning` ("GPT-6.1 Sol" in the web client), showed up in a
+user's probes. Which accounts and scenarios serve it, does it take the tool agent, what does it cost,
+and which framing makes it drive a coding loop? Shipped as `gpt-6.1-sol`.
+
+### F67 — the paid scenario spends the `GPT61Sol*` budget; the included one doesn't 🟢
+`tone-probe` + `agent-tone-probe` on the premium account (17:30–17:42Z, results.json and frame dumps
+re-read): every paid-scenario `Gpt_61_Sol_Reasoning` turn lowered the budget by exactly 1, agent or not.
+The agent probe's paid frames read `GPT61SolQueryWeekly` 72, 71 and 69 (daily 34 at the last), and the
+six paid turns up to that last reading (three agent-less, three with the agent, interleaved) account for
+every step from 75/40. Included-scenario turns carry no `metering` map, and
+an included-only run between the 73 and 72 readings lowered nothing. This is H26a's budget, 40 a day and
+75 a week, Opus's numbers. Nothing else on the wire tells the scenarios apart: same `DeepLeo` origin,
+same `serviceVersion`, same frames apart from `metering`, and the same self-ID on both ("M365 Copilot
+based on GPT-6 reasoning model", cutoff 2025-12 agent-less, "unknown" with the agent).
+**Decision:** `gpt-6.1-sol` routes on the included scenario. That is the only one a non-premium
+account can use (the paid one answers there with `InvalidCopilotLicense`, F68), and it spends nothing.
+The tone stays out of `PAID_SCENARIO_TONES`, and no budget is tracked for it.
+
+### H27a — is the included scenario's GPT-6.1 Sol the same model as the paid one's? 🔴
+For every other metered tone the included scenario serves an older model (`Claude_Opus`: Opus 4.5 vs
+5.5; `Claude_Sonnet`: Sonnet 4.6 vs 5.5), which self-ID gave away. GPT self-IDs come from M365's system
+prompt ("GPT-6 reasoning model" for GPT-6, GPT-6 Sol and both GPT-6.1 Sol scenarios), so self-ID can't
+answer this. **Falsifier:** a behavioural difference between `Gpt_61_Sol_Reasoning` @ included and
+@ paid that `Gpt_6_Sol_Reasoning` @ included shares with the included one (a knowledge question past
+one model's cutoff, with grounding off). Paid turns cost budget units, so keep it to a handful.
+*(§29 F72 narrows it: agent-less, the included one keeps out of its sandbox when asked and GPT-6 Sol
+doesn't, so it isn't GPT-6 Sol under a new name. Included vs paid is still open.)*
+
+### F68 — agent: premium only, on both scenarios; agent-less: included only, every account 🟢
+| account | path | included | paid |
+|---|---|---|---|
+| premium | agent | 5/5 serve (DeepLeo + `3PDeclarativeAgent`) | 3/3 serve |
+| premium | agent-less | 5/5 serve | 4/4 serve (metered, F67) |
+| non-premium 1 | agent | 1/1 dead (BotConnection, `InternalError`) | — |
+| non-premium 1 | agent-less | 4/4 serve | — |
+| non-premium 2 | agent | 1/1 dead | 1/1 dead |
+| non-premium 2 | agent-less | 1/1 serve | 1/1 `InvalidCopilotLicense` |
+
+The user's probes (the premium account and non-premium account 1, 17:23–17:42Z) plus two of ours
+(non-premium account 2 at 18:33Z, premium at 18:34Z,
+`agent-tone-probe --baseline`). Rejected outright (`type:3` "Failed to invoke 'Chat'", non-premium account 1):
+`Gpt_61`, `Gpt_61_Chat`, `Gpt_61_Reasoning`, `Gpt_61_Sol`, `Gpt_61_Sol_Chat`. The same split as GPT-6
+Sol (F49), so the tone joins `PREMIUM_ONLY_AGENT_TONES`: the first tool request tries the agent, a
+non-premium account's dead route switches the process to agent-less for that tone. The probe used to
+read the tone name `Gpt_61` as GPT major 61 and report `VERSION_MISMATCH(GPT-6)` without `--baseline`;
+it now reads a two-digit run as major.minor.
+
+### Framing: design and pre-registered decision rule
+**Phase A (screen, 18:36Z on):** `phase-sweep.sh`, `MODEL=gpt-6.1-sol`, 10 bench tasks per arm, confab
+retry off, paced (`M365_AVOID_THROTTLING=1`), seven framings on each account — baseline, minimal,
+demo_only (GPT-6 Sol's runners-up, F51), the four user-voice framings honest, terse_user, relay,
+relay_batch — in a different order per account. The agent path is the premium account's; the
+agent-less path is the two non-premium accounts', reached the way a real client reaches it (the first
+request tries the agent, the dead route switches the proxy agent-less). One proxy per arm.
+
+**Rule, fixed 19:40Z after reading phase A and before phase B.** Phase A narrowed it to relay vs
+relay_batch: the only framings that solved every task on both paths, relay_batch with the fewest turns.
+The default is one per tone, so it must hold on **both** paths. Switch from GPT-6 Sol's `relay` to
+`relay_batch` only if, per path, all of F61's criteria hold:
+1. solved(relay_batch) ≥ solved(relay) − 1 per 20 valid tasks;
+2. turns per task down ≥ 15%, task-stratified permutation p < 0.05;
+3. Disengaged + jailbreak + sandbox turns not up by more than 1 per 20 tasks;
+4. real pi under relay_batch: fix-bug and multi ≥ 9/10 together.
+
+**Phase B:** premium (agent) bench relay_batch, relay (A's order reversed), to reach 20 tasks per arm;
+then real pi fix-bug + multi, 5 runs each, under relay_batch and under relay, on the premium account
+(agent) and on both non-premium accounts (agent-less), the framing order mirrored between the two.
+
+### F69 — phase A: with the agent every framing works; without it only the user-voice ones do 🟢
+10 bench tasks per cell, 18:36–19:50Z. Turns are the arm's M365 turns (agent-less: including the one
+dead agent turn each fresh proxy spends before it falls back). Disengaged turns were all the jailbreak
+classifier's.
+
+| framing | agent (premium): solved, turns, Disengaged | agent-less (non-premium 1 + 2): solved, turns, sandbox turns, Disengaged |
+|---|---|---|
+| baseline | 9/10, 27, **3** | **0/20**, 27, 20, 5 |
+| minimal | 9/10, 30, **4** | **2/20**, 36, 20, 7 |
+| demo_only | 10/10, 28, 2 | 13/20, 43, 9, 4 |
+| terse_user | 10/10, 29, 1 | 19/20, 56, 0, 2 |
+| honest | 9/10, 30, 0 | 20/20, 59, 0, 0 |
+| relay | 9/10, 33, 0 | 20/20, 69, 0, 0 |
+| relay_batch | **10/10, 27, 0** | **20/20, 45, 0, 0** |
+
+GPT-6 Sol's pattern again (F51): agent-less, the `<system>`-tagged framings send it to its own sandbox
+("I couldn't find config.json… upload it") on every task; the user-voice ones never. With the agent
+the framings only differ in Disengaged turns and in the odd prose give-up (fix-bug under baseline and minimal: the fix as a
+Python block; count-lines under relay and honest: "I can't create or run scripts in this session").
+Unlike GPT-6 Sol (F61: 2 → 4; §28 found that gap was noise), relay_batch sent it to the sandbox no more than relay did (0 and 0).
+The fallback worked on every agent-less arm: one `InternalError`, then agent-less for the process.
+
+### F70 — phase B: relay_batch passes the rule on both paths → the default 🟢
+19:40–21:30Z, same settings as phase A, no throttled, Disengaged or invalid task or run. Bench turns
+are the client's count per task (the agent-less proxies' one dead agent turn left out); real-pi turns
+are the M365 turns per run (each agent-less arm's first run includes that dead turn, under both
+framings alike). Permutation tests are task-stratified.
+
+| path | | relay | relay_batch | Δ turns |
+|---|---|---|---|---|
+| agent (premium) | bench, A + B | 19/20, 3.25 per task | 20/20, 2.70 | −17% (p = 0.007) |
+| | real pi | 10/10, 5.80 per run | 10/10, 4.10 | −29% (p = 3·10⁻⁵) |
+| agent-less (non-premium 1 + 2) | bench, A | 20/20, 3.35 | 20/20, 2.15 | −36% (p = 10⁻⁵) |
+| | real pi | 20/20, 6.00 | 20/20, 3.20 | −47% (p < 10⁻⁴ on each account) |
+
+Real-pi turns per run:
+
+| account | framing | fix-bug | multi |
+|---|---|---|---|
+| premium | relay | 5,5,5,5,5 | 8,6,6,6,7 |
+| premium | relay_batch | 4,4,3,3,3 | 5,4,5,5,5 |
+| non-premium 1 | relay | 6,5,5,5,5 | 7,6,6,6,6 |
+| non-premium 1 | relay_batch | 4,3,3,3,3 | 4,3,3,3,3 |
+| non-premium 2 | relay | 6,5,5,5,5 | 9,8,7,6,7 |
+| non-premium 2 | relay_batch | 4,3,3,3,3 | 4,3,3,3,3 |
+
+Sandbox turns: relay 0 on the bench and 1 in pi (a multi run, non-premium 2), relay_batch 0 and 0.
+Disengaged and jailbreak turns: 0 under both framings, bench and pi. No blind edits: every relay_batch
+run first read the files (`find … | sort`, `head` of the sources, a Python heredoc printing them), then
+fixed and checked in one block (`perl -pi … && python3 test.py`); agent-less that is read, fix-and-check,
+summary — 3 turns. Where the bench saved turns with the agent: only the tasks one script can finish
+(fizzbuzz, count-lines, ec-plain, ec-nonport); the rest took the same turns under both.
+
+**Against the rule, per path:** 1 (solves ≥ relay − 1 per 20) holds on both; 2 (≥ 15% fewer turns,
+p < 0.05) holds on both, the agent path closest to the line on the bench (−17%) and well past it in pi;
+3 (Disengaged + jailbreak + sandbox not up > 1 per 20) holds, 0 → 0; 4 (real pi ≥ 9/10) holds, 10/10
+and 20/20. **Decision: `gpt-6.1-sol` defaults to `relay_batch` on both paths** (`defaultFramingForTone`).
+GPT-6 Sol stayed on `relay` (F61): what kept it there was its sandbox turns under relay_batch, and
+GPT-6.1 Sol showed none. *(§28 retested it: the gap didn't hold, and GPT-6 Sol is on relay_batch too.)*
+
+---
+
+## 28. Oct 7 2026 — GPT-6 Sol, `relay` vs `relay_batch` again
+
+**Question.** F61 kept `gpt-6-sol` on `relay` on one criterion alone: agent-less, relay_batch sent it
+to its own sandbox on 4 turns in 20 bench tasks against relay's 2, one over the limit of 1 per 20.
+Four events against two is weak evidence either way, and F61 had no real-pi run for it. GPT-6.1 Sol,
+the same split one version on, showed none (F70). Does the gap hold up with more data, on today's
+service?
+
+**Hypothesis H28.** relay_batch sends GPT-6 Sol agent-less to its sandbox no more often than relay
+does, and keeps F61's ~⅓ saving in turns on both paths. **Falsified if** the sandbox gap of F61
+reappears (criterion 3 below fails again).
+
+**Pre-registered decision rule (fixed 01:27Z, before any run).** F61's criteria, judged on the new
+data only (F61's bench pooled in is reported, not decisive), per path. One default serves both paths,
+so both must pass to switch `gpt-6-sol` to relay_batch; otherwise it keeps relay.
+1. solved(relay_batch) ≥ solved(relay) − 1 per 20 valid tasks (bench);
+2. bench turns per task down ≥ 15%, task-stratified permutation p < 0.05;
+3. Disengaged + jailbreak + sandbox turns not up by more than 1 per 20 tasks, bench and real pi
+   together;
+4. real pi under relay_batch: fix-bug and multi ≥ 9/10 per account.
+Turns are M365 turns per task or run, without the dead agent turn an agent-less proxy spends once
+before it falls back.
+
+**Design.** `phase-sweep.sh`, `MODEL=gpt-6-sol`, the 10 bench tasks per arm, confab retry off, paced
+(`M365_AVOID_THROTTLING=1`), the shipped routing (the first tool request tries the agent; the
+non-premium accounts fall back to agent-less), one sweep per account, all three at once:
+- premium (agent): bench relay_batch, relay, relay, relay_batch (F61's order mirrored); real pi
+  fix-bug + multi, 5 runs each, under relay, then relay_batch;
+- non-premium 1 (agent-less): bench relay, relay_batch, relay_batch, relay; pi relay_batch, then relay;
+- non-premium 2 (agent-less): bench relay_batch, relay, relay, relay_batch; pi relay, then relay_batch.
+That is 20 bench tasks and 10 pi runs per framing with the agent, 40 and 20 without it.
+
+### F71 — the sandbox gap was noise: relay_batch passes on both paths, `gpt-6-sol` switches 🟢
+Ran 01:28Z–02:45Z, no throttle, no invalid task; archives `r28-prem` and one per non-premium account.
+Every non-premium arm spent exactly one dead agent turn (`InternalError`) and then fell back agent-less,
+as shipped (excluded from the turn counts). Read with `analyze-arms.mjs --turns`.
+
+| path | | relay | relay_batch | turns | sandbox / Disengaged / jailbreak turns |
+|---|---|---|---|---|---|
+| agent (premium) | bench | 20/20, 3.05 | 20/20, 2.10 | −31% (p = 10⁻⁵) | 0/0/0 → 0/0/0 |
+| agent (premium) | real pi | 10/10, 4.30 | 10/10, 3.50 | −19% (p = 0.037) | 0/0/0 → 0/0/0 |
+| agent-less (np 1 + np 2) | bench | 40/40, 3.08 | 40/40, 2.10 | −32% (p = 10⁻⁵) | 15/0/0 → 13/0/0 |
+| agent-less (np 1 + np 2) | real pi | 20/20, 4.25 | 20/20, 3.20 | −25% (p = 10⁻⁵) | 3/0/0 → 2/0/0 |
+
+Real pi under relay_batch was 10/10 on each account (fix-bug 5/5 and multi 5/5 each). Agent-less
+sandbox turns by account, bench: relay 3 and 12, relay_batch 6 and 7; one relay arm alone had 9.
+
+**Against the rule, per path:** 1 holds on both (no task lost anywhere). 2 holds on both, −31% and
+−32%, p = 10⁻⁵. 3 holds: with the agent 0 → 0; agent-less, bench and pi together, 18 → 15 in 60 tasks
+and runs — relay_batch had *fewer* sandbox turns. 4 holds, 10/10 on each of the three accounts.
+**Decision: `gpt-6-sol` defaults to `relay_batch` on both paths** (`defaultFramingForTone`). H28 confirmed.
+
+**Pooled with F61 (reported, not decisive):** agent 32/32 at 3.09 vs 40/40 at 2.10; agent-less 60/60 at
+3.08 vs 60/60 at 2.10, sandbox turns **17 and 17**. F61's 2 → 4 was noise on a rare event.
+
+**The sandbox turns went up for both framings, not one.** F61's relay arms had 2 sandbox turns in 20
+agent-less tasks; today's had 15 in 40, from 2–3 per arm up to 9. The commands are mostly a look around
+before the fence (`bash -lc pwd`, `bash -lc true`, `ls -la`, an empty `hiddenText`), with the odd real
+read (`find /mnt/data -name settings.txt`, a `sed` of `calc.py`); none cost a task or added a turn
+(relay's turns per task are F61's to the decimal). So the rate drifts with the service, and a
+criterion on rare events should be judged on enough tasks to see that rate, both arms on the same day.
+
+**Tooling.** `analyze-arms.mjs` gained `--turns A B` (turns per valid task without the fallback's dead
+turn, a task-stratified permutation test, and the sandbox/Disengaged/jailbreak totals), and a selection
+can filter on a phase's env (`pi=fix-bug,pi=multi+M365_FRAMING_VARIANT=relay@agent-less`) so pi arms
+under different framings come apart. It reproduces F61 and F70 exactly.
+
+---
+
+## 29. Oct 7 2026 — agent-less GPT-6.1 Sol vs GPT-6 Sol: the same model to the bench, but only 6.1 stays out of its sandbox
+
+**Question.** F69 had agent-less GPT-6.1 Sol go to its sandbox on every `<system>`-tagged task and on
+none under the user-voice framings, where GPT-6 Sol looks in on a fraction of tasks whatever the framing
+(F50, F61, F71). Is that a real difference between the two tones, or the luck of a 20-task screen?
+
+**Design (the user's sweeps).** `phase-sweep.sh`, `PHASES=A:relay_batch,minimal,baseline,honest`, the
+10 bench tasks per arm, `COOLDOWN=60`, `TASK_GAP=0`, the shipped routing, the included scenario, on both
+non-premium accounts at once (so agent-less: every arm's fresh proxy spent its one dead agent turn,
+`InternalError`, and fell back, as shipped; left out of the turn counts). GPT-6.1 Sol twice, 00:18–00:49Z
+(GIT 6fbc441) and 03:56–04:39Z (ea77c56; the framing texts are identical), archives
+`gpt-6.1-sol-agent-nonpaid-included-scenario` and `…-again`; GPT-6 Sol once, 05:43–06:20Z, archive
+`gpt-6-sol-agent-nonpaid-included-scenario`. The same day as F71 (01:28–02:45Z), which ran GPT-6 Sol
+between the two GPT-6.1 Sol sweeps. No throttled or invalid task. It was GPT-6 Sol's first agent-less
+`honest` bench. Read with `analyze-arms.mjs --turns`.
+
+### F72 — the same solves and turns; GPT-6.1 Sol keeps out of its sandbox when asked, GPT-6 Sol doesn't 🟢
+Every arm scored the same on both accounts. Turns are M365 turns per task; sandbox is tasks with a
+sandbox turn (never more than one per task under the user-voice framings).
+
+| framing | GPT-6.1 Sol (40 tasks): solved, turns, sandbox, Disengaged | GPT-6 Sol (20 tasks): solved, turns, sandbox, Disengaged |
+|---|---|---|
+| relay_batch | 40/40, 2.13, **0/40**, 0 | 20/20, 2.10, **6/20**, 0 |
+| honest | 40/40, 2.85, **3/40**, 0 | 20/20, 2.90, **17/20**, 0 |
+| minimal | 0/40, 1.48, 40/40, 19 | 0/20, 1.55, 20/20, 9 |
+| baseline | 0/40, 1.30, 40/40, 9 | 0/20, 1.25, 20/20, 5 |
+
+- **To the bench they are the same model.** The user-voice framings solve every task at the same turns
+  per task, relay_batch beating honest by a quarter for both (−25% and −28%, p = 10⁻⁵ each); the
+  `<system>`-tagged ones solve nothing, and the failure is the same: the first turn goes to the sandbox
+  on every task ("I couldn't find config.json… upload it", or a `/mnt/data` artifact that the proxy's
+  remote-artifact guard turns into an error), and the jailbreak classifier fires at the same rate (28 in
+  80 tasks, 14 in 40). F69's agent-less screen (baseline 0/20, minimal 2/20) holds at 0/80.
+- **GPT-6.1 Sol has the sandbox, and stays out of it when the user's note says to.** Under relay_batch
+  it never went in: 0 of 40 tasks today, 0 of 60 on the bench since F69, 0 of 20 real-pi runs (F70).
+  Under honest it went in on 3 of 40, all on one account, each time to run `pass`. GPT-6 Sol went in on
+  6 of 20 under relay_batch (3 per account: `bash -lc true`, `pwd`, `echo no`, once a real
+  `ls -la; sed -n '1,240p' calc.py`), and on 17 of 20 under honest (9 and 8; mostly `bash -lc pwd`,
+  but also `cat config.json`, a `grep` for the secret code, and on ec-create writing `/mnt/data/greeting.txt`
+  and listing it). Its sandbox turns cost no task and no turn, as in F71.
+
+Tasks with a sandbox turn, GPT-6 Sol vs GPT-6.1 Sol, Fisher's exact test:
+
+| framing | data | GPT-6 Sol | GPT-6.1 Sol | p |
+|---|---|---|---|---|
+| relay_batch | today's sweeps | 6/20 | 0/40 | 8·10⁻⁴ |
+| relay_batch | Oct 7 bench (today's + F71) | 19/60 | 0/40 | 2·10⁻⁵ |
+| relay_batch | every bench + real pi (F61, F69–F72) | 25/100 | 0/80 | 10⁻⁷ |
+| honest | today's sweeps | 17/20 | 3/40 | 3·10⁻⁹ |
+| relay | every bench + real pi (F61, F69–F71) | 13/80 | 1/40 | 0.03 |
+
+**Reading.** Both run on the same kind of sandbox and both can be talked out of solving in it, but only
+GPT-6.1 Sol follows the user-voice note that the sandbox is the wrong machine all the way to not
+looking. GPT-6 Sol's habit drifts with the service (F71) but has never dropped to zero, while GPT-6.1
+Sol's has never risen above it under relay or relay_batch.
+
+**What changes:** nothing in the routing or the defaults; both are on relay_batch, which wins for both.
+On a non-premium account `gpt-6.1-sol` is the cleaner of the two: the same solves and turns, without the
+sandbox look-around and its odd `/mnt/data` write. **Bearing on H27a:** the behaviour is a fingerprint
+that tells GPT-6 Sol apart from the included scenario's GPT-6.1 Sol, so the included scenario does not
+serve GPT-6 Sol under a new name, the way it serves the previous model for Opus and Sonnet. Whether it
+serves the same model as the paid scenario is still open: an honest arm on the paid scenario
+(premium, agent-less, about 3 budget units a task) that went to the sandbox would falsify "same model";
+one that didn't wouldn't settle it.
+
+---
+
+## 30. Oct 2 2026 — Windows / pi as a general agent (#6, #7): six proxy-side causes, and what is still open
 
 **Question.** #7's fix (673911b) was reasoned, not measured: no Windows host had run it. On a real
 Windows 11 machine with real pi and `gpt-5.6-think-deeper`, does a pi session work as a general
@@ -4336,9 +4618,9 @@ causes are the proxy's?
 `results.json` of a six-task suite (`%TEMP%\m365-agent-suite-*`); sweeps, a mock OpenAI endpoint and
 probes (`%TEMP%\m365-tooltest`). Service version not captured (`M365_DEBUG` truncates frames).
 Methods note for anyone sweeping single turns: **vary the first user message** — `SessionPool`
-fingerprints a conversation by it, so identical prompts land in one M365 conversation (F73).
+fingerprints a conversation by it, so identical prompts land in one M365 conversation (F79).
 
-### F67 — a Windows host is not a PowerShell shell: the platform note sent pi's bash PowerShell 🟢
+### F73 — a Windows host is not a PowerShell shell: the platform note sent pi's bash PowerShell 🟢
 pi on Windows gives a tool named `bash` ("Execute a bash command…") backed by Git Bash. The #7 note
 said it "runs PowerShell" and to emit ```powershell, so every shell turn came back as
 `/usr/bin/bash: line 2: Write-Output: command not found` (trace, 1/1) and the model gave up after
@@ -4348,14 +4630,14 @@ one or two. That is also #7's original report read the other way: "only works wh
 with `find`/`grep`; "count the .ts files and write the number" wrote 43 (actual 43).
 **Falsify:** a harness whose tool is named `bash` but runs PowerShell (set `M365_HOST_SHELL`).
 
-### F68 — the fence regex closed on the first ```, so nested fences executed 🟢
+### F74 — the fence regex closed on the first ```, so nested fences executed 🟢
 A ```markdown answer holding N illustrative ```bash examples parsed as N−1 executable calls
 (deterministic; 3 examples → 2 calls), and a heredoc writing Markdown with a code block reached the
 shell as `cat > ozet.md <<'EOF'\n# Title` (unterminated). `scanFences` counts depth; only depth-0
 blocks are tool candidates. 0 of ~1 MB of logged model output glues a closer to code, so the
 own-line rule costs nothing observed.
 
-### F69 — pi's shell tool cuts commands past ~8,190 characters silently 🟢 (model-free)
+### F75 — pi's shell tool cuts commands past ~8,190 characters silently 🟢 (model-free)
 A mock OpenAI endpoint returning scripted tool calls to real pi: a 12,070-char heredoc wrote 8,164
 bytes, the trailing `wc`/`echo` never ran, and bash only said "here-document … delimited by
 end-of-file"; 7,000 chars and 6,000 double quotes were intact (the cap is on characters, not escaped
@@ -4365,7 +4647,7 @@ before the heredoc). A platform-note line telling the model to use the write too
 it still wrote one 13.6 KB heredoc), so the proxy rewrites an over-cap quoted heredoc write to the
 harness write tool (`longHeredocAsWrite`). After: the summary task wrote 13,418 chars, complete.
 
-### F70 — every follow-up tool result went out as `name="unknown"` 🟢; that it caused the give-ups ⚫ not supported
+### F76 — every follow-up tool result went out as `name="unknown"` 🟢; that it caused the give-ups ⚫ not supported
 `formatMessages` names a result after its call (fixed earlier for the misread it causes); the
 handler's delta path — every pi turn from turn 2 on — kept `m.name || "unknown"`. Fixed: one
 `formatToolResponse` for both. The hypothesis that the label caused the mid-task "bash is not
@@ -4375,7 +4657,7 @@ after the fix, pdf and docx still gave up the same way (3 of 4 runs).
 name="bash" call_id="…">` for deltas. Kept here: the one shared renderer, so the delta reads like the
 first turn, `tool="bash" command="…"`, and #51's test now expects that.)
 
-### F71 — give-ups the forcing retry never saw: Turkish ones, and ones dressed as a document 🟢
+### F77 — give-ups the forcing retry never saw: Turkish ones, and ones dressed as a document 🟢
 (1) Every confabulation pattern was English; a Turkish user's give-ups went straight through.
 (2) "…devre dışı olduğu için oluşturamıyorum" + two "run these yourself" ```bash blocks parsed as
 tool calls, so the retry (gated on no calls) was skipped, then the document guard returned it as
@@ -4384,14 +4666,14 @@ patterns are first-person / session-scoped so a Turkish summary of this repo doe
 Live detections after the change rescued fix-bug, skill-use, docx (2×), pdf (1×) and a turn-1
 summary refusal; one summary retry also failed.
 
-### F72 — the forcing prompt contradicted the transcript mid-task 🟡
+### F78 — the forcing prompt contradicted the transcript mid-task 🟡
 `CONFAB_FORCE_PROMPT` says "you have not run any command yet"; after a real tool result the model
 answered "so I can't run `ls -la` or `cat`" (2/2 observed retries). With `everActed`, the retry now
 says the tools work and a missing program is something to install. Indicative only: the first pdf
 pass of the night came after it (a 39.6 KB PDF via Edge headless print-to-pdf, Segoe UI / Consolas
 embedded, every Turkish glyph of the source mapped). n too small for a rate.
 
-### F73 — framing variants and "a refusal poisons the thread": both ⚫ at the scale tested
+### F79 — framing variants and "a refusal poisons the thread": both ⚫ at the scale tested
 An n=1-per-arm read suggested `relay`/`honest`/`minimal` beat `baseline` for GPT-5.6 tool calls. A
 5-per-arm sweep that reused one first message put all 30 trials in **one** conversation
 (`x_m365_conversation_messages` 3→4→5…) and scored 1/30. With a nonce per trial and interleaved
@@ -4399,9 +4681,9 @@ arms: `baseline` 5/5, `relay` 5/5, `honest` 5/5 — no framing effect on the tur
 poisons the thread" (re-send in a fresh conversation on a give-up): in-thread 5/6 vs fresh 6/6, not a
 result; left as the opt-in lever it was on the fork, not shipped.
 
-### F74 — the general suite: coding works, documents don't yet 🟡
+### F80 — the general suite: coding works, documents don't yet 🟡
 Real pi, `gpt-5.6-think-deeper`, one objective verifier per task, across the night's builds after
-F67: write code (Turkish slugify, with the `İ` trap) 3/3 · fix two seeded bugs 3/3 · use a project
+F73: write code (Turkish slugify, with the `İ` trap) 3/3 · fix two seeded bugs 3/3 · use a project
 skill 2/2 · repo Q&A 2/3 (one answer from context, wrong file) · .docx 3/6 · PDF 1/10. Two caveats:
 project skills are trust-gated and `-p` mode skips them (`--approve` for automation — the first two
 skill runs were a test bug, not a model failure); and the last three PDF runs were turn-1 refusals
@@ -4409,11 +4691,11 @@ in a row after well over 100 threads that night — plausibly account degradatio
 **Update (Oct 4, rested account):** the "obstacle" reading was partly my harness. pandoc 3.12 and
 MiKTeX `xelatex` had been installed since Sep 29, but the shell the suite ran from had a stale PATH,
 so its agents never saw them; and one of the night's docx runs `pip install`ed python-docx, changing
-the environment for later runs. Day-to-day numbers are therefore not comparable. See F75 for what the
+the environment for later runs. Day-to-day numbers are therefore not comparable. See F81 for what the
 probe actually found.
 
-### F75 — sessions that share an opening message shared one M365 conversation 🟢
-The F74 probe (Oct 4, one day of rest, 3 arms × {pdf, docx} × 5, interleaved; arms: control, the
+### F81 — sessions that share an opening message shared one M365 conversation 🟢
+The F80 probe (Oct 4, one day of rest, 3 arms × {pdf, docx} × 5, interleaved; arms: control, the
 document recipes in the platform note, the same recipes as a project skill) scored control 7/10, note
 3/10, skill 4/10 — and **by position in the sweep** 7/10 → 4/10 → 3/10, every arm falling together.
 The failed runs' text explains it: in **empty** directories the model wrote "notlar.docx was already
@@ -4424,7 +4706,7 @@ and on a match the handler called `session.reset()` — which drops the `Copilot
 keeps the `conversationId` — so the full prompt went into the previous run's M365 thread. At equal
 length nothing reset at all, the delta was empty, and `"Please continue."` went there. Real-use
 shape: two pi sessions opened with the same prompt within 30 minutes, even in different directories.
-This is also what F73's 1/30 was, read as a measurement artifact at the time. Fixed:
+This is also what F79's 1/30 was, read as a measurement artifact at the time. Fixed:
 `messages.length <= sentMessageCount` → `newConversation()` (a harness only ever appends, and the
 full prompt re-sends the whole history). Regression tests fail on the old handler.
 The document-recipe arms did not help (note 3/10 with 7 turn-1 give-ups vs control 2; p ≈ 0.07 on
@@ -4432,5 +4714,5 @@ the give-ups, not significant) and were not shipped. **Live after the fix** (sam
 **17/20** (pdf 8/10, docx 9/10) vs control 7/10 before; by position 9/10 then 8/10 — the decline is
 gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prompt), and 0 outputs
 referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
-(F71/F72), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
+(F77/F78), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.
