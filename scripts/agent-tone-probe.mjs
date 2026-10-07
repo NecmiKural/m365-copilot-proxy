@@ -87,6 +87,7 @@ export const DEFAULT_CELLS = [
   // Serves with the agent on a premium account, dead route on a non-premium
   // one (#23) — the proxy learns which at runtime (PREMIUM_ONLY_AGENT_TONES).
   { tone: "Gpt_6_Sol_Reasoning", note: "gpt-6-sol — agent only on a premium account" },
+  { tone: "Gpt_61_Sol_Reasoning", note: "gpt-6.1-sol — agent only on a premium account", ...INCLUDED },
   // One tone, two models agent-less: Sonnet 4.6 included, Sonnet 5.5 paid
   // (§26). Sonnet 5 has its own tone now, paid only (included is Sonnet 4.6).
   { tone: "Claude_Sonnet", note: "claude-sonnet (Sonnet 4.6 agent-less)", ...INCLUDED },
@@ -124,11 +125,13 @@ export function selfId(text) {
 
 const majorOf = (v) => (v ? v.split(".")[0] : null);
 
-/** What the tone's NAME claims. `magic` routes itself; the control is nothing. */
+/** What the tone's NAME claims. `magic` routes itself; the control is nothing.
+ *  A run of two digits is a version without its dot: `Gpt_61_Sol_Reasoning` is
+ *  the web client's "GPT-6.1 Sol" (§27), so its major is 6, not 61. */
 function expectedFromTone(tone) {
   if (/^Claude_/i.test(tone)) return { family: "claude" };
   const gpt = tone.match(/^Gpt_(\d+)/i);
-  if (gpt) return { family: "gpt", gptMajor: gpt[1] };
+  if (gpt) return { family: "gpt", gptMajor: gpt[1].length === 2 ? gpt[1][0] : gpt[1] };
   return null;
 }
 

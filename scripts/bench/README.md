@@ -120,7 +120,9 @@ Per arm it prints the score and what happened on the wire: which path served eac
 without the tool agent), turns where the model worked in its own sandbox, Disengaged and
 jailbreak-classifier turns, dead-route `InternalError`s and fallbacks, network failures and
 throttles. Then it pools by arm × path, and `--compare` gives Fisher's exact test between two
-selections. Tasks that failed because of the network or a throttle are left out of every score,
+selections. `--turns A B` compares turns per task instead, with a task-stratified permutation test,
+and counts each selection's sandbox, Disengaged and jailbreak turns; a pi arm's framing is selected
+by its phase env (`'pi=fix-bug,pi=multi+M365_FRAMING_VARIANT=relay@agent'`). Tasks that failed because of the network or a throttle are left out of every score,
 so an outage doesn't read as a bad arm. It also reads the older `sonnet5-sweep.sh` archives. The
 header of the script documents each rule.
 

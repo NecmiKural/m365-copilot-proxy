@@ -264,8 +264,20 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   unless the agent already answered for that tone (`noteAgentRouteAlive`): premium accounts emit the
   same `InternalError` as a rare transient (§23 F52). Run
   `agent-tone-probe.mjs` on **both** kinds of account before classifying a new tone. Agent-less, GPT-6
-  Sol has its own sandbox that `M365_NO_CODE_INTERPRETER` does not remove; only `relay` keeps it out
-  (60/60 vs ≤6/10), relay wins with the agent too (30/30), and real pi went 21/21. See docs/hypotheses.md §23.
+  Sol has its own sandbox that `M365_NO_CODE_INTERPRETER` does not remove; only the user-voice framings
+  get it to solve (60/60 vs ≤6/10), though it still looks into the sandbox on some tasks, harmlessly.
+  relay wins with the agent too (30/30), and its default is now
+  `relay_batch` on both paths (−32% turns, 60/60 + 40/40 bench, 30/30 real pi). F61 kept it on relay over 4 vs 2
+  sandbox turns; the retest found 13 vs 15, so one small gap is not a reason to hold a default back
+  — rerun it. See docs/hypotheses.md §23, §28.
+  `Gpt_61_Sol_Reasoning` (`gpt-6.1-sol`) splits the same way and is also routed on the included scenario:
+  its paid scenario serves too but spends a `GPT61Sol*` budget (40/day, 75/week), so don't add it to
+  `PAID_SCENARIO_TONES`. Its default is `relay_batch` too: it didn't add sandbox
+  turns, and it cut turns 17–47% at 40/40 bench, 30/30 real pi. See docs/hypotheses.md §27.
+  Agent-less the two are the same to the bench (same solves and turns, framing by framing), except
+  that GPT-6.1 Sol stays out of its sandbox when the user-voice note says to (relay_batch: 0 of 80
+  tasks and pi runs) and GPT-6 Sol looks in on about a quarter of them (25 of 100) — harmless, but a
+  fingerprint: the included scenario's GPT-6.1 Sol isn't GPT-6 Sol renamed (§29 F72).
 - **A turn can hold several bot messages; assemble text per message.** Each new message's head
   arrives only as a snapshot with a `cursor`; folding everything into one string drops it (it ate
   a fence's backticks). `TurnTextComposer` in `session.ts` — don't "simplify" it away. #29.

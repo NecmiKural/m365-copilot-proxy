@@ -283,7 +283,8 @@ without NixOS: `nix run github:cramt/m365-copilot-proxy -- 4141`.
 | Model ID | M365 Tone | Description |
 |---|---|---|
 | `gpt-6-think-deeper` | Gpt_6_Reasoning | GPT-6 reasoning. **Needs a paid/premium Copilot seat** (see below); 30/30 on the bench (agent-less, `relay` framing). Defaults to `relay_batch`: 20/20 at 2.1 turns per task (relay: 3.2), 10/10 driving real pi |
-| `gpt-6-sol` | Gpt_6_Sol_Reasoning | GPT-6 Sol ("GPT 6.0 Sol" in the web UI). **Works on every account**, no paid seat needed; uses the tool agent only on a premium account (see below). With the `relay` framing: 30/30 on the bench with the agent, 60/60 without, 21/21 driving real pi |
+| `gpt-6-sol` | Gpt_6_Sol_Reasoning | GPT-6 Sol ("GPT 6.0 Sol" in the web UI). **Works on every account**, no paid seat needed; uses the tool agent only on a premium account (see below). Defaults to `relay_batch`: 40/40 on the bench with the agent, 60/60 without, 30/30 driving real pi, at 2.1 turns per bench task either way |
+| `gpt-6.1-sol` | Gpt_61_Sol_Reasoning | GPT-6.1 Sol ("GPT-6.1 Sol" in the web UI). **Works on every account**, and uses the tool agent only on a premium account, like `gpt-6-sol`. Defaults to `relay_batch`: 40/40 on the bench, 30/30 driving real pi, at 2.7 turns per bench task with the agent and 2.2 without, and without the agent it keeps out of its sandbox, which `gpt-6-sol` doesn't always (see below) |
 | `gpt-5.6-think-deeper` | Gpt_5_6_Reasoning | GPT-5.6 reasoning — 27/30 on the bench, tied with `gpt-5.5-think-deeper` |
 | `gpt-5.6` / `gpt-5.6-quick` | Gpt_5_6_Chat | GPT-5.6 fast ("GPT 5.6 Quick response" in the web UI). **Weak at tool calling** — 7/30 on the bench (see below) |
 | `gpt-5.5-think-deeper` | Gpt_5_5_Reasoning | **Recommended default for agents/tool-calling** — 26/30 on the bench |
@@ -387,11 +388,43 @@ the proxy treats that as a transient and retries instead of dropping the agent.
 **Without the agent it has a sandbox of its own.** It runs `bash` in a remote machine (`/mnt/data`,
 `/home/oai`), finds none of your files there, and asks you to upload them, or hands back a Teams link
 to a file it made. Turning off M365's code interpreter (`M365_NO_CODE_INTERPRETER=1`) doesn't stop
-it. The `relay` framing does: on the bench it solved 60/60 agent-less, against 0–6/10 for every
-other framing, and 30/30 with the agent (the others 3–9/10). Through real pi it solved 21/21 runs
-across both kinds of account. `relay` is the default on both paths: `relay_batch` saved a third of
-the turns, but without the agent it sent GPT-6 Sol to its sandbox twice as often (hypotheses §25).
-Details: [hypotheses §23](docs/hypotheses.md).
+it. The user-voice `relay` framing does: on the bench it solved 60/60 agent-less, against 0–6/10 for
+every other framing, and 30/30 with the agent (the others 3–9/10). Its batching variant,
+`relay_batch`, is the default on both paths: it keeps relay's wording and asks for one script per
+turn, which cut the turns by a third on the bench (60/60 agent-less, 40/40 with the agent) and by a
+fifth to a quarter in real pi (30/30 runs). It doesn't send GPT-6 Sol to its sandbox any more often
+than `relay` (an earlier, smaller run suggested it did; the retest found no difference). Details:
+[hypotheses §23, §28](docs/hypotheses.md).
+
+### GPT-6.1 Sol (`gpt-6.1-sol`) — GPT-6 Sol's routing, and the `relay_batch` framing
+
+The web client calls it **"GPT-6.1 Sol"**; the tone is `Gpt_61_Sol_Reasoning`, and like GPT-6 Sol it
+identifies itself as the GPT-6 reasoning model. It is routed exactly like `gpt-6-sol`: the default
+included scenario, which serves it on premium and non-premium accounts alike, and the tool agent
+only on a premium account, which the proxy learns from the first tool request (see above).
+
+**It has a separate allowance, which the proxy doesn't use.** The paid scenario serves it too, but
+every paid turn spends a GPT-6.1 Sol allowance of 40 turns a day and 75 a week, the size of Opus
+5.5's; included turns spend nothing, and a non-premium account can't use the paid scenario at all.
+So the proxy stays on the included one. Whether the paid scenario serves a newer model behind the
+same name is still open: the model can't tell you, since its self-description is M365's.
+
+**It defaults to `relay_batch` on both paths.** Without the agent it has a sandbox like GPT-6 Sol's,
+and the framings that put the instructions in a `<system>` block send it there: `baseline` solved
+0/20 and `minimal` 2/20. The framings written as the user's own request kept it out entirely. As with
+GPT-6 Sol, it went to the sandbox no more often under `relay_batch` than under `relay` (never, on the
+bench), so here the turn saving decides: 40/40 on the bench against relay's 39/40 at 17% fewer turns
+with the agent and 36% fewer without, and 30/30 runs driving real pi at 29% and 47% fewer turns (about
+4 and 3 per run). Details: [hypotheses §27](docs/hypotheses.md).
+
+**Without the agent it matches GPT-6 Sol on the bench, but stays out of its sandbox.** Side by side
+on both non-premium accounts, the two solved the same tasks at the same turns under every framing:
+`relay_batch` and `honest` everything (about 2.1 and 2.9 turns per task), `baseline` and `minimal`
+nothing. The difference is the sandbox: told by the user's note that it's the wrong machine, GPT-6.1
+Sol never went into it under `relay_batch` (0 of 80 bench tasks and pi runs so far), where GPT-6 Sol
+still looks around in it on about a quarter of tasks — harmless, but on a non-premium account
+`gpt-6.1-sol` is the tidier of the two. It also shows the included scenario's GPT-6.1 Sol isn't GPT-6
+Sol under a new name. Details: [hypotheses §29](docs/hypotheses.md).
 
 ### Sonnet 5 and 5.5 (`claude-sonnet-5`, `claude-sonnet-5.5`) — their own sandbox, and the `relay` framing
 
@@ -561,10 +594,10 @@ Three token scopes are acquired:
 | `M365_NO_INTERACTIVE` | Set to `1` to hard-disable any visible browser login, overriding the flag above. For systemd/CI hosts where a window must never open. |
 | `M365_INTERACTIVE_TIMEOUT_MS` | How long to wait for you to finish the interactive sign-in (default `600000`, i.e. 10 minutes). |
 | `M365_LOGIN_LOCALE` / `M365_LOGIN_TIMEZONE` | Browser locale and timezone presented during login (defaults `en-GB` / `Europe/Copenhagen`). These are part of the anti-bot-scoring fingerprint ([§11 F25](docs/hypotheses.md)) — set them to match your own machine if AAD starts treating your automated login as a bot. |
-| `M365_FORCE_AGENT` | Override which tool requests carry the Copilot Studio tool agent. `1` attaches it to every tool request (and turns off the `gpt-6-sol` fallback below); `0` never attaches it. Unset, the proxy decides per model: GPT-5.x, `m365-copilot` and both Opus models take it, the other Claude models and `gpt-6-think-deeper` don't, and `gpt-6-sol` takes it only on a premium account, which the proxy learns from the first request. `claude-opus-4.5` carries it on tool-less requests too, since that's its only route (`0` turns that off as well). On a non-premium account `0` saves the `gpt-6-sol` probe turn (~3 s) per proxy start. |
+| `M365_FORCE_AGENT` | Override which tool requests carry the Copilot Studio tool agent. `1` attaches it to every tool request (and turns off the GPT-6 Sol fallback below); `0` never attaches it. Unset, the proxy decides per model: GPT-5.x, `m365-copilot` and both Opus models take it, the other Claude models and `gpt-6-think-deeper` don't, and `gpt-6-sol` / `gpt-6.1-sol` take it only on a premium account, which the proxy learns from the first request. `claude-opus-4.5` carries it on tool-less requests too, since that's its only route (`0` turns that off as well). On a non-premium account `0` saves the probe turn (~3 s) per GPT-6 Sol model per proxy start. |
 | `M365_OPUS_FALLBACK_MODEL` | Model to serve `claude-opus` (Opus 5.5) requests with once its priority-access budget is used up, instead of returning a 429 — typically `claude-opus-4.5`, which isn't metered (premium accounts only). Applies until the budget resets; the response's `model` field names the model that answered. Unset by default. |
 | `M365_SONNET_FALLBACK_MODEL` | The same for `claude-sonnet-5.5` (Sonnet 5.5) once its priority-access budget is used up — e.g. `claude-sonnet-5` (unmetered) or `claude-sonnet` (Sonnet 4.6, any account). A fallback naming a metered model is ignored. Unset by default. |
-| `M365_SCENARIO` / `M365_LICENSE_TYPE` | Override the entitlement the WebSocket is opened under (defaults: `OfficeWebIncludedCopilot` / `Starter`, switching to `OfficeWebPaidCopilot` / `Premium` for the entitlement-gated models — `claude-opus`, `gpt-6-think-deeper`, `claude-sonnet-5` and `claude-sonnet-5.5`; `claude-opus-4.5` stays on the included one). `scenario` is what gates the model list (and picks Sonnet 4.6 vs 5.5 for the `Claude_Sonnet` tone, Sonnet 4.6 vs 5 for `Claude_Sonnet_5`, Opus 4.5 vs 5.5 for `Claude_Opus`); `licenseType` rides along and unlocks nothing by itself. |
+| `M365_SCENARIO` / `M365_LICENSE_TYPE` | Override the entitlement the WebSocket is opened under (defaults: `OfficeWebIncludedCopilot` / `Starter`, switching to `OfficeWebPaidCopilot` / `Premium` for the entitlement-gated models — `claude-opus`, `gpt-6-think-deeper`, `claude-sonnet-5` and `claude-sonnet-5.5`; `claude-opus-4.5` and `gpt-6.1-sol` stay on the included one). `scenario` is what gates the model list (and picks Sonnet 4.6 vs 5.5 for the `Claude_Sonnet` tone, Sonnet 4.6 vs 5 for `Claude_Sonnet_5`, Opus 4.5 vs 5.5 for `Claude_Opus`); `licenseType` rides along and unlocks nothing by itself. Forcing the paid scenario on `gpt-6.1-sol` spends its separate GPT-6.1 Sol allowance (40 turns a day, 75 a week), which the proxy doesn't track. |
 | `M365_CACHE_FILE` | Override MSAL token cache location |
 | `M365_SECRETS_FILE` | Override credentials file location |
 | `CHROMIUM_PATH` | Path to Chromium binary for automated login |
