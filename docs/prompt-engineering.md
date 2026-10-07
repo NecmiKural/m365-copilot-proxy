@@ -86,8 +86,19 @@ premium account) there's no sandbox, but the cage framings still lose to relay (
 the model confabulates "I can't access your working directory from this chat", even after a
 successful `cat`. relay removes the question: the user runs the commands, so the model needs no
 belief about its own access. **Lesson:** for any new reasoning tone, put `relay` in the first sweep.
-GPT-6 now runs the batching relay (`relay_batch`, below): a third fewer turns, no sandbox turns. GPT-6
-Sol doesn't: agent-less, batching sent it to its sandbox twice as often (hyp §25 F61).
+GPT-6 and GPT-6 Sol now run the batching relay (`relay_batch`, below): a third fewer turns. For
+GPT-6 Sol that took a second look: agent-less, its first run sent it to its sandbox on 4 turns against
+relay's 2 (hyp §25 F61), the retest on 40 tasks per framing found 13 against 15 (hyp §28 F71), and
+pooled the two are level (17 and 17 in 60 tasks). GPT-6.1 Sol
+(hyp §27) repeats GPT-6 Sol's pattern (agent-less baseline 0/20, minimal 2/20, every user-voice framing
+19–20/20) and runs `relay_batch` too (no sandbox turn under it; 40/40 bench, 30/30 real pi, 17–47% fewer
+turns). **Lesson:** don't hold a default back on a gap of a few rare events; rerun with more tasks.
+Side by side agent-less (hyp §29 F72), GPT-6.1 Sol and GPT-6 Sol solve and spend turns alike under
+every framing, so the framing results carry over between them; what differs is whether the model
+obeys the note: under relay_batch GPT-6.1 Sol went into its sandbox on 0/40 tasks (0/80 with the
+earlier bench and pi), GPT-6 Sol on 6/20 (25/100 overall), and under `honest` 3/40 vs
+17/20. The user-voice note is what makes both solve; how literally a model takes it is per model, and
+doesn't cost solves either way.
 
 ## Claude Opus: when every framing solves, count the Disengages
 
@@ -114,8 +125,9 @@ Opus default (both models). The cost to watch: a batched block acts before it ha
 in pi every edit still came after a read.
 
 **It carries to other models unevenly — measure in real pi, not only on the bench** (hyp §25). The
-bench's turn savings: GPT-6 and GPT-6 Sol −33%, Sonnet 4.6 −14%, Sonnet 5 −15%. In pi: Sonnet 4.6
-−21%, Sonnet 5 only −6% (relay already reads, fixes and checks in ~5 turns). Savings come from tasks
+bench's turn savings: GPT-6 and GPT-6 Sol −33%, Sonnet 4.6 −14%, Sonnet 5 −15%. In pi: GPT-6 Sol −19%
+with the agent and −25% without (hyp §28), Sonnet 4.6 −21%, Sonnet 5 only −6% (relay already reads,
+fixes and checks in ~5 turns). Savings come from tasks
 one script can finish; fix-bug and config edits barely move. **And batching needs a shell:** with a
 read-only toolset, "a script can look at the files…" made Sonnet 4.6 announce it had only its own
 sandbox tools (3/7 vs relay 6/6, H25b), so `relay_batch` is plain relay when there is no shell tool.
@@ -178,11 +190,11 @@ the transcript's **tags** (`transcriptStyleForVariant`): the Claude Sonnet set n
 the harness's own system prompt becomes `<harness_system_prompt>`.
 
 **The default is model-aware** (`defaultFramingForModel`, falling back to `defaultFramingForTone`).
-`Claude_Opus` (Opus 4.5 and 5.5), `Claude_Sonnet` (as Sonnet 4.6) and `Gpt_6_Reasoning` →
-`relay_batch`; Sonnet 5 (`claude-sonnet-5`, its own `Claude_Sonnet_5` tone since 2026-10-06),
+`Claude_Opus` (Opus 4.5 and 5.5), `Claude_Sonnet` (as Sonnet 4.6), `Gpt_6_Reasoning`,
+`Gpt_6_Sol_Reasoning` (hyp §28) and
+`Gpt_61_Sol_Reasoning` (GPT-6.1 Sol, hyp §27) → `relay_batch`; Sonnet 5 (`claude-sonnet-5`, its own `Claude_Sonnet_5` tone since 2026-10-06) and
 Sonnet 5.5 (`claude-sonnet-5.5`, `Claude_Sonnet` on the paid scenario, keyed on the model ID;
-inherits Sonnet 5's relay, unbenched, hyp §26) and
-`Gpt_6_Sol_Reasoning` → `relay`. **Every other model keeps `baseline` byte-for-byte** (including
+inherits Sonnet 5's relay, unbenched, hyp §26) → `relay`. **Every other model keeps `baseline` byte-for-byte** (including
 `claude-sonnet-think-deeper`, unmeasured under relay), so no GPT-5.x bench number moves, and
 `M365_FRAMING_*` still wins. Opus used to default to `minimal`, to spend less of its priority-access
 budget by sending a shorter prompt; that budget counts turns, not tokens (docs/hypotheses.md §24

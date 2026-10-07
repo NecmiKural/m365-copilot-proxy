@@ -304,9 +304,9 @@ export async function handleChatCompletion(
   // path doesn't serve Claude at all (§22 F44) — except Claude Opus, whose
   // included-scenario model (Opus 4.5) serves ONLY with the agent (§24), so it
   // carries the agent even on a tool-less request. `Gpt_6_Reasoning` doesn't serve
-  // with the agent on any account (§22 F45, #41), and `Gpt_6_Sol_Reasoning` only
-  // on a premium one (learned at runtime, see the dead-route fallback in
-  // runBuffered). The rule lives in core (`requestUsesAgent`);
+  // with the agent on any account (§22 F45, #41), and `Gpt_6_Sol_Reasoning` /
+  // `Gpt_61_Sol_Reasoning` only on a premium one (learned at runtime, see the
+  // dead-route fallback in runBuffered). The rule lives in core (`requestUsesAgent`);
   // M365_FORCE_AGENT=1 / =0 forces the agent on / off for tool requests.
   // Derive it from the RESOLVED tone, not the raw model string: getToneForModel
   // routes any unmapped `claude-*` (e.g. the `claude-opus-5[1m]` a Claude Code
@@ -318,8 +318,8 @@ export async function handleChatCompletion(
   // Framing default follows the MODEL (defaultFramingForModel): the Claude,
   // GPT-6 and GPT-6 Sol tones get a user-voice relay (Sonnet reads the
   // `<system>`-tagged baseline as an injected prompt; on Opus it trips the
-  // jailbreak classifier). Opus, Sonnet 4.6 and GPT-6 get the turn-saving
-  // `relay_batch` (§24 F60, §25); Sonnet 5, Sonnet 5.5 and GPT-6 Sol plain `relay`. The
+  // jailbreak classifier). Opus, Sonnet 4.6, GPT-6, GPT-6 Sol and GPT-6.1 Sol get the
+  // turn-saving `relay_batch` (§24 F60, §25, §27, §28); Sonnet 5 and Sonnet 5.5 plain `relay`. The
   // rest keep the bench-tuned `baseline`.
   // Keyed on the model, not the tone, because one tone can serve two models.
   // M365_FRAMING_* still wins.
