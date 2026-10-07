@@ -15,7 +15,13 @@
 // M365_DEBUG=1 — phase-sweep always sets it, and has each arm's proxy write its
 // log straight into the sweep archive. This replays every recently modified debug
 // log under ~/.config/opencode-m365 (archives included), plus the M365_LOG_FILE
-// this process sees, through the bucket. Turns it can't see don't count: a proxy
+// this process sees, through the bucket. The replay starts full only where the
+// bucket was provably full: after a quiet stretch of capacity/refill minutes
+// (~1 h). It reads back 6 h, then 24 h, then 72 h until it finds one, and starts
+// EMPTY if it doesn't. (Starting full 6 h back, as it used to, is wrong for a
+// sweep busy for longer than that: once its opening burst left the window the
+// replay handed those ~70 turns back, the pacing stopped, and the premium
+// account throttled 6 h 11 min into a paced sweep — hypotheses §30.) Turns it can't see don't count: a proxy
 // run without M365_DEBUG, the web client, another host on the same account. The
 // reserve absorbs some of that; a sudden throttle still stops the bench as before.
 //
@@ -48,9 +54,10 @@ export function budgetConfig(env = process.env) {
     refillPerMin: num(env.M365_BUDGET_REFILL, 1.6),
     reserve: num(env.M365_BUDGET_RESERVE, 20),
     holdMin: num(env.M365_BUDGET_HOLD_MIN, 75),
-    // A bucket left alone for capacity/refill minutes (~1 h) is full, so a
-    // replay that starts full this far back is exact for anything quieter.
+    // How far back the logs are read first; budgetStatus reads 4x further, up
+    // to maxWindowMin, until the window holds a quiet stretch (see replay).
     windowMin: 360,
+    maxWindowMin: 4320,
     enabled: !!env.M365_AVOID_THROTTLING && env.M365_AVOID_THROTTLING !== "0",
     dirs: [
       cfgDir,
@@ -91,24 +98,41 @@ export function findLogs(dirs, sinceMs, depth = 3) {
 
 /**
  * Replay events through the bucket and report it at `nowMs`. Pure.
- * Events before `nowMs - windowMin` are ignored (the bucket starts full there);
- * the same log line seen in two files counts once.
+ * Only events since `nowMs - windowMin` count; the logs hold every one of those.
+ * A bucket left alone for capacity/refill minutes is full whatever came before,
+ * so the replay starts full at the end of the LAST quiet stretch that long
+ * (`settled`). A window busy throughout says nothing about where the bucket
+ * stood when it opened, so the replay then starts there EMPTY, and
+ * `settled: false` asks for a longer window. The same log line seen in two
+ * files counts once.
  */
 export function replay(events, nowMs, cfg) {
   const start = nowMs - cfg.windowMin * 60_000;
+  const fullAfterMs = (cfg.capacity / cfg.refillPerMin) * 60_000;
   const seen = new Set();
   const evs = events
     .filter((e) => e.t >= start && e.t <= nowMs && !seen.has(e.line) && seen.add(e.line))
     .sort((a, b) => a.t - b.t);
-  let level = cfg.capacity, last = start, turns = 0, lastThrottle = null;
-  for (const e of evs) {
+  // A throttle before the quiet stretch still holds: the hold outlasts the refill.
+  const lastThrottle = evs.reduce((t, e) => (e.kind === "throttled" ? e.t : t), null);
+  let first = -1;
+  for (let i = evs.length; i >= 0; i--) {
+    const gapStart = i > 0 ? evs[i - 1].t : start;
+    const gapEnd = i < evs.length ? evs[i].t : nowMs;
+    if (gapEnd - gapStart >= fullAfterMs) { first = i; break; }
+  }
+  const settled = first >= 0;
+  let level = settled ? cfg.capacity : 0;
+  const since = settled ? (first < evs.length ? evs[first].t : nowMs) : start;
+  let last = since, turns = 0;
+  for (const e of evs.slice(settled ? first : 0)) {
     level = Math.min(cfg.capacity, level + ((e.t - last) / 60_000) * cfg.refillPerMin);
     last = e.t;
     if (e.kind === "turn") { level -= 1; turns++; }
-    else { level = Math.min(level, 0); lastThrottle = e.t; }
+    else level = Math.min(level, 0);
   }
   level = Math.min(cfg.capacity, level + ((nowMs - last) / 60_000) * cfg.refillPerMin);
-  return { level, turns, lastThrottle };
+  return { level, turns, lastThrottle, settled, since };
 }
 
 /**
@@ -124,10 +148,15 @@ export function decide(state, need, nowMs, cfg) {
   return { ok: waitMs === 0, waitMs, want, reason };
 }
 
+/** The bucket at `nowMs`, read back as far as it takes to find where it was last full (see replay). */
 export function budgetStatus(nowMs = Date.now(), cfg = budgetConfig()) {
-  const logs = findLogs(cfg.dirs, nowMs - cfg.windowMin * 60_000);
-  const events = logs.flatMap((f) => { try { return parseEvents(readFileSync(f, "utf8")); } catch { return []; } });
-  return { ...replay(events, nowMs, cfg), logs: logs.length };
+  const maxWindowMin = Math.max(cfg.windowMin, cfg.maxWindowMin ?? cfg.windowMin);
+  for (let windowMin = cfg.windowMin; ; windowMin = Math.min(windowMin * 4, maxWindowMin)) {
+    const logs = findLogs(cfg.dirs, nowMs - windowMin * 60_000);
+    const events = logs.flatMap((f) => { try { return parseEvents(readFileSync(f, "utf8")); } catch { return []; } });
+    const st = replay(events, nowMs, { ...cfg, windowMin });
+    if (st.settled || windowMin >= maxWindowMin) return { ...st, logs: logs.length, windowMin };
+  }
 }
 
 const fmtMin = (ms) => `${(ms / 60_000).toFixed(1)} min`;
@@ -162,7 +191,7 @@ async function main(argv) {
     const at = opt("--at") ? Date.parse(opt("--at")) : Date.now();
     const st = budgetStatus(at, cfg);
     const d = decide(st, Number(opt("--need", "12")), at, cfg);
-    console.log(`bucket ~${st.level.toFixed(1)}/${cfg.capacity} turns at ${new Date(at).toISOString()} (refill ${cfg.refillPerMin}/min, reserve ${cfg.reserve}; ${st.turns} turns in the last ${cfg.windowMin / 60} h from ${st.logs} logs` +
+    console.log(`bucket ~${st.level.toFixed(1)}/${cfg.capacity} turns at ${new Date(at).toISOString()} (refill ${cfg.refillPerMin}/min, reserve ${cfg.reserve}; ${st.turns} turns since ${st.settled ? "it was last full at" : "the start of the logs read, assumed empty, at"} ${new Date(st.since).toISOString()}, from ${st.logs} logs` +
       `${st.lastThrottle ? `; last throttled turn ${new Date(st.lastThrottle).toISOString()}` : ""}) — ${d.ok ? "a task may start" : `wait ~${fmtMin(d.waitMs)} (${d.reason})`}` +
       `${cfg.enabled ? "" : " [pacing is off: set M365_AVOID_THROTTLING=1 to have the bench wait]"}`);
   } else if (cmd === "wait") {
