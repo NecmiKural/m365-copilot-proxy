@@ -51,7 +51,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   request, and concurrent sessions with one opening message collided (F63, fixed); each turn landed
   on a random backend and the conversation forked under the model, pinned with a routing header (F64);
   a pile of global pi skills: fine to ~120, broad "any task" descriptions are the risk (F67);
-  a leading "<" streamed twice (F65); file-chip markup in answers (F66)
+  a leading "<" streamed twice (F65); file-chip markup in answers (F66); every other over-cap command
+  now runs whole from a script (F68)
 
 ---
 
@@ -4018,3 +4019,20 @@ listing (`task-observer` "ANY multi-step task", `modern-web-guidance` "MANDATORY
 skip" and it needs a search tool pi doesn't have, `graphify`, `ponytail`) with `disable-model-invocation:
 true` and call them with `/skill:name`. Don't copy `~/.agents/skills` into `~/.pi/agent/skills` (pi reads
 both; duplicate names keep the first and warn). **Not measured:** real bodies at 308; `gpt-5.5-think-deeper`.
+
+### F68 — the heredoc rewrite left every other long command cut; a script carries any of them 🟢 (model-free)
+F55's fix covers one shape: a lone quoted heredoc that writes a file. A long `py - <<'EOF'` analysis
+script, a long `py -c "…"`, or a heredoc bundled with other commands (`cd`, `find`, `wc`) still reached
+the shell cut at ~8.2k characters. The proxy holds the whole command, and the harness's write tool has
+no length cap, so an over-cap call to a POSIX shell on Windows now goes out in two steps: the write tool
+saves the command unchanged to `<temp>/m365-cmd-<id>.sh`, and when that result comes back the proxy
+answers `bash '<script>'; s=$?; rm -f '<script>'; exit $s` itself, with no M365 turn
+(`longCommandAsScript`). M365 never sees the write: the next delta is the run's output, after a note
+saying the command was saved and run unchanged. A lone heredoc write still goes straight to the write
+tool (one step); one bundled with other commands now runs whole instead of skipping them.
+**Measured** (real pi, the real handler with a scripted model, one 14,785-char `cd sub && py - <<'EOF'
+… EOF; echo …; pwd`): with the fix the script printed the right sum with Turkish text intact, the
+trailing `echo`/`pwd` ran in `sub`, the script was deleted, and M365's second message was the note plus
+that output; with it off (`M365_HOST_SHELL=powershell`) bash said "here-document … delimited by
+end-of-file" and Python a SyntaxError on the cut list. **Not covered:** WSL bash (it can't see the
+Windows temp path) and a PowerShell shell tool (left as it was).
