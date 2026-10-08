@@ -9,7 +9,7 @@
 // reply shows which earlier messages the model can see; turnCount shows where on
 // the thread the server ran the turn. Arms:
 //   unpinned — temporary chat, no routing key (the proxy before the fix)
-//   saved    — saved chat, no routing key (is disableMemory=1 the cause? no: F82)
+//   saved    — saved chat, no routing key (is disableMemory=1 the cause? no: F85)
 //   pinned   — temporary chat + X-RoutingParameter-SessionKey (the fix)
 //
 //   ARMS=pinned,unpinned node scripts/fork-probe.mjs   # CONVS=3 TURNS=6 MODEL=gpt-5.6-think-deeper AGENT=1

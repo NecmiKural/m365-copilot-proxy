@@ -200,7 +200,7 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   until the reset (midnight UTC; weekly: Monday) and, with `M365_OPUS_FALLBACK_MODEL=claude-opus-4.5`,
   serves Opus 4.5 instead. Every paid turn carries `throttling.metering` (surfaced in `usage`).
   **Sonnet 5.5 has the same kind of budget, its own** (80/day `ClaudeSonnet55QueryDaily`, 150/week
-  `ClaudeSonnet55QueryWeekly`; `M365_SONNET_FALLBACK_MODEL`). Budgets live in `METERED_BUDGETS`
+  `ClaudeSonnet55QueryWeekly` — which has reset daily, not on Monday, §30; `M365_SONNET_FALLBACK_MODEL`). Budgets live in `METERED_BUDGETS`
   (`priority-access.ts`) and `meteredBudgetOf()` maps a model to one; walls are remembered per budget.
   A new `*Query*` key in `metering` is how a new metered model shows up — add a budget, don't hard-code Opus.
   Don't burn it on sweeps. See docs/hypotheses.md §15, §24 F55, F59 (issue #18), §26.
@@ -250,7 +250,9 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   **Read its `ChainOfThoughtSummary` frames** (`M365_DUMP_FRAMES=1`) — they say why it refused.
 - **Not every tone serves with the tool agent — `toneUsesToolAgent()` decides, per exact tone**
   (`M365_FORCE_AGENT=1`/`0` overrides it either way).
-  Claude tones (except `Claude_Opus`, see above) and `Gpt_6_Reasoning` go agent-less even with tools. With the agent attached GPT-6 is
+  Claude tones (except `Claude_Opus`, see above) and `Gpt_6_Reasoning` go agent-less even with tools.
+  The Sonnets were benched with the agent on a premium account (§30 F75): it removes their sandbox, but
+  Sonnet 5 then refuses the harness and Sonnet 4.6 spends a turn more per pi run — don't add them. With the agent attached GPT-6 is
   a dead route on every account (`result: InternalError`; the proxy used to 502 on it, #41), and
   Claude is dead on non-premium accounts. Add a tone to `AGENTLESS_TOOL_TONES` only after
   `scripts/agent-tone-probe.mjs` says so. Agent-less also means M365's code interpreter is on, and under `baseline` GPT-6
