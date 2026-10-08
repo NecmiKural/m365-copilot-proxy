@@ -93,7 +93,10 @@ PHASES='A:baseline,relay,demo_only,relay|B@M365_FORCE_AGENT=0:relay,pi=fix-bug,p
 ```
 
 `PHASES` is `NAME[@KEY=VAL...]:ARM,...` separated by `|`. An arm is a framing variant, `default`
-(the model's shipped framing) or `pi=fix-bug|multi|edit-config` (`PI_N` real-pi runs). Every
+(the model's shipped framing) or `pi=fix-bug|multi|edit-config` (`PI_N` real-pi runs).
+`@MODEL=ID` gives a phase its own model, so one sweep can alternate two models arm by arm (one arm
+per phase) instead of running them hours apart; `MODEL` can then be left out, and `analyze-arms`
+selects on `+MODEL=ID`. Every
 proxy runs with debug logs, frame dumps and the confab retry off. `DRY_RUN=1` validates the plan
 (unknown variants included) without spending anything; `PROXY_CMD="node
 scripts/bench/_mock-proxy.mjs"` runs the whole driver against the mock. The header of the

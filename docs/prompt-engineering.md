@@ -73,6 +73,14 @@ but "on which machine" — and our framing decides that. Conclusive (hyp §21, p
 - **Sonnet 4.6 has the same reflex, weaker.** It rarely refuses, but says "this appears to be a
   system-level automated agent prompt embedded in a user message" and then hedges. `relay` is its
   default too: 78/90 vs baseline's 47/76 (p = 3×10⁻⁴, hyp §21 F42).
+- **The tool agent takes the sandbox away, and that isn't a fix** (hyp §30, premium account). With
+  the agent no Sonnet works in its own sandbox, and Sonnet 4.6 solves under every framing (99% vs
+  82% agent-less over 17 framings; the gap is all in the `<system>`-tagged ones). But Sonnet 5 then
+  reads the agent's enterprise tools in its context against the harness and disowns it ("I'm
+  Microsoft 365 Copilot, and I don't have access to a shell…"; 10/20 vs 19/20), and Sonnet 4.6
+  stops batching in real pi: it reaches for pi's `edit` and checks in a call of its own, one turn
+  more per run. Under the shipped user-voice framings, agent-less already solves 193/200, so
+  the Sonnets stay agent-less.
 
 ## GPT-6 / GPT-6 Sol: `relay` is not just a Claude fix
 
@@ -194,7 +202,8 @@ the harness's own system prompt becomes `<harness_system_prompt>`.
 `Gpt_6_Sol_Reasoning` (hyp §28) and
 `Gpt_61_Sol_Reasoning` (GPT-6.1 Sol, hyp §27) → `relay_batch`; Sonnet 5 (`claude-sonnet-5`, its own `Claude_Sonnet_5` tone since 2026-10-06) and
 Sonnet 5.5 (`claude-sonnet-5.5`, `Claude_Sonnet` on the paid scenario, keyed on the model ID;
-inherits Sonnet 5's relay, unbenched, hyp §26) → `relay`. **Every other model keeps `baseline` byte-for-byte** (including
+inherits Sonnet 5's relay, hyp §26) → `relay` — though on the bench relay_batch cut its turns by a
+third (3.35 → 2.20, 40/40, both paths, hyp §30); real pi decides, ~90 budget units. **Every other model keeps `baseline` byte-for-byte** (including
 `claude-sonnet-think-deeper`, unmeasured under relay), so no GPT-5.x bench number moves, and
 `M365_FRAMING_*` still wins. Opus used to default to `minimal`, to spend less of its priority-access
 budget by sending a shorter prompt; that budget counts turns, not tokens (docs/hypotheses.md §24
