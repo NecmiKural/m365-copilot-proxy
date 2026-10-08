@@ -17,6 +17,7 @@ import {
   secondsUntilReset,
   type PriorityAccessExhaustion,
   formatMessages,
+  imageUrls,
   parseToolCalls,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
@@ -377,14 +378,18 @@ export async function handleChatCompletion(
   const isFirstTurn = session.turnCount === 0;
   const convId = session.conversationId;
   let text: string;
+  // Images ride on the message that carries their text (core image-input.ts).
+  let inputImages: string[] = [];
   if (run) {
     text = "";
     log.info(`Running the saved long command: ${trunc(run.function.arguments, 200)} (no M365 turn), cid=${convId}`);
   } else if (isFirstTurn || conv.sentMessageCount === 0) {
     text = formatMessages(body.messages, body.tools, body.tool_choice, convId, framingVariant);
+    inputImages = imageUrls(body.messages);
     log.info(`Chat completion: model=${model}, stream=${body.stream}, messages=${body.messages.length}, turn=${session.turnCount}, mode=full, cid=${convId}`);
   } else {
     const newMessages = body.messages.slice(conv.sentMessageCount);
+    inputImages = imageUrls(newMessages);
     const delta = newMessages.length > 0 ? formatDeltaMessages(newMessages, body.messages) : "";
     if (delta.length > 0) {
       text = delta;
@@ -445,7 +450,7 @@ export async function handleChatCompletion(
         // The agent overrides `tone` (forces GPT-5), so tool-less requests must
         // skip it to reach the model the tone selects (e.g. Claude). See
         // ModelSession.run / docs H8.6.
-        copilotStream = await session.run(text, model, opts.signal, useToolAgent);
+        copilotStream = await session.run(text, model, opts.signal, useToolAgent, inputImages);
       } catch (err: any) {
         return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
       }
@@ -519,6 +524,7 @@ export async function handleChatCompletion(
         useToolAgent = false;
         session.newConversation();
         text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant);
+        inputImages = imageUrls(body.messages);
         originalText = text;
         log.info(`Agent route dead for ${tone} (InternalError) — this account isn't premium; re-sending agent-less with '${framingVariant}' framing in a fresh conversation`);
         attempt--;
@@ -538,6 +544,7 @@ export async function handleChatCompletion(
           log.info(`Priority access exhausted (${exhausted.window}) — resets ${exhausted.resetsAt.toISOString()}`);
           return { error: priorityAccessResponse(exhausted, model) };
         }
+        inputImages = []; // on the server now: a forcing retry in this conversation needn't resend them
         return { fullText };
       }
 
@@ -562,6 +569,7 @@ export async function handleChatCompletion(
           // exactly the tag that model reads as a forged system prompt.
           const retryVariant = transcriptStyleForVariant(framingVariant).framingTag === "system" ? "softened" : framingVariant;
           text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, retryVariant);
+          inputImages = imageUrls(body.messages);
           log.info(`Upstream Disengaged — retrying once with '${retryVariant}' framing in a fresh conversation (F22)`);
           attempt--; // free retry; bounded — disengageRetried flips once
           continue;
