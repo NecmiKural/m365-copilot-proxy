@@ -87,6 +87,9 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   agent-less; a 2,000-char cap on the invented tail keeps the turns and still ends the runaways, and is
   the default (F89); between Oct 8 and Oct 11 M365 stopped streaming Claude to the premium account (no
   change in this repo caused it)
+- §37 — dropped tool calls: eight fence shapes the scanner dropped or changed, and a ninth in real replies
+  (a closer with the next sentence glued on: 3 dropped calls in 1,153); CommonMark fences, and asking
+  again for a call that still can't be read (F96)
 
 ---
 
@@ -5353,3 +5356,49 @@ stop at the tag, `M365_NO_EARLY_STOP=1` to opt out). The agent path wasn't re-ru
 with the stop at the tag (F88), and the premium account doesn't stream Claude today, so a stop there
 can't come early anyway. **Open:** whether M365 streams Claude to the premium account again, and what else
 the `Full`-only turns change for streaming clients there.
+
+---
+
+## 37. Oct 11 2026 — dropped tool calls: the fence shapes the scanner missed, and asking again for the rest
+
+A call the parser can't read is the worst failure the proxy has: the reply goes to the harness as prose,
+the harness ends its turn, and the model reads the silence as having no tools. 91bf23b brought back two
+shapes #44's scanner had dropped (a glued closer, a mid-line opener) as insurance; this asks which others
+exist, and whether any reach real replies.
+
+### F96 — eight fence shapes dropped or changed a call; a ninth was in the logs, 3 dropped calls in 1,153 replies 🟢
+**Probe** (model-free: `parseToolCalls` with pi's tools on `main` after 91bf23b). Read: a plain fence, a
+glued closer, a mid-line opener, CRLF. Dropped: ```` ```Bash ````, ```` ``` bash ````, `~~~bash`, ```` ```bash
+title="x" ````, a one-line ```` ```bash ls -la``` ````, a closer with text after it, a fence never closed.
+Changed: a ```` ````bash ```` block ran `ls -la` followed by a stray backtick line, and a block indented in a
+list item kept its indentation in the command (or in a written file).
+
+**The logs** (every tool-mode reply the proxy logged in real pi runs, Oct 3–8, Windows, `gpt-5.6-think-deeper`
+and some `gpt-5.5-think-deeper`; 1,153 logged whole). None of those shapes occurs. A ninth does: the closer
+with the next sentence glued on — "```Raporu hazırlayabilmem için önce…", "```Word belgesi oluşturamıyorum…" —
+in 3 replies, and each was a call the parser dropped (one `read` of a skill, two `bash` checks). It read as a
+nested opener, so the block never closed. It turned up only because the new check below flagged it.
+
+**Fix.**
+- **The scanner follows CommonMark's fence rules**: a closer is a bare line of the opener's character
+  (backtick or tilde), at least as long; inside an open fence, an opener of the same character and length
+  nests (the models' habit, as before) and any other fence line is body; the info string's first word names
+  the tool and the rest is ignored; an indented block's body loses the opener's indentation.
+- **Tool names**: an info word matching no tool exactly takes the one tool whose name matches it ignoring
+  case (```` ```Bash ````); with two candidates, none.
+- **Fallback closers**: a glued closer, and a closer with prose glued on (three or more words, no `=` or
+  `{`, so never ```` ```python title=x ````), end a block only when nothing else does by the end of the text.
+  A body line that merely ends in ``` (a README showing inline code) no longer cuts a write short.
+- **What still can't be read is named** (`unreadableToolFence`): a tool fence never closed, an edit fence
+  without its markers, a reply that is nothing but a one-line fence. The handler then asks once, in the same
+  conversation, saying what was wrong and that nothing ran ("If you meant to run it, send it again as one
+  block… If you didn't mean to, reply without it"), before any give-up handling. `M365_NO_FENCE_RETRY=1`
+  turns it off. A truncated reply is asked about, never run: the command or file in it is incomplete.
+
+**It doesn't move anything else.** Old and new parser over every distinct reply on disk (863 logged
+tool-mode replies and 37 assistant texts from pi sessions): 897 parse to the same calls, and the other 3 are
+the dropped calls, now read. The unreadable check flags no whole reply; its 56 flags were all replies the
+log had cut at 1,000 characters. In real pi with a scripted model, the call with prose glued to its closer
+ran as sent; the unclosed one was asked for again, came back closed, and ran.
+**Not covered:** shapes not seen anywhere yet (the re-ask is there for them), and Claude's output, which
+this corpus lacks. A one-line fence inside prose stays prose, by design: it is inline code.
