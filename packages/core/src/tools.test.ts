@@ -396,6 +396,25 @@ describe("tool-result labelling", () => {
     );
     expect(out).toContain('<tool_response tool="tool">');
   });
+
+  // GPT-5.6's CoT in a long pi session: "the tool is responding with an unexpected
+  // label" — an edit labelled command="todo.mjs", a command shown re-quoted.
+  it("labels a file tool by its path, not as a command", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const history = [{ role: "assistant", tool_calls: [{ id: "e1", function: { name: "edit", arguments: '{"path":"todo.mjs","edits":[]}' } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "e1", content: "Successfully replaced 1 block(s) in todo.mjs." }, history);
+    expect(out).toContain('<tool_response tool="edit" path="todo.mjs">');
+    expect(out).not.toContain("command=");
+  });
+
+  it("shows a command with its own quotes (escaped), not swapped for single quotes", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const cmd = `for f in a.mjs; do printf '%s\\n' "$f"; done`;
+    const history = [{ role: "assistant", tool_calls: [{ id: "b1", function: { name: "bash", arguments: JSON.stringify({ command: cmd }) } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "b1", content: "a.mjs" }, history);
+    expect(out).toContain(`command="for f in a.mjs; do printf '%s\\\\n' \\"$f\\"; done"`);
+    expect(out).not.toContain("'$f'"); // "$f" and '$f' are different shell commands
+  });
 });
 
 describe("fenced tool format (the only format)", () => {
