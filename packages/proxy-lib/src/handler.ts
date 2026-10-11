@@ -240,9 +240,9 @@ export class SessionPool {
     // to an earlier session's thread, later sessions answered from it —
     // "notlar.docx was already created and verified" in an empty directory — and
     // the pass rate fell 7/10 → 4/10 → 3/10 over the sweep. Resetting that thread
-    // instead (F61) broke the earlier session when it was still alive: two
+    // instead (F84) broke the earlier session when it was still alive: two
     // measurement jobs that ran at once threw each other's conversations away
-    // every turn (F63). The full prompt re-sends the whole history, so nothing
+    // every turn (F91). The full prompt re-sends the whole history, so nothing
     // the harness holds is lost.
     if (bucket.length) log.info(`Conversation ${fingerprint}: not a continuation of the ${bucket.length} on this first message, starting a fresh M365 conversation`);
     else log.info(`New conversation ${fingerprint}, ${this.size} active`);

@@ -746,7 +746,7 @@ describe("a new harness session that shares the first user message", () => {
     scripted.queue = [];
   });
 
-  // F63: the fresh conversation used to REPLACE the earlier session's, so a
+  // F91: the fresh conversation used to REPLACE the earlier session's, so a
   // session still running (two measurement jobs at once) lost its thread each
   // time the other one moved, and its next delta landed in the other's.
   it("leaves the earlier session's conversation alone: each continues in its own", async () => {
