@@ -11,7 +11,7 @@ const scripted: {
   /** Text of every run() call, in order. */
   texts: string[];
   /** Per-call overrides, consumed front-first (e.g. a Disengaged turn, then an answer). */
-  queue: Array<{ fullText: string; messageType?: string | null; result?: { value: string; errorCode?: string; message?: string }; metering?: Record<string, number>; turnCount?: number | null }>;
+  queue: Array<{ fullText: string; messageType?: string | null; result?: { value: string; errorCode?: string; message?: string }; metering?: Record<string, number> }>;
   /** The model argument of every run() call, in order. */
   models: string[];
   /** The `useAgent` argument of every run() call, in order. */
@@ -31,7 +31,11 @@ const scripted: {
   /** The M365 conversation id of every run() call, in order (unique per conversation). */
   convs: string[];
   ids: number;
-} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, models: [], images: [], gate: null, signals: [], stoppedAfter: null, convs: [], ids: 0 };
+  /** What awaitTurnBudget (M365_AVOID_THROTTLING) throws before every turn, or null to let it through. */
+  paceHold: Error | null;
+  /** The options of every awaitTurnBudget call, in order. */
+  paceCalls: Array<{ maxWaitMs?: number; signal?: AbortSignal }>;
+} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, models: [], images: [], gate: null, signals: [], stoppedAfter: null, paceHold: null, paceCalls: [], convs: [], ids: 0 };
 
 vi.mock("@m365-copilot/core", async (importActual) => {
   const actual = await importActual<typeof import("@m365-copilot/core")>();
@@ -67,7 +71,7 @@ vi.mock("@m365-copilot/core", async (importActual) => {
         messageType: (next?.messageType ?? null) as string | null,
         messageId: "m1",
         scores: null,
-        turnCount: next?.turnCount === undefined ? 1 : next.turnCount,
+        turnCount: 1,
         turnState: "Completed",
         async *[Symbol.asyncIterator]() {
           for (const d of deltas) {
@@ -82,11 +86,17 @@ vi.mock("@m365-copilot/core", async (importActual) => {
       return stream;
     }
   }
-  return { ...actual, ModelSession: FakeModelSession };
+  // awaitTurnBudget reads the account's real logs; script its verdict instead.
+  async function awaitTurnBudget(opts: { maxWaitMs?: number; signal?: AbortSignal } = {}) {
+    scripted.paceCalls.push(opts);
+    if (scripted.paceHold) throw scripted.paceHold;
+    return { waitedMs: 0 };
+  }
+  return { ...actual, ModelSession: FakeModelSession, awaitTurnBudget };
 });
 
 const { handleChatCompletion, SessionPool, ChatCompletionRequest } = await import("./index.js");
-const { resetAgentRoutes, resetPriorityAccessState } = await import("@m365-copilot/core");
+const { resetAgentRoutes, resetPriorityAccessState, TurnBudgetHold } = await import("@m365-copilot/core");
 
 // The proxy remembers a priority-access wall for the process (until the reset);
 // don't let one test's refusal 429 the next test's Opus request.
@@ -445,6 +455,66 @@ describe("an explicitly Throttled turn (result.value = Throttled)", () => {
   });
 });
 
+describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for", () => {
+  const hold = () => new TurnBudgetHold("throttle hold", 65 * 60_000, Date.parse("2026-10-12T08:00:00.000Z"));
+
+  it("answers 429 with Retry-After and never sends the turn", async () => {
+    scripted.result = null;
+    scripted.runs = 0;
+    scripted.paceHold = hold();
+    const body = ChatCompletionRequest.parse({ model: "claude-sonnet", stream: false, messages: [{ role: "user", content: "held" }] });
+    const res = await handleChatCompletion(body, new SessionPool());
+    scripted.paceHold = null;
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe(String(65 * 60));
+    const err = (await res.json()).error;
+    expect(err.type).toBe("rate_limit_error");
+    expect(err.code).toBe("m365_throttle_hold");
+    expect(err.message).toMatch(/throttled this account at 2026-10-12T08:00:00\.000Z/);
+    expect(scripted.runs).toBe(0);
+  });
+
+  it("carries the code and retry_after through the streaming path", async () => {
+    scripted.runs = 0;
+    scripted.paceHold = new TurnBudgetHold("refill", 20 * 60_000, null);
+    const { contents, errors } = await streamRaw([], "");
+    scripted.paceHold = null;
+    expect(contents).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].code).toBe("m365_turn_budget");
+    expect(errors[0].retry_after).toBe(20 * 60);
+    expect(scripted.runs).toBe(0);
+  });
+
+  it("lets a streamed request wait as long as configured, an unstreamed one 2 min, and passes the client's signal", async () => {
+    scripted.result = null;
+    scripted.queue = [];
+    scripted.paceCalls = [];
+    await streamContents(["hi"]);
+    const ac = new AbortController();
+    const body = ChatCompletionRequest.parse({ model: "m365-copilot", stream: false, messages: [{ role: "user", content: "hi" }] });
+    await handleChatCompletion(body, new SessionPool(), { signal: ac.signal });
+    expect(scripted.paceCalls.map((c) => c.maxWaitMs)).toEqual([undefined, 2 * 60_000]);
+    expect(scripted.paceCalls[1]!.signal).toBe(ac.signal);
+  });
+
+  it("makes the forcing retry wait for the budget too: every upstream turn goes through awaitTurnBudget", async () => {
+    scripted.paceCalls = [];
+    scripted.runs = 0;
+    scripted.queue = [
+      { fullText: "I can't access your files from here. Please paste the contents of calc.py." },
+      { fullText: "```bash\ncat calc.py\n```" },
+    ];
+    const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+    const body = ChatCompletionRequest.parse({ model: "claude-sonnet", stream: false, tools, messages: [{ role: "user", content: "fix calc.py" }] });
+    const res = await handleChatCompletion(body, new SessionPool());
+    expect(res.status).toBe(200);
+    expect(scripted.runs).toBe(2);
+    expect(scripted.paceCalls).toHaveLength(2);
+    scripted.queue = [];
+  });
+});
+
 describe("Disengage retry keeps a model's <system>-free framing", () => {
   const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
   async function disengageThenAnswer(model: string): Promise<string> {
@@ -470,7 +540,7 @@ describe("Disengage retry keeps a model's <system>-free framing", () => {
   });
 
   it("sends Opus, Sonnet 4.6 and GPT-6 relay_batch on the first try and keeps it on the retry (§24, §25)", async () => {
-    for (const model of ["claude-opus-4.5", "claude-opus", "claude-sonnet", "gpt-6-think-deeper"]) {
+    for (const model of ["claude-opus-4.8", "claude-opus", "claude-sonnet", "gpt-6-think-deeper"]) {
       const retry = await disengageThenAnswer(model);
       expect(scripted.texts[0]).toContain("put as much as you can into one block");
       expect(scripted.texts[0]).not.toContain("<system>");
@@ -522,19 +592,18 @@ describe("which requests carry the tool agent (#41)", () => {
     expect(await agentFlagFor("claude-sonnet-5")).toBe(false);
   });
 
-  it("sends both Opus models' tool requests with it (§24)", async () => {
+  it("sends both Opus models' tool requests with it (§24, §36)", async () => {
     expect(await agentFlagFor("claude-opus")).toBe(true);
     expect(await agentFlagFor("claude-opus-5[1m]")).toBe(true);
+    expect(await agentFlagFor("claude-opus-4.8")).toBe(true);
     expect(await agentFlagFor("claude-opus-4.5")).toBe(true);
   });
 
-  it("never attaches it to a request without tools", async () => {
+  it("never attaches it to a request without tools — Opus 4.8 included, which serves agent-less (§36)", async () => {
     expect(await agentFlagFor("gpt-5.5-think-deeper", false)).toBe(false);
     expect(await agentFlagFor("claude-opus", false)).toBe(false);
-  });
-
-  it("…except for Opus 4.5, which isn't served without it", async () => {
-    expect(await agentFlagFor("claude-opus-4.5", false)).toBe(true);
+    expect(await agentFlagFor("claude-opus-4.8", false)).toBe(false);
+    expect(await agentFlagFor("claude-opus-4.5", false)).toBe(false);
   });
 
   it("lets M365_FORCE_AGENT=1 put it back", async () => {
@@ -606,35 +675,28 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
     scripted.queue = [DEAD, CALL];
     const res = await send();
     expect(res.status).toBe(200);
-    // No fresh conversation, no agent-less switch: the ordinary empty-reply retry.
-    expect(scripted.newConversations).toBe(0);
+    // No agent-less switch: the ordinary InternalError retry, which re-sends the
+    // whole request in a fresh conversation — the dropped turn processed nothing,
+    // so "Please continue." would lose the request.
+    expect(scripted.newConversations).toBe(1);
     expect(scripted.agentFlags).toEqual([true, true]);
-    expect(scripted.texts[1]).toBe("Please continue.");
+    expect(scripted.texts[1]).not.toBe("Please continue.");
+    // The same request, in another conversation (the fake numbers its ids).
+    const id = (t: string) => /<conversation_id>([^<]*)</.exec(t)?.[1];
+    const sameRequest = (t: string) => t.replace(/<conversation_id>[^<]*</, "<conversation_id><");
+    expect(id(scripted.texts[1])).not.toBe(id(scripted.texts[0]));
+    expect(sameRequest(scripted.texts[1])).toBe(sameRequest(scripted.texts[0]));
     scripted.queue = [CALL];
     await send();
     expect(scripted.agentFlags).toEqual([true]);
-  });
-
-  // Live (308 skills, a ~200K-char first message): M365 answered in 0.25 s with
-  // InternalError and no bot message; the retry said "Please continue." into a
-  // conversation that had never received the task, and the model asked "What would
-  // you like me to continue with?". The server's own counter then read 1 of 600.
-  it("resends the text, not 'Please continue.', when the empty turn was never recorded upstream", async () => {
-    scripted.queue = [CALL];
-    await send(); // the agent answered: InternalError below is a transient (premium)
-    scripted.queue = [{ ...DEAD, turnCount: null }, CALL];
-    const res = await send();
-    expect(res.status).toBe(200);
-    expect(scripted.texts[1]).toBe(scripted.texts[0]); // the full prompt again
-    expect(scripted.texts[1]).toContain("list files");
-    expect(scripted.newConversations).toBe(0);
   });
 
   it("doesn't touch tones outside PREMIUM_ONLY_AGENT_TONES", async () => {
     scripted.queue = [DEAD, CALL];
     const res = await send("gpt-5.5-think-deeper");
     expect(res.status).toBe(200);
-    expect(scripted.newConversations).toBe(0);
+    // The fresh-conversation InternalError retry, still with the agent.
+    expect(scripted.newConversations).toBe(1);
     expect(scripted.agentFlags[1]).toBe(true);
   });
 
@@ -642,7 +704,8 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
     process.env.M365_FORCE_AGENT = "1";
     scripted.queue = [DEAD, CALL];
     await send();
-    expect(scripted.newConversations).toBe(0);
+    // The fresh-conversation InternalError retry, still with the agent.
+    expect(scripted.newConversations).toBe(1);
     expect(scripted.agentFlags).toEqual([true, true]);
   });
 });
@@ -783,7 +846,7 @@ describe("a new harness session that shares the first user message", () => {
     scripted.queue = [];
   });
 
-  // F91: the fresh conversation used to REPLACE the earlier session's, so a
+  // F98: the fresh conversation used to REPLACE the earlier session's, so a
   // session still running (two measurement jobs at once) lost its thread each
   // time the other one moved, and its next delta landed in the other's.
   it("leaves the earlier session's conversation alone: each continues in its own", async () => {
@@ -837,13 +900,13 @@ describe("a new harness session that shares the first user message", () => {
 
   it("returns M365's file markup as the bare file name, outside code blocks", async () => {
     scripted.result = null;
-    scripted.queue = [{ fullText: "<File>notlar.docx</File> oluşturuldu; < File>ozet.md</File> da hazır.\n\n```xml\n<File>keep.xml</File>\n```" }];
+    scripted.queue = [{ fullText: "<File>notlar.docx</File> oluşturuldu; < File>ozet.md</File> da hazır. Etiket: `<File>a.txt</File>`.\n\n```xml\n<File>keep.xml</File>\n```" }];
     const m = await ask([
       { role: "user", content: `docx ${Math.random()}` },
       { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } }] },
       { role: "tool", tool_call_id: "c1", content: "notlar.md" },
     ], new SessionPool());
-    expect(m.content).toBe("notlar.docx oluşturuldu; ozet.md da hazır.\n\n```xml\n<File>keep.xml</File>\n```");
+    expect(m.content).toBe("notlar.docx oluşturuldu; ozet.md da hazır. Etiket: `<File>a.txt</File>`.\n\n```xml\n<File>keep.xml</File>\n```");
     scripted.queue = [];
   });
 
@@ -862,21 +925,22 @@ describe("a new harness session that shares the first user message", () => {
   });
 });
 
-describe("Opus 4.5 on an account that can't serve it (§24)", () => {
+describe("Opus 4.8 on an account that can't serve it (§24, §36)", () => {
   const DEAD = { fullText: "", result: { value: "InternalError" } };
+  const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
 
   afterEach(() => {
     resetAgentRoutes();
     scripted.queue = [];
   });
 
-  it("says the model is premium-only instead of 'empty response', and never goes agent-less", async () => {
+  async function deadRoute(withTools: boolean) {
     scripted.result = null;
     scripted.agentFlags = [];
     scripted.newConversations = 0;
     scripted.queue = [DEAD, DEAD, DEAD];
     const body = ChatCompletionRequest.parse({
-      model: "claude-opus-4.5", stream: false,
+      model: "claude-opus-4.8", stream: false, ...(withTools ? { tools } : {}),
       messages: [{ role: "user", content: `hello ${Math.random()}` }],
     });
     const res = await respond(body);
@@ -884,9 +948,17 @@ describe("Opus 4.5 on an account that can't serve it (§24)", () => {
     const err = (await res.json()).error;
     expect(err.code).toBe("model_route_unavailable");
     expect(err.message).toContain("premium");
-    // Agent-less is a dead route too, so there is nothing to fall back to.
-    expect(scripted.agentFlags).toEqual([true, true, true]);
     expect(scripted.newConversations).toBe(0);
+  }
+
+  it("says the model is premium-only instead of 'empty response' on a tool-less (agent-less) request", async () => {
+    await deadRoute(false);
+    expect(scripted.agentFlags).toEqual([false, false, false]);
+  });
+
+  it("…and on a tool request, which keeps the agent: agent-less is dead too, so there's no fallback", async () => {
+    await deadRoute(true);
+    expect(scripted.agentFlags).toEqual([true, true, true]);
   });
 
   it("keeps the generic message for other models' empty InternalErrors", async () => {
@@ -954,40 +1026,40 @@ describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, 
     const res = await send("claude-opus", "another task");
     expect(res.status).toBe(429);
     expect(scripted.models).toEqual([]); // nothing sent upstream
-    // Opus 4.5 isn't metered, so it is unaffected.
+    // Opus 4.8 isn't metered, so it is unaffected.
     scripted.queue = [CALL];
-    expect((await send("claude-opus-4.5", "third task")).status).toBe(200);
-    expect(scripted.models).toEqual(["claude-opus-4.5"]);
+    expect((await send("claude-opus-4.8", "third task")).status).toBe(200);
+    expect(scripted.models).toEqual(["claude-opus-4.8"]);
   });
 
   it("with M365_OPUS_FALLBACK_MODEL, re-sends the whole request to it in a fresh conversation", async () => {
-    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5";
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8";
     scripted.queue = [REFUSAL, { fullText: "```bash\nls\n```" }];
     const res = await send();
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.choices[0].message.tool_calls).toHaveLength(1);
-    expect(json.model).toBe("claude-opus-4.5"); // says who answered
-    expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.5"]);
+    expect(json.model).toBe("claude-opus-4.8"); // says who answered
+    expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.8"]);
     expect(scripted.newConversations).toBe(1);
     expect(scripted.agentFlags).toEqual([true, true]);
     expect(scripted.texts[1]).toContain("list files"); // the whole request, not a delta
   });
 
   it("…and routes the next requests straight to the fallback until the reset", async () => {
-    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5";
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8";
     scripted.queue = [REFUSAL, { fullText: "```bash\nls\n```" }];
     await send();
     scripted.queue = [{ fullText: "```bash\npwd\n```" }];
     const res = await send("claude-opus", "another task");
     expect(res.status).toBe(200);
-    expect(scripted.models).toEqual(["claude-opus-4.5"]);
+    expect(scripted.models).toEqual(["claude-opus-4.8"]);
   });
 
   it("starts a fresh conversation when an ongoing Opus 5.5 conversation moves to the fallback", async () => {
     scripted.queue = [CALL];
     await send("claude-opus", "long task");          // turn 1 served by Opus 5.5
-    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5";
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8";
     scripted.queue = [REFUSAL, { fullText: "Done." }];
     // the client continues the same conversation with a tool result
     scripted.texts = []; scripted.models = []; scripted.newConversations = 0;
@@ -1001,13 +1073,13 @@ describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, 
     });
     const res = await handleChatCompletion(body, pool);
     expect(res.status).toBe(200);
-    expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.5"]);
+    expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.8"]);
     expect(scripted.texts[1]).toContain("long task");   // full history for the new model
     expect(scripted.texts[1]).toContain("a.txt");
   });
 
   it("never falls back for an unmetered model's refusal text", async () => {
-    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5";
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8";
     scripted.queue = [{ fullText: WEEKLY }];
     const res = await send("gpt-5.5-think-deeper");
     expect(res.status).toBe(429);
@@ -1015,15 +1087,15 @@ describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, 
   });
 
   it("falls back on the streaming path too, without leaking the refusal", async () => {
-    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5";
-    scripted.queue = [REFUSAL, { fullText: "Hello from 4.5" }];
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8";
+    scripted.queue = [REFUSAL, { fullText: "Hello from 4.8" }];
     scripted.result = null; scripted.models = [];
     const body = ChatCompletionRequest.parse({ model: "claude-opus", stream: true, messages: [{ role: "user", content: `hi ${Math.random()}` }] });
     const res = await handleChatCompletion(body, pool);
     const text = await res.text();
-    expect(text).toContain("Hello from 4.5");
+    expect(text).toContain("Hello from 4.8");
     expect(text).not.toContain("priority access");
-    expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.5"]);
+    expect(scripted.models).toEqual(["claude-opus", "claude-opus-4.8"]);
   });
 
   // Sonnet 5.5 has a budget of its own (§26): ClaudeSonnet55QueryDaily/Weekly.
@@ -1056,7 +1128,7 @@ describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, 
 
   it("with M365_SONNET_FALLBACK_MODEL, re-sends a Sonnet 5.5 request to it", async () => {
     process.env.M365_SONNET_FALLBACK_MODEL = "claude-sonnet-5";
-    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.5"; // the other budget's, unused here
+    process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8"; // the other budget's, unused here
     scripted.queue = [SONNET_REFUSAL, { fullText: "```bash\nls\n```" }];
     const res = await send("claude-sonnet-5.5");
     expect(res.status).toBe(200);

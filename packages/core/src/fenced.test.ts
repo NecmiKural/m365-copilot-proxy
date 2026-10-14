@@ -714,7 +714,7 @@ describe("defaultFramingForTone", () => {
     // relay_batch: 2.30 turns per bench task vs relay's 3.65 — and Opus 5.5's
     // budget counts turns (F55). `minimal`'s shorter prompt saved nothing.
     expect(defaultFramingForTone("Claude_Opus")).toBe("relay_batch");
-    for (const id of ["claude-opus", "claude-opus-5.5", "claude-opus-4.5", "claude-opus-4-5-20251101", "claude-opus-5[1m]"]) {
+    for (const id of ["claude-opus", "claude-opus-5.5", "claude-opus-4.8", "claude-opus-4.5", "claude-opus-4-8-20261001", "claude-opus-5[1m]"]) {
       expect(defaultFramingForModel(id)).toBe("relay_batch");
     }
   });
@@ -777,7 +777,7 @@ describe("defaultFramingForTone", () => {
     expect(defaultFramingForModel("gpt-6.1-sol")).toBe("relay_batch");
   });
 
-  it("gives GPT-5.6 Think Deeper relay — baseline's <system> block conflicts with M365's 'file generation is disabled' (§36 F90)", () => {
+  it("gives GPT-5.6 Think Deeper relay — baseline's <system> block conflicts with M365's 'file generation is disabled' (§39 F97)", () => {
     // Real pi, PDF + .docx: runs with any give-up turn baseline 12/14, relay 0/14.
     expect(defaultFramingForTone("Gpt_5_6_Reasoning")).toBe("relay");
     expect(defaultFramingForModel("gpt-5.6-think-deeper")).toBe("relay");

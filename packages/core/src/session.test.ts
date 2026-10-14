@@ -215,6 +215,13 @@ describe("TurnTextComposer (multi-message turns)", () => {
     expect(r.streamed).toBe(r.text);
   });
 
+  it("keeps a one-character head that the first delta continues (\"**bold**\", a ``` fence)", () => {
+    const bold = compose([{ cursor: cur("m1"), s: "*", id: "m1" }, { d: "*Summary**" }, { d: " done." }]);
+    expect(bold.text).toBe("**Summary** done.");
+    const fence = compose([{ cursor: cur("m1"), s: "`", id: "m1" }, { d: "``bash\nls\n```" }]);
+    expect(fence.text).toBe("```bash\nls\n```");
+  });
+
   it("falls back to the snapshot's message when no cursor was ever sent", () => {
     const r = compose([{ s: "x", id: "m1" }, { d: "yz" }]);
     expect(r.text).toBe("xyz");

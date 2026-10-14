@@ -42,10 +42,10 @@ export {
   getScenarioForModel,
   isSonnet5Model,
   isSonnet55Model,
-  isOpus45Model,
+  isIncludedOpusModel,
   toneUsesToolAgent,
   toolRequestUsesAgent,
-  modelRequiresAgent,
+  isPremiumOnlyModel,
   requestUsesAgent,
   meteredBudgetOf,
   priorityAccessFallbackModel,
@@ -138,4 +138,24 @@ export {
   type ParseResult,
 } from "./tools.js";
 
-export { createLogger, trunc, LOG_PATH, FRAME_DIR } from "./log.js";
+export { createLogger, trunc, LOG_PATH, FRAME_DIR, fileLoggingEnabled } from "./log.js";
+export {
+  budgetConfig,
+  parseEvents,
+  findLogs,
+  readLogEvents,
+  replay,
+  decide,
+  budgetStatus,
+  paceStatus,
+  awaitTurnBudget,
+  recordTurn,
+  recordThrottle,
+  resetTurnBudget,
+  TurnBudgetHold,
+  type BudgetConfig,
+  type BudgetEvent,
+  type BudgetState,
+  type BudgetDecision,
+  type AwaitTurnBudgetOptions,
+} from "./turn-budget.js";
