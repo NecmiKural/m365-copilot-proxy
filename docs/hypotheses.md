@@ -98,8 +98,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   turn (F93); with it set on the proxy alone, 144 pi turns in 40 min, 42 at the floor, no throttle (F94);
   the bucket doesn't refill at 00:00Z like the priority-access budgets: without it, the account
   throttled 31 turns after 00:00Z (F95)
-- §39 — GPT-5.6 Think Deeper through pi: its give-up is an instruction conflict that `relay` dissolves
-  (F97); long sessions: labels that misdescribed calls, sessions sharing an opening message (F98); a
+- §39 — GPT-5.6 Think Deeper through pi: its give-up is an instruction conflict that `relay` dissolves,
+  and `relay_batch` too at baseline's turn count (F97); long sessions: labels that misdescribed calls, sessions sharing an opening message (F98); a
   doubled "<" (F99); file-chip markup in answers (F100); a pile of global skills (F101); every over-cap
   command run whole from a script (F102)
 
@@ -5605,7 +5605,7 @@ Follow-ups to §31 and §32 from the same real-pi setup (Windows, `gpt-5.6-think
 Turkish prompts). In the notebook these were written as §24 F62, F63 and F65–F68 on the branch that
 became #44 and #49; they are renumbered here, and F85's fork note moved with them.
 
-### F97 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper 🟢
+### F97 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper (`relay_batch` ships) 🟢
 **Why it gives up.** M365 streams chain-of-thought summaries as `addToChainOfThought` frames (visible
 with `M365_DEBUG`). In give-up turns they name a conflict between two instruction sources: "There
 seems to be a conflict between the developer's statement about file generation being disabled and
@@ -5691,6 +5691,24 @@ without them, so `Gpt_5_6_Reasoning` keeps `relay`. The passive form was invisib
 word, not "tamamlanamadıysa" or "oluşturulamadığında". Old vs new detector over the 245 distinct
 no-tool replies in the transcripts: 2 new hits, both give-ups; 0 lost; 0 false positives.
 
+**Review follow-up (Oct 14): relay_batch.** relay costs turns, and relay_batch is the default
+everywhere else relay won. `phase-sweep` on the bench (10 tasks; baseline, relay, relay_batch, two
+rotated rounds each; with the agent; `M365_AVOID_THROTTLING=1`):
+
+| arm | solved | turns per task |
+|---|---|---|
+| baseline | 19/20 (one prose give-up) | 2.15 |
+| relay | 20/20 | 2.85 |
+| relay_batch | 20/20 | 2.30 |
+
+relay_batch vs relay: −19% turns (task-stratified permutation p = 7·10⁻⁴); vs baseline +7% (p = 0.42);
+relay vs baseline +33% (p = 1·10⁻⁴). No sandbox, Disengaged or jailbreak turn in any arm. The bench has
+no document task, so the PDF + .docx real-pi runs above again, ×4 each, interleaved: relay 8/8 (5.6 tool
+calls a run), relay_batch 7/8 (3.4); the miss was a cut label read as a cut command (F98), and with that
+fixed relay_batch went 8/8 (3.4 calls a run). No other run gave up. **Shipped:** `Gpt_5_6_Reasoning` →
+`relay_batch`. The bench ran on Windows with a local adaptation of `phase-sweep.sh` (under Git Bash its
+port check doesn't parse and `$!` isn't the node process).
+
 ### F98 — long sessions: follow-ups anchor to the first request, labels misdescribed calls, and a concurrency hazard 🟢 (the anchoring was F85's fork; the note is removed)
 **Long-session test** (Oct 4; real pi, `gpt-5.6-think-deeper`; one pi session per run with three
 consecutive requests — a 4-file feature, a follow-up feature, a PDF — each checked by a hidden
@@ -5748,6 +5766,13 @@ fully rested account, with a pre-flight check that no other measurement process 
 **Ran** (22:33, rested 12 h, one job): throttled at 22:49 after 4 sessions (~110 messages in 16
 min). Follow-ups on their own topic: note on 1/3, off 1/4 — inconclusive, and confounded: these
 sessions ran on forked conversations (F85).
+
+**A cut label read as a cut command (Oct 14).** The label shortens a long value to 100 characters,
+silently. In one relay_batch PDF run the last label read `command="set -eu css=… printf '%s\n' \
+'@page { size: A4; margin: 22m"`, and the model answered "You're right. The recorded command was
+truncated at `margin: 22m` … I can't generate files in the current session"; the task failed. The command
+had run whole. A shortened summary now ends in "…", and the same eight runs then passed 8/8. **Open:**
+that give-up wasn't caught — no detector has "can't generate files in the current session".
 
 ### F99 — a "<" at the head of a message came out twice 🟢
 In the 5.5 sweep three baseline answers began `<<notlar.pdf>`, `<<notlar.docx>`,
