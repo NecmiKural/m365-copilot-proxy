@@ -5641,3 +5641,19 @@ log had cut at 1,000 characters. In real pi with a scripted model, the call with
 ran as sent; the unclosed one was asked for again, came back closed, and ran.
 **Not covered:** shapes not seen anywhere yet (the re-ask is there for them), and Claude's output, which
 this corpus lacks. A one-line fence inside prose stays prose, by design: it is inline code.
+
+**Review (Oct 14).** Two inputs the fallbacks turned into wrong behaviour, worse than a missed call:
+- A truncated heredoc: ```` ```bash ```` / `cat > README.md <<'EOF'` / `# Title` / ```` ```Then run the following
+  commands ```` / `make install`, with no `EOF` and no closer, ran `cat > README.md <<'EOF'\n# Title` and would
+  have clobbered the file (main dropped it). A fallback closer is no longer taken while a heredoc in the
+  body is open (`openHeredoc`: `<<EOF`, `<<'EOF'`, `<<-EOF`, not a `<<<` here-string); the block stays
+  unclosed and is asked about instead of run.
+- A prose opener at the top level: ```` ```Here is the plan for you ```` opened a block and swallowed the
+  real ```` ```bash ```` block after it (main ran it). A fence line whose text reads as prose (the same
+  `looksLikeProse` as the closer side) is no opener now, unless its first word names a tool
+  (```` ```bash run this one first ```` still opens).
+- The forcing retry no longer follows a re-ask: the re-ask tells the model it may reply without the
+  call, and a give-up-shaped answer to it was then forced into the call anyway.
+
+The 900-reply replay is unchanged by these: 897 identical, the same 3 dropped calls read, no whole reply
+flagged.
