@@ -304,6 +304,21 @@ describe("fence shapes the models write", () => {
     expect(cmds("```write_file\npath: a.md\n\n# Title\n\n```python title=x\nprint(1)\n```\nmore")).toEqual([]);
   });
 
+  // Review (#71): two cases where a fallback turned prose or partial input into a wrong call.
+  it("never closes a block with a fallback closer inside an open heredoc (a truncated write)", () => {
+    const cut = "```bash\ncat > README.md <<'EOF'\n# Title\n```Then run the following commands\nmake install";
+    expect(cmds(cut)).toEqual([]); // main dropped it; it must not run `cat > README.md` on a cut body
+    expect(unreadableToolFence(cut, specs)?.name).toBe("bash"); // asked again instead
+    expect(cmds("```bash\ncat > a.md <<-EOF\n\t# Title\n\tEOF\necho done```")).toEqual([{ command: "cat > a.md <<-EOF\n\t# Title\n\tEOF\necho done" }]);
+    expect(cmds("```bash\ncat > a.md <<EOF\n# Title```")).toEqual([]); // a glued closer counts the same
+    expect(cmds("```bash\ncat <<<'x' > a\n```Then I will check the file contents.")).toEqual([{ command: "cat <<<'x' > a" }]);
+  });
+
+  it("doesn't take a line that reads as prose for an opener, unless it names a tool", () => {
+    expect(cmds("```Here is the plan for you\n1. List the files\n```bash\nls -la\n```")).toEqual([{ command: "ls -la" }]);
+    expect(cmds("```bash run this one first\nls -la\n```")).toEqual([{ command: "ls -la" }]);
+  });
+
   it("leaves inline code and a one-line fence inside prose alone", () => {
     expect(cmds("Run ```bash ls -la``` to see them, then tell me.")).toEqual([]);
   });

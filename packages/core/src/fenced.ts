@@ -926,6 +926,27 @@ const FENCE_CLOSE_GLUED = /[^`\s](`{3,})[ \t]*$/;
 const looksLikeProse = (after: string): boolean => after.trim().split(/\s+/).length >= 3 && !/[={]/.test(after);
 const FENCE_RUN_THEN_TEXT = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
 
+/** Whether a body leaves a shell heredoc open: a `<<EOF`, `<<'EOF'` or `<<-EOF`
+ *  whose delimiter line never comes. The shell would read on to the end, so a
+ *  fallback closer inside it ("```Then run the following commands") is the
+ *  heredoc's text cut short, not the end of the call. Errs toward "open" (a
+ *  `<<` in a quoted string counts too): that only costs asking again. */
+function openHeredoc(body: string): boolean {
+  const pending: Array<{ delim: string; tabs: boolean }> = [];
+  for (const raw of body.split("\n")) {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    if (pending.length) {
+      if ((pending[0].tabs ? line.replace(/^\t+/, "") : line) === pending[0].delim) pending.shift();
+      continue;
+    }
+    for (const m of line.matchAll(/<<(-?)[ \t]*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)) {
+      if (m.index > 0 && line[m.index - 1] === "<") continue; // `<<<` is a here-string
+      pending.push({ delim: m[3], tabs: m[1] === "-" });
+    }
+  }
+  return pending.length > 0;
+}
+
 interface FenceLine {
   indent: number;
   char: string;
@@ -979,10 +1000,14 @@ interface FenceScan {
  *  A glued closer ("ls -la```"), or one with prose glued after it ("```Raporu
  *  hazırlayabilmem için…"), ends a block only when nothing else does by the
  *  end of the text, so a body line that merely ends in ``` (a README showing
- *  inline code) doesn't cut a write short. A block still open at the end is
- *  returned as `unclosed`: a native-call closer may end it
- *  (unclosedToolCall), and otherwise unreadableToolFence reports it. */
-function scanFences(text: string, from = 0): FenceScan {
+ *  inline code) doesn't cut a write short — and never inside an open heredoc,
+ *  where it is the heredoc's text in a truncated reply. A line whose text after
+ *  the backticks reads as prose ("```Here is the plan for you") doesn't open a
+ *  block unless its first word names a tool (`isTool`): taken as an opener, it
+ *  swallowed the real tool block after it. A block still open at the end is
+ *  returned as `unclosed`: a native-call closer may end it (unclosedToolCall),
+ *  and otherwise unreadableToolFence reports it. */
+function scanFences(text: string, isTool: (info: string) => boolean, from = 0): FenceScan {
   const blocks: FenceBlock[] = [];
   const stack: FenceLine[] = [];
   let open: { info: string; start: number; bodyStart: number; indent: number } | null = null;
@@ -1002,8 +1027,9 @@ function scanFences(text: string, from = 0): FenceScan {
     const lineEnd = offset + raw.length;
     const f = fenceLine(line);
     if (!open) {
+      const prose = f && !f.bare && !isTool(f.info) && looksLikeProse(line.slice(f.indent + f.len));
       const mid = f ? null : FENCE_OPEN_MIDLINE.exec(line);
-      if (f) {
+      if (f && !prose) {
         open = { info: f.info, start: offset, bodyStart: lineEnd + 1, indent: f.indent };
         stack.push(f);
       } else if (mid) {
@@ -1038,9 +1064,9 @@ function scanFences(text: string, from = 0): FenceScan {
     }
     offset = lineEnd + 1;
   }
-  if (open && glued) {
+  if (open && glued && !openHeredoc(text.slice(open.bodyStart, Math.max(open.bodyStart, glued.bodyEnd)))) {
     blocks.push({ info: open.info, inner: body(open.bodyStart, glued.bodyEnd, open.indent), start: open.start, end: glued.end });
-    const rest = scanFences(text, glued.next);
+    const rest = scanFences(text, isTool, glued.next);
     return { blocks: [...blocks, ...rest.blocks], unclosed: rest.unclosed };
   }
   return { blocks, unclosed: open && { info: open.info, start: open.start, inner: body(open.bodyStart, text.length, open.indent) } };
@@ -1397,7 +1423,7 @@ export function parseFencedToolCalls(
 ): FencedParseResult {
   const calls: ParsedToolCall[] = [];
   let leftover = text;
-  const scan = scanFences(text);
+  const scan = scanFences(text, (info) => resolveSpec(specs, info) !== undefined);
 
   for (const block of scan.blocks) {
     const spec = resolveSpec(specs, block.info);
@@ -1426,7 +1452,7 @@ export function findFirstToolFence(
   text: string,
   specs: Map<string, FencedToolSpec>,
 ): { start: number; end: number } | null {
-  const scan = scanFences(text);
+  const scan = scanFences(text, (info) => resolveSpec(specs, info) !== undefined);
   for (const block of scan.blocks) {
     const spec = resolveSpec(specs, block.info);
     if (spec && parseFencedInner(spec, fenceInner(block.info, block.inner))) return { start: block.start, end: block.end };
@@ -1451,7 +1477,7 @@ export function unreadableToolFence(
   text: string,
   specs: Map<string, FencedToolSpec>,
 ): { name: string; reason: string } | null {
-  const scan = scanFences(text);
+  const scan = scanFences(text, (info) => resolveSpec(specs, info) !== undefined);
   let found: { name: string; reason: string } | null = null;
   for (const block of scan.blocks) {
     const spec = resolveSpec(specs, block.info);
