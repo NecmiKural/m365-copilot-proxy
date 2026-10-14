@@ -5758,6 +5758,9 @@ the doubled text, never replaced it (`foldStreamText` ignores a shorter snapshot
 debug logs every cursor has `p: -1`; in 9 of 1,061 cursor frames the first delta restated the
 snapshot, each one a `"<"`. **Fixed:** the first delta after a cursor replaces the message text when it
 starts with it; otherwise it appends as before. The new test fails on the old composer.
+**Narrowed (review):** only a held-back `"<"` counts. Taken for any head, the rule ate a one-character
+head the delta continues: `"*"` + `"*Summary**"` came out as broken bold, and `` "`" `` + `` "``bash" `` as a
+two-backtick fence. All 9 restated heads in the logs were `"<"`.
 
 ### F100 — M365's file-chip markup reached the client 🟢
 The web client renders `<File>notlar.docx</File>` as a file chip, and the GPT models write it into
