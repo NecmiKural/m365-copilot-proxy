@@ -95,9 +95,9 @@ export const DEFAULT_CELLS = [
   { tone: "Claude_Sonnet", note: "claude-sonnet (Sonnet 4.6 agent-less)", ...INCLUDED },
   { tone: "Claude_Sonnet", note: "claude-sonnet-5.5 (Sonnet 5.5 agent-less) — spends priority access", ...PAID },
   { tone: "Claude_Sonnet_5", note: "claude-sonnet-5 (Sonnet 5 agent-less)", ...PAID },
-  // One tone, two models with the agent: Opus 4.5 included (premium only; the
-  // agent is its only route), Opus 5.5 paid (§24).
-  { tone: "Claude_Opus", note: "claude-opus-4.5 (Opus 4.5, premium only)", ...INCLUDED },
+  // One tone, two models with the agent: Opus 4.8 included (premium only),
+  // Opus 5.5 paid (§24, §36).
+  { tone: "Claude_Opus", note: "claude-opus-4.8 (Opus 4.8, premium only)", ...INCLUDED },
   { tone: "Claude_Opus", note: "claude-opus (Opus 5.5, paid) — spends priority access", ...PAID },
   { tone: CONTROL_TONE, note: "CONTROL: invalid tone" },
 ];

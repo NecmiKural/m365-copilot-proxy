@@ -408,9 +408,10 @@ export function currentFramingVariant(toneDefault?: string): string {
 
 /** The framing a tone should default to when the caller hasn't overridden it.
  *
- *  `Claude_Opus` — both models, Opus 4.5 (`claude-opus-4.5`, included scenario)
- *  and Opus 5.5 (`claude-opus`, paid), both with the tool agent — defaults to
- *  `relay_batch` (docs §24 F56, F60). Two findings decide it:
+ *  `Claude_Opus` — both models, Opus 4.8 (`claude-opus-4.8`, included scenario;
+ *  Opus 4.5 until October 2026) and Opus 5.5 (`claude-opus`, paid), both with
+ *  the tool agent — defaults to `relay_batch` (docs §24 F56, F60). Two findings
+ *  decide it, both measured on Opus 4.5:
  *  - The JailBreak Classifier. Opus 4.5 solves almost every bench task under
  *    any framing; the `<system>`-tagged rule framings tripped the classifier on
  *    20 of 60 tasks (`minimal` 12/30, `baseline` 8/30), the user-voice relays
@@ -421,7 +422,8 @@ export function currentFramingVariant(toneDefault?: string): string {
  *    issue #18), whatever the prompt size — which is why the old lean
  *    `minimal` default saved nothing. relay_batch asks for as much as fits in
  *    each block: 2.30 turns per bench task vs relay's 3.65 (20/20 each), and
- *    3.5 vs 6.0 per real-pi run (10/10 each), measured on Opus 4.5.
+ *    3.5 vs 6.0 per real-pi run (10/10 each).
+ *  Opus 4.8 solves the bench with it too (30/30, 2.53 turns per task, §36).
  *  The cost to watch: a batched block acts before it has seen output. In pi
  *  every edit still followed a read. Opus 5.5 is benched under relay (10/10),
  *  not yet under relay_batch.
@@ -917,7 +919,7 @@ const FENCE_OPEN_MIDLINE = /(`{3,})([A-Za-z0-9_.-]+)[ \t]*$/;
 const FENCE_CLOSE_GLUED = /[^`\s](`{3,})[ \t]*$/;
 // And a closer with the next sentence glued on: "```Raporu hazırlayabilmem için
 // önce…" (3 of 1,153 whole logged replies, every one a call that was dropped;
-// docs §37 F96).
+// docs §40 F103).
 // It reads as an opener, so it is taken only when what follows the backticks
 // reads as prose — three or more words, no attribute syntax — never as
 // "```python title=x".

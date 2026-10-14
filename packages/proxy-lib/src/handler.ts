@@ -5,7 +5,7 @@ import {
   trunc,
   getToneForModel,
   requestUsesAgent,
-  modelRequiresAgent,
+  isPremiumOnlyModel,
   noteAgentRouteDead,
   noteAgentRouteAlive,
   isAgentRouteAlive,
@@ -41,6 +41,8 @@ import {
   getMessageContent,
   noteRequestOutcome,
   awaitDegradationBackoff,
+  awaitTurnBudget,
+  TurnBudgetHold,
   getImageArtifactToken,
   fetchImageBytes,
   type CapturedImage,
@@ -138,6 +140,12 @@ function earlyStopAfter(): number {
   const v = Number(process.env.M365_EARLY_STOP_AFTER);
   return process.env.M365_EARLY_STOP_AFTER !== undefined && Number.isFinite(v) && v >= 0 ? v : DEFAULT_EARLY_STOP_AFTER;
 }
+
+/** The longest M365_AVOID_THROTTLING holds a request that isn't streamed: it
+ *  sends nothing until the answer, and its clients give up on headers after
+ *  5 min (pi's SDK, the bench), of which a turn itself can take ~3. A streamed
+ *  request has its keepalive chunks and waits up to M365_BUDGET_MAX_WAIT_MIN. */
+const UNSTREAMED_MAX_PACE_WAIT_MS = 2 * 60_000;
 
 type ChatBody = z.infer<typeof ChatCompletionRequest>;
 type ParsedMessage = ChatBody["messages"][number];
@@ -345,7 +353,7 @@ export async function handleChatCompletion(
   // Priority access (§15, §24 F55, §26, issue #18). Once a budget is used up
   // every turn on it is refused until the reset, so don't start one: serve the
   // opt-in fallback model (M365_OPUS_FALLBACK_MODEL, e.g. the unmetered
-  // claude-opus-4.5; M365_SONNET_FALLBACK_MODEL for Sonnet 5.5), or answer the
+  // claude-opus-4.8; M365_SONNET_FALLBACK_MODEL for Sonnet 5.5), or answer the
   // 429 here. A refused turn costs no allowance, but it does cost an M365 turn
   // and often a fresh conversation — what the account's thread-rate throttle
   // counts.
@@ -369,9 +377,9 @@ export async function handleChatCompletion(
   // Which requests carry the declarative tool agent. GPT-the-chat-model won't
   // tool-call agent-less (0/4), so it needs the agent. Claude tool-calls reliably
   // AGENT-LESS via shell-routing (F23), and on a non-premium account the agent
-  // path doesn't serve Claude at all (§22 F44) — except Claude Opus, whose
-  // included-scenario model (Opus 4.5) serves ONLY with the agent (§24), so it
-  // carries the agent even on a tool-less request. `Gpt_6_Reasoning` doesn't serve
+  // path doesn't serve Claude at all (§22 F44) — except Claude Opus, which takes
+  // it: agent-less, Opus 4.8 works in its own code interpreter unless the
+  // framing steers it out (§36). `Gpt_6_Reasoning` doesn't serve
   // with the agent on any account (§22 F45, #41), and `Gpt_6_Sol_Reasoning` /
   // `Gpt_61_Sol_Reasoning` only on a premium one (learned at runtime, see the
   // dead-route fallback in runBuffered). The rule lives in core (`requestUsesAgent`);
@@ -457,6 +465,7 @@ export async function handleChatCompletion(
     let disengageRetried = false;
     let agentFallbackDone = false;
     let priorityFallbackDone = false;
+    let internalErrorFreshRetried = false;
     let originalText = text;
     // Self-imposed pacing while the account is degraded (thread-rate throttle). A
     // no-op when healthy; during backoff it sleeps a jittered delay so we stop
@@ -483,12 +492,20 @@ export async function handleChatCompletion(
         : opts.signal ? AbortSignal.any([opts.signal, earlyStop.signal]) : earlyStop.signal;
       let copilotStream;
       try {
+        // M365_AVOID_THROTTLING=1: wait until the account's turn bucket can
+        // afford this turn (turn-budget.ts, hypotheses §37). A pi session is one
+        // long thread, but every turn in it draws on the same bucket as a bench
+        // sweep (F58), so a busy enough session runs it dry and then sits out a
+        // throttle of about an hour. Every upstream turn passes here, the
+        // forcing retries included.
+        await awaitTurnBudget({ signal: opts.signal, maxWaitMs: body.stream ? undefined : UNSTREAMED_MAX_PACE_WAIT_MS });
         // Only attach the tool-calling agent when the request actually has tools.
         // The agent overrides `tone` (forces GPT-5), so tool-less requests must
         // skip it to reach the model the tone selects (e.g. Claude). See
         // ModelSession.run / docs H8.6.
         copilotStream = await session.run(text, model, signal, useToolAgent, inputImages);
       } catch (err: any) {
+        if (err instanceof TurnBudgetHold) return { error: turnBudgetHoldResponse(err) };
         return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
       }
 
@@ -661,6 +678,33 @@ export async function handleChatCompletion(
         };
       }
 
+      // A content-less `InternalError` is a turn M365 dropped, and the
+      // conversation it happened in tends to stay dropped: "Please continue."
+      // into it came back `InternalError` again in 9 of 18 retries, against
+      // 28 of 89 turns overall (Gpt_6_Sol_Reasoning on a non-premium account,
+      // T3 Code driving Claude Code, 2026-10-14). The turn processed nothing,
+      // so a "continue" has nothing to continue from either: re-send the
+      // WHOLE request once in a fresh conversation instead. Not a free retry: it
+      // spends an attempt, so a tone that fails every time still ends at the
+      // premium-only / empty-response handling below. A premium-only model's
+      // InternalError is deterministic (§24), so it skips straight there.
+      if (
+        !internalErrorFreshRetried &&
+        copilotStream.result?.value === "InternalError" &&
+        !copilotStream.hasContent && fullText.length === 0 &&
+        !isPremiumOnlyModel(model) &&
+        attempt < MAX_RETRIES
+      ) {
+        internalErrorFreshRetried = true;
+        session.newConversation();
+        text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant);
+        inputImages = imageUrls(body.messages);
+        originalText = text;
+        log.info(`Upstream InternalError — re-sending the whole request in a fresh conversation (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await new Promise(r => setTimeout(r, SHORT_RETRY_DELAY_MS));
+        continue;
+      }
+
       // Empty response. Only an at-limit throttle warrants treating this as rate
       // limiting; otherwise it's a different failure (content filter, an invalid
       // agent/session, a transient upstream error) where a long escalating
@@ -691,12 +735,12 @@ export async function handleChatCompletion(
         await new Promise(r => setTimeout(r, SHORT_RETRY_DELAY_MS));
         text = "Please continue."; // M365 already has context
       } else {
-        // A model that serves only with the agent, on an account whose agent
-        // route doesn't serve it (Opus 4.5 on a non-premium account: BotConnection,
-        // `InternalError`, every time — §24). Not a throttle, so it doesn't feed
-        // the degradation backoff; say what it is instead of "empty response".
-        if (useToolAgent && modelRequiresAgent(model) && copilotStream.result?.value === "InternalError") {
-          log.info(`${model}: agent route returned InternalError on every attempt — premium-only model on a non-premium account?`);
+        // A model served only on a premium account, on a non-premium one (Opus
+        // 4.8: BotConnection, `InternalError`, every time, with the agent and
+        // without — §24, §36). Not a throttle, so it doesn't feed the degradation
+        // backoff; say what it is instead of "empty response".
+        if (isPremiumOnlyModel(model) && copilotStream.result?.value === "InternalError") {
+          log.info(`${model}: InternalError on every attempt — premium-only model on a non-premium account?`);
           return { error: premiumOnlyModelResponse(model) };
         }
         // Final empty after retries, and not an at-limit (per-conversation) cap:
@@ -748,7 +792,7 @@ export async function handleChatCompletion(
     log.info(`Parse result: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
 
     // The reply tried to call a tool, but the call couldn't be read: ask for it
-    // once more, saying what was wrong, before any give-up handling (§37 F96). Off with
+    // once more, saying what was wrong, before any give-up handling (§40 F103). Off with
     // M365_NO_FENCE_RETRY=1.
     const unreadable = parsed.hasToolCalls || process.env.M365_NO_FENCE_RETRY ? null : unreadableToolCall(fullText, body.tools);
     if (unreadable) {
@@ -1127,6 +1171,25 @@ function throttledResponse(result: { errorCode?: string; message?: string }): Re
   });
 }
 
+/** M365_AVOID_THROTTLING would have had to wait longer than this request may
+ *  (a throttle hold, usually), so the turn was never sent: sending it would only
+ *  keep the throttle alive. Whatever retries the client makes are answered here
+ *  the same way, without reaching M365. */
+function turnBudgetHoldResponse(hold: TurnBudgetHold): Response {
+  const retryAfter = Math.max(1, Math.ceil(hold.waitMs / 1000));
+  return jsonResponse(
+    429,
+    {
+      error: {
+        message: `Not sent to M365 Copilot (M365_AVOID_THROTTLING): ${hold.message}.`,
+        type: "rate_limit_error",
+        code: hold.reason === "throttle hold" ? "m365_throttle_hold" : "m365_turn_budget",
+      },
+    },
+    { "Retry-After": String(retryAfter) },
+  );
+}
+
 /** Empty upstream reply that is NOT an at-limit throttle — a distinct failure
  *  (content filter, invalid agent/session, transient error) we surface clearly
  *  instead of hanging on a long retry loop. */
@@ -1143,7 +1206,7 @@ function emptyResponseResponse(throttle: { current: number; max: number } | null
 function premiumOnlyModelResponse(model: string): Response {
   return jsonResponse(502, {
     error: {
-      message: `M365 Copilot didn't serve ${model}: its only route (with the tool agent attached) returned InternalError on every attempt. ${model} is served only on a premium (paid Microsoft 365 Copilot) account; on any other account use claude-sonnet.`,
+      message: `M365 Copilot didn't serve ${model}: it returned InternalError on every attempt. ${model} is served only on a premium (paid Microsoft 365 Copilot) account; on any other account use claude-sonnet.`,
       type: "upstream_error",
       code: "model_route_unavailable",
     },

@@ -59,7 +59,12 @@ task plus a reserve of 20 turns, and for 75 minutes of quiet after a throttled t
 A long sweep then runs at the account's pace, ~1.6 turns a minute once the bucket is low. It needs a
 proxy with `M365_DEBUG=1`, which phase-sweep always sets; turns it can't see (the web client, another
 host, a proxy without debug logs) aren't counted. `node scripts/bench/turn-budget.mjs status` shows
-where the bucket stands, and the `M365_BUDGET_*` variables in its header tune the model. The Opus
+where the bucket stands, and the `M365_BUDGET_*` variables tune the model. The model lives in the
+core package (`packages/core/src/turn-budget.ts`; build first), because a proxy started with the same
+variable also waits, before each upstream turn — which is what keeps a long pi session clear of the
+throttle (hypotheses §37). Both keep the same reserve, so a task the bench let start only waits in the
+proxy if it runs past its turn allowance or something else spends turns meanwhile; phase-sweep's
+proxies inherit the variable. The Opus
 priority-access wall (`claude-opus`: 40 turns a day) stops it the same way, as `[bench] PRIORITY
 ACCESS EXHAUSTED` (exit 4); `analyze-arms.mjs` counts the tasks it took as `INVALID(quota)`.
 

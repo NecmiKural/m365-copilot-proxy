@@ -683,7 +683,7 @@ describe("defaultFramingForTone", () => {
     // relay_batch: 2.30 turns per bench task vs relay's 3.65 — and Opus 5.5's
     // budget counts turns (F55). `minimal`'s shorter prompt saved nothing.
     expect(defaultFramingForTone("Claude_Opus")).toBe("relay_batch");
-    for (const id of ["claude-opus", "claude-opus-5.5", "claude-opus-4.5", "claude-opus-4-5-20251101", "claude-opus-5[1m]"]) {
+    for (const id of ["claude-opus", "claude-opus-5.5", "claude-opus-4.8", "claude-opus-4.5", "claude-opus-4-8-20261001", "claude-opus-5[1m]"]) {
       expect(defaultFramingForModel(id)).toBe("relay_batch");
     }
   });
