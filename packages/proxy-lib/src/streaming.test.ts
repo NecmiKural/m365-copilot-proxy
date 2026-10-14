@@ -644,7 +644,11 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
     expect(scripted.newConversations).toBe(1);
     expect(scripted.agentFlags).toEqual([true, true]);
     expect(scripted.texts[1]).not.toBe("Please continue.");
-    expect(scripted.texts[1]).toBe(scripted.texts[0].replace("conv-test<", "conv-test-2<"));
+    // The same request, in another conversation (the fake numbers its ids).
+    const id = (t: string) => /<conversation_id>([^<]*)</.exec(t)?.[1];
+    const sameRequest = (t: string) => t.replace(/<conversation_id>[^<]*</, "<conversation_id><");
+    expect(id(scripted.texts[1])).not.toBe(id(scripted.texts[0]));
+    expect(sameRequest(scripted.texts[1])).toBe(sameRequest(scripted.texts[0]));
     scripted.queue = [CALL];
     await send();
     expect(scripted.agentFlags).toEqual([true]);
