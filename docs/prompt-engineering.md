@@ -131,7 +131,10 @@ there. Asking for batching works: "Each round trip takes me a while, so put as m
 block" (`relay_batch`) took Opus 4.5 from 3.65 to 2.30 turns per bench task at 20/20 solved.
 Real pi agreed: 3.5 turns per run vs 6.0, 10/10 each. It is the
 Opus default (both models). The cost to watch: a batched block acts before it has seen any output —
-in pi every edit still came after a read.
+in pi every edit still came after a read. Opus 4.8, which replaced Opus 4.5 on `claude-opus-4.8` in
+October 2026, went 30/30 with it at 2.53 turns per task, with the agent (hyp §36 F90). Agent-less it
+has a code interpreter of its own, and the user-voice note is what keeps it out: under `baseline` it
+worked there and reported on files it never touched (1/10), under relay_batch it never went in (F91).
 
 **It carries to other models unevenly — measure in real pi, not only on the bench** (hyp §25). The
 bench's turn savings: GPT-6 and GPT-6 Sol −33%, Sonnet 4.6 −14%, Sonnet 5 −15%. In pi: GPT-6 Sol −19%
@@ -199,7 +202,7 @@ the transcript's **tags** (`transcriptStyleForVariant`): the Claude Sonnet set n
 the harness's own system prompt becomes `<harness_system_prompt>`.
 
 **The default is model-aware** (`defaultFramingForModel`, falling back to `defaultFramingForTone`).
-`Claude_Opus` (Opus 4.5 and 5.5), `Claude_Sonnet` (as Sonnet 4.6), `Gpt_6_Reasoning`,
+`Claude_Opus` (Opus 4.8 and 5.5), `Claude_Sonnet` (as Sonnet 4.6), `Gpt_6_Reasoning`,
 `Gpt_6_Sol_Reasoning` (hyp §28) and
 `Gpt_61_Sol_Reasoning` (GPT-6.1 Sol, hyp §27) → `relay_batch`; Sonnet 5 (`claude-sonnet-5`, its own `Claude_Sonnet_5` tone since 2026-10-06) and
 Sonnet 5.5 (`claude-sonnet-5.5`, `Claude_Sonnet` on the paid scenario, keyed on the model ID;

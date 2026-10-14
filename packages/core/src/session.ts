@@ -24,6 +24,7 @@ import {
   ACTION_ALLOWED_MESSAGE_TYPES,
 } from "./native-actions.js";
 import { createLogger, trunc, FRAME_DIR } from "./log.js";
+import { recordThrottle, recordTurn } from "./turn-budget.js";
 import { parseMetering, meteredAllowance, METERED_BUDGETS, type MeteredBudget } from "./priority-access.js";
 
 const RS = "\x1E";
@@ -345,16 +346,17 @@ export class CopilotSession {
     const images = opts?.images ?? [];
 
     log.info(`Chat turn ${this._turnCount - 1}: model=${model}, isFirst=${isFirst}, text=${JSON.stringify(trunc(text, 200))}`);
+    recordTurn(); // the throttle-avoidance bucket counts what that line counts (turn-budget.ts)
 
     const claims = decodeJwt(token);
     const requestId = crypto.randomUUID();
 
     // Resolve the tone ONCE and derive the connection's entitlement from the
-    // MODEL (not the tone alone). `scenario` is not cosmetic: agent-less, the
-    // default `OfficeWebIncludedCopilot` will not serve `Claude_Opus` (canned
-    // BotConnection apology), while `OfficeWebPaidCopilot` does — and the same
-    // `Claude_Sonnet` tone is Sonnet 4.6 on one and Sonnet 5.5 on the other, the
-    // same `Claude_Opus` tone Opus 4.5 (agent, premium) and Opus 5.5.
+    // MODEL (not the tone alone). `scenario` is not cosmetic: the same
+    // `Claude_Sonnet` tone is Sonnet 4.6 on the default `OfficeWebIncludedCopilot`
+    // and Sonnet 5.5 on `OfficeWebPaidCopilot`, the same `Claude_Opus` tone Opus
+    // 4.8 (premium only) and Opus 5.5, and some tones (`Gpt_6_Reasoning`) serve on
+    // the paid one only.
     // See getScenarioForModel / docs §5.
     const tone = getToneForModel(model);
     const { scenario, licenseType } = getScenarioForModel(model);
@@ -855,6 +857,7 @@ export class CopilotSession {
                 ...(typeof item.result.message === "string" ? { message: item.result.message } : {}),
               };
               if (item.result.value !== "Success") log.info(`Turn result: ${item.result.value}${serverResult.errorCode ? ` (${serverResult.errorCode})` : ""}`);
+              if (item.result.value === "Throttled") recordThrottle();
             }
             if (item.turnState) turnState = item.turnState;
             if (item.throttling) {

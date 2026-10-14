@@ -35,7 +35,8 @@
 //
 // A task is INVALID (left out of every score) when it failed because of the
 // infrastructure: its error is a transport failure or a throttle (WebSocket /
-// connection / 429 / m365_throttled); or its conversation logged a network-level
+// connection / 429 / m365_throttled, or a turn M365_AVOID_THROTTLING held back
+// — a pi run sees only its message); or its conversation logged a network-level
 // WS error or a Throttled turn; or it timed out in an arm whose log shows network
 // failures elsewhere (a stalled connect leaves no error of its own); or it hit
 // the Opus priority-access wall (a priority_access_exhausted error, or an
@@ -59,7 +60,7 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const PI_TASKS = ["fix-bug", "multi", "edit-config"];
-const TRANSPORT = /WebSocket error|connection failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|m365_throttled|HTTP 429/i;
+const TRANSPORT = /WebSocket error|connection failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|socket hang up|m365_throttled|HTTP 429|Not sent to M365 Copilot/i;
 // A WS error the network caused. Not "closed before the connection was
 // established": that's the proxy aborting a turn because the client gave up.
 const NETWORK_WS_ERROR = /WS error: (connection failed|.*(ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|getaddrinfo))/;

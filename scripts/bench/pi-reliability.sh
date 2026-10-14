@@ -11,7 +11,8 @@
 #
 # Throttle pacing, as in run.mjs, only with M365_AVOID_THROTTLING=1: before each
 # run it waits until the proxy's debug logs say the account can afford PACE_NEED
-# (12) turns plus a reserve (turn-budget.mjs; the proxy needs M365_DEBUG=1).
+# (12) turns plus a reserve (turn-budget.mjs; the proxy needs M365_DEBUG=1). A
+# proxy started with the same variable also waits before each turn inside a run.
 # A run that comes back throttled is recorded as THROTTLED and ends the
 # loop ("[pi-rel] THROTTLED", exit 3): every later run would only keep it alive.
 set -u
@@ -75,7 +76,10 @@ EOF
     "$PYBIN/python3" "$D/check.py" 2>/dev/null | grep -qx OK && ok=1 || ok=0
   fi
   if [ "$ok" = 1 ]; then outcome=SOLVED
-  elif grep -qiE 'PerUserThrottled|m365_throttled' "$D/pi.out" 2>/dev/null; then outcome=THROTTLED
+  # A streamed error reaches pi as its message only: "M365 Copilot throttled this
+  # account (PerUserThrottled)…", or the proxy holding the turn back under
+  # M365_AVOID_THROTTLING ("…M365 throttled this account at…", hypotheses §37).
+  elif grep -qiE 'PerUserThrottled|m365_throttled|throttled this account' "$D/pi.out" 2>/dev/null; then outcome=THROTTLED
   elif grep -qi 'disengag' "$D/pi.out" 2>/dev/null; then outcome=DISENGAGED
   else outcome=FAIL; fi
   el=$(( $(date +%s) - t0 ))

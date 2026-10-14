@@ -189,34 +189,38 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   pi works and heavy harnesses (opencode) don't. The proxy also enforces one tool call per
   turn and strips M365's invented `{confidence}`/`{final}` JSON (`M365_ALLOW_MULTI_TOOL` to opt out).
 - **`claude-opus` is entitlement-gated and separately metered.** The WS `scenario` decides which
-  models will serve: agent-less, Opus is a dead route on `OfficeWebIncludedCopilot` and a real model
-  (Opus 5.5) on `OfficeWebPaidCopilot` (`getScenarioForModel`, derived per-turn from the model ID).
+  model serves: `Claude_Opus` is Opus 5.5 on `OfficeWebPaidCopilot` and another model, Opus 4.8 (below), on
+  `OfficeWebIncludedCopilot` (`getScenarioForModel`, derived per-turn from the model ID).
   `licenseType: Premium` pairs with it but unlocks nothing alone. Opus 5.5 also has a small
   priority-access budget — 75/week (`ClaudeOpusQuery75`) and 40/day (`ClaudeOpusQueryDaily`), **one unit
   per turn whatever the prompt size** — so a leaner framing saves nothing; only fewer turns do
   (the proxy's own retries count too). The refusal is **not streamed**: it is only in the final
   item (`result.value: "OutOfCredits"`, `result.message`), so a stream reader sees an empty turn —
   read the result (`priorityAccessExhaustionOf`), not the text. The proxy 429s, remembers the wall
-  until the reset (midnight UTC; weekly: Monday) and, with `M365_OPUS_FALLBACK_MODEL=claude-opus-4.5`,
-  serves Opus 4.5 instead. Every paid turn carries `throttling.metering` (surfaced in `usage`).
+  until the reset (midnight UTC; weekly: Monday) and, with `M365_OPUS_FALLBACK_MODEL=claude-opus-4.8`,
+  serves Opus 4.8 instead. Every paid turn carries `throttling.metering` (surfaced in `usage`).
   **Sonnet 5.5 has the same kind of budget, its own** (80/day `ClaudeSonnet55QueryDaily`, 150/week
   `ClaudeSonnet55QueryWeekly` — which has reset daily, not on Monday, §30; `M365_SONNET_FALLBACK_MODEL`). Budgets live in `METERED_BUDGETS`
   (`priority-access.ts`) and `meteredBudgetOf()` maps a model to one; walls are remembered per budget.
   A new `*Query*` key in `metering` is how a new metered model shows up — add a budget, don't hard-code Opus.
   Don't burn it on sweeps. See docs/hypotheses.md §15, §24 F55, F59 (issue #18), §26.
-- **`claude-opus-4.5` is the same tone on the included scenario — reachable only through the tool
-  agent, only on a premium account, and unmetered.** Agent-less it is the dead route everywhere, so
-  `modelRequiresAgent` attaches the agent even to tool-less requests, and there is no agent-less
-  fallback (it is NOT in `PREMIUM_ONLY_AGENT_TONES`). Routing is the mirror of Sonnet 5.5: the tone is
-  paid and the model ID opts back into the included scenario (`INCLUDED_SCENARIO_MODELS`, plus
-  `opus-4-5`-style strings). Its system prompt calls it "Claude Opus 5"; trust its "Opus 4.5" and
-  its `ChainOfThoughtSummary`, not the name in the prompt. Both Opus models carry the agent on tool
-  requests (`AGENT_CLAUDE_TONES`) and default to `relay_batch`: every framing solves on Opus 4.5,
+- **`claude-opus-4.8` is the same tone on the included scenario — only on a premium account, and
+  unmetered.** It replaced Opus 4.5 (`claude-opus-4.5`, now an alias) unannounced between Oct 4 and
+  Oct 11 2026, so re-run the self-ID probes now and then. Opus 4.5 served only through the tool agent;
+  Opus 4.8 serves agent-less too, so tool-less requests go without it. On a non-premium account it is
+  the dead route on both paths: there is no fallback (it is NOT in `PREMIUM_ONLY_AGENT_TONES`), and
+  `isPremiumOnlyModel` turns the `InternalError`s into a 502 that says so. Its tool requests keep the
+  agent (§36): agent-less ties on the bench but costs 22% more turns in real pi (F90), and has its own
+  code interpreter, which it works in under a framing that doesn't steer it out (`baseline` 1/10 vs
+  8/10), and writes its own `<tool_response>`s (13 of 134 turns, 0 with the agent; F91). Routing is the
+  mirror of Sonnet 5.5: the tone is paid and the model ID opts back into the included scenario
+  (`INCLUDED_SCENARIO_MODELS`, plus `opus-4-8` / `opus-4-5`-style strings). Both Opus models carry the
+  agent on tool requests (`AGENT_CLAUDE_TONES`) and default to `relay_batch`: every framing solved on Opus 4.5,
   so rank framings by Disengaged turns and turns per task, not the solve rate — the `<system>`-tagged
   ones tripped the jailbreak classifier on a third of tasks (§24 F56), and relay_batch's "put as much
-  as you can into one block" cut turns per task 37% (F60), which is what Opus 5.5's budget counts. Opus sometimes ends a tool fence with its native call
+  as you can into one block" cut turns per task 37% (F60), which is what Opus 5.5's budget counts. Opus 4.5 sometimes ended a tool fence with its native call
   markup (`</invoke>`, `</parameter>`…); the parser strips it (F57), don't "simplify" that away. Only a premium account can
-  bench it. See docs/hypotheses.md §24.
+  bench it. See docs/hypotheses.md §24, §36.
 - **Entitlement-gated ≠ metered.** `gpt-6-think-deeper` (`Gpt_6_Reasoning`) and `claude-sonnet-5`
   (`Claude_Sonnet_5`) need the same paid
   scenario as Opus but carry **no** priority-access budget and throttle like everything else,
@@ -308,7 +312,11 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   the final `type:2` item says `result.value:"Throttled"`, `errorCode:"PerUserThrottled"`, and
   the proxy now returns 429 `m365_throttled` without retrying (#35). ~190 fresh threads in a
   day tripped it on the premium account. The bench and phase-sweep stop at the first throttled
-  task, and `TASK_GAP` paces bench tasks. **A fresh login does NOT clear it:** the throttle is
+  task, and `TASK_GAP` paces bench tasks. F58's per-turn bucket fits the onsets better than any
+  thread count, and by it a busy pi session drains the account too: every turn takes one, mid-thread
+  or not. `M365_AVOID_THROTTLING=1` waits for that bucket: the bench before each task, the proxy
+  before each upstream turn, inside the open stream (§37). The model is `packages/core/src/turn-budget.ts`;
+  `scripts/bench/turn-budget.mjs` re-exports it, so tune it in one place. **A fresh login does NOT clear it:** the throttle is
   keyed on the account's `oid`, which a new token keeps (API doc §2/§7, hypotheses §11 H-R1 —
   F13's "fresh login clears it" was n=1 and confounded with a rest). It lifts with idle time,
   which is why the proxy's degradation backoff replaced the old auto-reauth. Space experiment
