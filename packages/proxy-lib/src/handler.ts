@@ -440,9 +440,9 @@ export async function handleChatCompletion(
   // Framing default follows the MODEL (defaultFramingForModel): the Claude,
   // GPT-6 and GPT-6 Sol tones get a user-voice relay (Sonnet reads the
   // `<system>`-tagged baseline as an injected prompt; on Opus it trips the
-  // jailbreak classifier). Opus, Sonnet 4.6, GPT-6, GPT-6 Sol and GPT-6.1 Sol get the
-  // turn-saving `relay_batch` (§24 F60, §25, §27, §28); Sonnet 5, Sonnet 5.5 and
-  // GPT-5.6 Think Deeper plain `relay` (§39 F97). The rest keep the bench-tuned
+  // jailbreak classifier). Opus, Sonnet 4.6, GPT-6, GPT-6 Sol, GPT-6.1 Sol and
+  // GPT-5.6 Think Deeper get the turn-saving `relay_batch` (§24 F60, §25, §27, §28,
+  // §39 F97); Sonnet 5 and Sonnet 5.5 plain `relay`. The rest keep the bench-tuned
   // `baseline`.
   // Keyed on the model, not the tone, because one tone can serve two models.
   // M365_FRAMING_* still wins.

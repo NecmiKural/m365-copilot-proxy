@@ -174,8 +174,9 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - **Reasoning tones work with the agent; the framing decides whether they obey it.** `*-think-deeper`
   (and bare `gpt-5.4`) route through the `DeepLeo` reasoning pipeline, which meta-analyzes the injected
   prompt, and this note used to say they don't work with the agent at all. They do: GPT-5.5 Think Deeper
-  tool-calls with the agent under baseline, and GPT-5.6 Think Deeper under `relay`. Under baseline 5.6
-  gave up on file-producing turns (runs with a give-up turn 12/14, relay 0/14, §39 F97): on the agent path
+  tool-calls with the agent under baseline, and GPT-5.6 Think Deeper under the user-voice framings
+  (`relay_batch` by default). Under baseline 5.6 gave up on file-producing turns (runs with a give-up turn
+  12/14, relay 0/14, relay_batch 0/8, §39 F97): on the agent path
   M365's own instructions say file generation is disabled, and baseline's `<system>`-tagged block says
   create the file. When a reasoning tone refuses, read its chain-of-thought frames before blaming the
   tone. What still holds: the model can't be bound to our (declarative `minimalBots`) agent type as its

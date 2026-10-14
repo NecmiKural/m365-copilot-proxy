@@ -439,6 +439,18 @@ describe("tool-result labelling", () => {
     expect(out).toContain(`command="for f in a.mjs; do printf '%s\\\\n' \\"$f\\"; done"`);
     expect(out).not.toContain("'$f'"); // "$f" and '$f' are different shell commands
   });
+
+  // Live (GPT-5.6, relay_batch, a PDF task): a label cut silently at 100 chars,
+  // `command="… margin: 22m"`, was read as the command itself cut there.
+  it("marks a long command it shortens, so the label doesn't read as a cut command", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const cmd = `set -eu\ncss=".notlar-pdf.css"\nprintf '%s\\n' '@page { size: A4; margin: 22mm 20mm; }' 'body { font-family: "Segoe UI", Arial }' > "$css"`;
+    const history = [{ role: "assistant", tool_calls: [{ id: "b2", function: { name: "bash", arguments: JSON.stringify({ command: cmd }) } }] }];
+    const label = formatToolResponse({ role: "tool", tool_call_id: "b2", content: "(no output)" }, history).split("\n")[0];
+    expect(label).toMatch(/…">$/);
+    const short = [{ role: "assistant", tool_calls: [{ id: "b3", function: { name: "bash", arguments: '{"command":"ls -la"}' } }] }];
+    expect(formatToolResponse({ role: "tool", tool_call_id: "b3", content: "x" }, short)).toContain('command="ls -la">');
+  });
 });
 
 describe("fenced tool format (the only format)", () => {

@@ -792,10 +792,11 @@ describe("defaultFramingForTone", () => {
     expect(defaultFramingForModel("gpt-6.1-sol")).toBe("relay_batch");
   });
 
-  it("gives GPT-5.6 Think Deeper relay — baseline's <system> block conflicts with M365's 'file generation is disabled' (§39 F97)", () => {
-    // Real pi, PDF + .docx: runs with any give-up turn baseline 12/14, relay 0/14.
-    expect(defaultFramingForTone("Gpt_5_6_Reasoning")).toBe("relay");
-    expect(defaultFramingForModel("gpt-5.6-think-deeper")).toBe("relay");
+  it("gives GPT-5.6 Think Deeper relay_batch — baseline's <system> block conflicts with M365's 'file generation is disabled' (§39 F97)", () => {
+    // Real pi, PDF + .docx: runs with any give-up turn baseline 12/14, relay 0/14,
+    // relay_batch 0/8 with 3.4 calls a run vs relay's 5.6; bench 20/20 each at −19% turns.
+    expect(defaultFramingForTone("Gpt_5_6_Reasoning")).toBe("relay_batch");
+    expect(defaultFramingForModel("gpt-5.6-think-deeper")).toBe("relay_batch");
     // Measured on the reasoning tone only; the chat tone keeps baseline.
     expect(defaultFramingForTone("Gpt_5_6_Chat")).toBeUndefined();
     expect(defaultFramingForModel("gpt-5.6")).toBeUndefined();
