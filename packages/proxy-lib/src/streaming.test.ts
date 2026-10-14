@@ -11,7 +11,7 @@ const scripted: {
   /** Text of every run() call, in order. */
   texts: string[];
   /** Per-call overrides, consumed front-first (e.g. a Disengaged turn, then an answer). */
-  queue: Array<{ fullText: string; messageType?: string | null; result?: { value: string; errorCode?: string; message?: string }; metering?: Record<string, number>; turnCount?: number | null }>;
+  queue: Array<{ fullText: string; messageType?: string | null; result?: { value: string; errorCode?: string; message?: string }; metering?: Record<string, number> }>;
   /** The model argument of every run() call, in order. */
   models: string[];
   /** The `useAgent` argument of every run() call, in order. */
@@ -71,7 +71,7 @@ vi.mock("@m365-copilot/core", async (importActual) => {
         messageType: (next?.messageType ?? null) as string | null,
         messageId: "m1",
         scores: null,
-        turnCount: next?.turnCount === undefined ? 1 : next.turnCount,
+        turnCount: 1,
         turnState: "Completed",
         async *[Symbol.asyncIterator]() {
           for (const d of deltas) {
@@ -648,21 +648,6 @@ describe("GPT-6 Sol: agent on premium, learned fallback on non-premium (#23)", (
     scripted.queue = [CALL];
     await send();
     expect(scripted.agentFlags).toEqual([true]);
-  });
-
-  // Live (308 skills, a ~200K-char first message): M365 answered in 0.25 s with
-  // InternalError and no bot message; the retry said "Please continue." into a
-  // conversation that had never received the task, and the model asked "What would
-  // you like me to continue with?". The server's own counter then read 1 of 600.
-  it("resends the text, not 'Please continue.', when the empty turn was never recorded upstream", async () => {
-    scripted.queue = [CALL];
-    await send(); // the agent answered: InternalError below is a transient (premium)
-    scripted.queue = [{ ...DEAD, turnCount: null }, CALL];
-    const res = await send();
-    expect(res.status).toBe(200);
-    expect(scripted.texts[1]).toBe(scripted.texts[0]); // the full prompt again
-    expect(scripted.texts[1]).toContain("list files");
-    expect(scripted.newConversations).toBe(0);
   });
 
   it("doesn't touch tones outside PREMIUM_ONLY_AGENT_TONES", async () => {

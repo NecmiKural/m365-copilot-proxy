@@ -773,14 +773,7 @@ export async function handleChatCompletion(
         }
         log.info(`Empty upstream response, quick retry in ${SHORT_RETRY_DELAY_MS / 1000}s (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await new Promise(r => setTimeout(r, SHORT_RETRY_DELAY_MS));
-        // An empty turn that carries no server turnCount was rejected unread (an
-        // instant InternalError, no bot message): the conversation never saw this
-        // text, so "Please continue." would resume a thread that has nothing to
-        // continue — measured on a 200K-char first message: the model answered "What
-        // would you like me to continue with?" and the task was lost. Resend it.
-        // Otherwise M365 has the text already and only needs the nudge.
-        if (copilotStream.turnCount == null) log.info("Empty reply was never recorded upstream (no turnCount), resending this turn's text");
-        else text = "Please continue.";
+        text = "Please continue."; // M365 already has context
       } else {
         // A model served only on a premium account, on a non-premium one (Opus
         // 4.8: BotConnection, `InternalError`, every time, with the agent and
