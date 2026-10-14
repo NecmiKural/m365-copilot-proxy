@@ -47,6 +47,7 @@ import {
   fetchImageBytes,
   type CapturedImage,
   type ParseResult,
+  type ParsedToolCall,
 } from "@m365-copilot/core";
 import { ChatCompletionRequest } from "./schemas.js";
 import type { z } from "zod/v4";
@@ -164,7 +165,6 @@ interface ConversationState {
   chain: { writeId: string; run: ParsedToolCall } | null;
 }
 
-type ParsedToolCall = ParseResult["toolCalls"][number];
 
 /** What a client echoes back of a reply in its next request: the tool-call ids
  *  (they pair the results, so they come back verbatim), else the text. */
@@ -331,10 +331,11 @@ function parseReply(text: string, tools: Parameters<typeof parseToolCalls>[1]): 
  *  models write that markup into answers: 58 times in the 245 distinct final
  *  answers of the pi transcripts (Oct 2–5), plus `<document>`, `<Files>`,
  *  `<file>`, `<FILE>` and "< File>". An API client shows the raw tags, so a prose
- *  answer gets the bare name. Code blocks are left as they are. */
+ *  answer gets the bare name. Code is left as it is: fenced blocks, and inline
+ *  code (`<file>a.txt</file>` written as an example of the markup). */
 export function plainFileNames(text: string): string {
   return text
-    .split(/(```[\s\S]*?```)/)
+    .split(/(```[\s\S]*?```|`[^`\n]+`)/)
     .map((part, i) => (i % 2 ? part : part.replace(/<\s*(file|files|document)\s*>([^<>\n]{1,200}?)<\/\s*\1\s*>/gi, "$2")))
     .join("");
 }
