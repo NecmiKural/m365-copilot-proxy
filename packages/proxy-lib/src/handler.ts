@@ -842,7 +842,7 @@ export async function handleChatCompletion(
     log.info(`Parse result: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
 
     // The reply tried to call a tool, but the call couldn't be read: ask for it
-    // once more, saying what was wrong, before any give-up handling (§37 F96). Off with
+    // once more, saying what was wrong, before any give-up handling (§40 F103). Off with
     // M365_NO_FENCE_RETRY=1.
     const unreadable = parsed.hasToolCalls || process.env.M365_NO_FENCE_RETRY ? null : unreadableToolCall(fullText, body.tools);
     if (unreadable) {
@@ -870,7 +870,9 @@ export async function handleChatCompletion(
     const everActed = (body.messages ?? []).some(
       (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0,
     );
-    for (let attempt = 0; attempt < maxConfabRetries && !parsed.hasToolCalls; attempt++) {
+    // Not after asking again: the model was just told it could reply without the
+    // call, and a forcing retry would override the answer it gave to that.
+    for (let attempt = 0; attempt < (unreadable ? 0 : maxConfabRetries) && !parsed.hasToolCalls; attempt++) {
       const confab = looksLikeConfabulation(judged);
       const remoteArtifact = looksLikeRemoteArtifactCompletion(parsed.textContent);
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);

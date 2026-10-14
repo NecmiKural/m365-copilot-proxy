@@ -292,6 +292,14 @@ describe("a tool call the proxy can't read", () => {
     expect(scripted.texts).toHaveLength(2);
   });
 
+  it("doesn't force a call after asking again, whatever the answer to that was", async () => {
+    // The re-ask told the model it could reply without the call; a confab retry
+    // on that reply would force the call anyway (review, #71).
+    const msg = await ask([UNCLOSED, "I don't have access to your project files or the ability to run commands here.", "```bash\nls\n```"]);
+    expect(msg.tool_calls).toBeUndefined();
+    expect(scripted.texts).toHaveLength(2);
+  });
+
   it("doesn't ask when nothing in the reply was a tool call, or when turned off", async () => {
     await ask(["Done. The function is:\n\n```python\ndef f():\n    return 1"]);
     expect(scripted.texts).toHaveLength(1);
