@@ -213,11 +213,14 @@ export class TurnTextComposer {
    *  "<document" (M365 holds the "<" back until it knows the tag), so appending
    *  gave "<<document>notlar.docx…", and the final snapshot, one character
    *  shorter, never replaced it. 9 of 1,061 cursor frames in the Oct 2–5 debug
-   *  logs, each one a "<"; in the rest the first delta continues the snapshot. */
+   *  logs, each one a "<"; in the rest the first delta continues the snapshot.
+   *  Only that "<" counts as restated: a head of "*" or "`" followed by a delta
+   *  that starts the same way is a continuation ("*" + "*Summary**" is bold,
+   *  "`" + "``bash" a fence), and dropping it would break the markdown. */
   delta(text: string): void {
     const key = this.target ?? "";
     const current = this.texts.get(key) ?? "";
-    const restated = this.afterCursor && current.length > 0 && text.startsWith(current);
+    const restated = this.afterCursor && current === "<" && text.startsWith("<");
     this.texts.set(key, restated ? text : current + text);
     this.afterCursor = false;
   }
