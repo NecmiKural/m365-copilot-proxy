@@ -131,7 +131,12 @@ function toolCallSummary(rawArgs: string): { key: string; value: string } | null
   const hit = named.find(([, v]) => typeof v === "string") ??
     (() => { const v = Object.values(args).find((x) => typeof x === "string"); return v === undefined ? undefined : ["input", v] as [string, unknown]; })();
   if (!hit) return null;
-  const value = (hit[1] as string).replace(/\s+/g, " ").trim().slice(0, 100).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  // A long value is cut, and says so: cut silently, the label reads as the call
+  // itself cut short. GPT-5.6 took `command="… margin: 22m"` for its command
+  // truncated there, and gave up ("I can't generate files in the current
+  // session", §39 F98).
+  const flat = (hit[1] as string).replace(/\s+/g, " ").trim();
+  const value = (flat.length > 100 ? `${flat.slice(0, 100)}…` : flat).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return { key: hit[0], value };
 }
 
