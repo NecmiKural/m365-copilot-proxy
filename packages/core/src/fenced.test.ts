@@ -1029,3 +1029,63 @@ describe("array and object params written as a YAML block (#50)", () => {
     expect(args.command).toBe("  echo indented");
   });
 });
+
+describe("multi-line string values in a header-only fence (#82)", () => {
+  // opencode's `edit`: every param is a header line (no body, no edit pair).
+  const ocEdit: ToolDef = {
+    type: "function",
+    function: {
+      name: "edit",
+      description: "Performs exact string replacements in files.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" }, oldString: { type: "string" }, newString: { type: "string" }, replaceAll: { type: "boolean" } },
+        required: ["path", "oldString", "newString"],
+      },
+    },
+  };
+  const read: ToolDef = {
+    type: "function",
+    function: { name: "read", parameters: { type: "object", properties: { path: { type: "string" }, offset: { type: "number" }, limit: { type: "number" } } } },
+  };
+  const specs = buildSpecMap([ocEdit, read, bash]);
+  const argsOf = (text: string) => {
+    const { calls } = parseFencedToolCalls(text, specs);
+    expect(calls).toHaveLength(1);
+    return JSON.parse(calls[0].function.arguments);
+  };
+
+  it("reads both values whole — verbatim from Sonnet 5 in opencode, which lost newString", () => {
+    const args = argsOf("```edit\npath: calc.py\noldString: def add(a, b):\n    return a - b\nnewString: def add(a, b):\n    return a + b\n```");
+    expect(args).toEqual({ path: "calc.py", oldString: "def add(a, b):\n    return a - b", newString: "def add(a, b):\n    return a + b" });
+  });
+
+  it("ends a value at the next key, which keeps its type", () => {
+    const args = argsOf("```edit\npath: a.py\noldString: x = 1\ny = 2\nnewString: x = 3\ny = 4\nreplaceAll: true\n```");
+    expect(args).toEqual({ path: "a.py", oldString: "x = 1\ny = 2", newString: "x = 3\ny = 4", replaceAll: true });
+  });
+
+  it("keeps blank lines inside a value and drops the trailing ones", () => {
+    const args = argsOf("```edit\npath: a.py\noldString: def f():\n\n    pass\n\nnewString: def f():\n    return 1\n\n\n```");
+    expect(args.oldString).toBe("def f():\n\n    pass");
+    expect(args.newString).toBe("def f():\n    return 1");
+  });
+
+  it("reads `key: |` as a block scalar and an empty `key:` as an indented block", () => {
+    const args = argsOf("```edit\npath: a.py\noldString: |\n  if x:\n      y()\nnewString:\n  if x:\n      z()\n```");
+    expect(args.oldString).toBe("if x:\n    y()\n");
+    expect(args.newString).toBe("if x:\n    z()");
+  });
+
+  it("leaves one-line values and a clean read fence as they were", () => {
+    expect(argsOf("```edit\npath: a.py\noldString: return a - b\nnewString: return a + b\n```"))
+      .toEqual({ path: "a.py", oldString: "return a - b", newString: "return a + b" });
+    expect(argsOf("```read\npath: src/main.py\noffset: 10\nlimit: 20\n```")).toEqual({ path: "src/main.py", offset: 10, limit: 20 });
+  });
+
+  it("doesn't touch a tool with a body: the header still ends at the first non-key line", () => {
+    const write: ToolDef = { type: "function", function: { name: "write", parameters: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } } } };
+    const { calls } = parseFencedToolCalls("```write\npath: a.txt\nhello\nworld\n```", buildSpecMap([write]));
+    expect(JSON.parse(calls[0].function.arguments)).toEqual({ path: "a.txt", content: "hello\nworld" });
+  });
+});

@@ -4216,6 +4216,18 @@ delta turns' `name="unknown"` label). **Fixed** (PR #51): real pi, relay, 10/10,
 10 edits YAML and all parsed, none rejected — 5.20 turns per run vs relay's 7.16 here (12:19–12:33Z,
 account P). That is a bigger saving than batching's, and the two should stack; not yet measured together.
 
+**Side finding — opencode's `edit` loses multi-line strings (#82).** opencode's `edit` takes `path`,
+`oldString`, `newString`, `replaceAll`: no body param, and camelCase names that aren't in `SEARCH_KEYS`, so
+all four are header lines (`oldString: <oldString>`). Sonnet 5 fills that in with the text as it is in the
+file, its later lines at the code's own indentation. The parser read one line per value and ended the
+header at the first non-`key:` line, so the call reached opencode as `{"path", "oldString": "<first
+line>"}`, with no `newString` (2 of 2 opencode sessions on Oct 16, 2 or 3 wasted turns each). **Fixed:** in a
+header-only tool a string value runs on to the next `key:` line, blank lines included, trailing ones
+dropped; `key: |` reads as a block scalar. Before relying on that, the dumps were checked for stray lines
+in header-only fences, which the run-on would now glue onto a value: 47 of 47 pi `read` fences had none.
+Live (opencode 2.0.30, `claude-sonnet-5`, premium account): a four-line `oldString` written in exactly
+that shape arrived whole and the edit applied on the first try.
+
 ### F63 — real pi on the premium account: GPT-6 batches cleanly, Sonnet 5 doesn't save turns → the decision 🟢
 Paced runs (`M365_AVOID_THROTTLING=1`), 11:00–11:56Z, confab retry off, no throttled or Disengaged run.
 
@@ -5025,6 +5037,19 @@ gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prom
 referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
 (F80/F81), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.
+
+**The key needs the tool names too (#83, Oct 16).** opencode 2.0.30 opens a session with two requests
+4 ms apart that share the first user message: a title request ("You are a title generator…", no tools)
+and the task (12 tools). Keyed on the opener alone, both resolved to one `ConversationState` and ran in one
+M365 conversation at the same time, the title prompt as turn 0 and the task as turn 1 (2 of 3 opencode
+sessions; in the third the pair shared the state too, but each request rotated it to a fresh conversation
+because the session switched model, the task's while the title turn was still running). A fake OpenAI server showed that neither pi (4 tools) nor opencode's task thread changes its
+tool names or system prompt between turns, so the key is now the opener plus the sorted tool names. Names,
+not definitions, because a description can carry per-turn text; the system prompt was left out for the
+same reason. A session that changes its tool set starts a fresh conversation with the full history: one
+more thread, but no wrong answer. **Live** (opencode, `claude-sonnet-5`, premium account): the title request
+went into its own conversation and the task into another, and the task's 3 follow-up turns went into
+the task's conversation in delta mode.
 
 ---
 

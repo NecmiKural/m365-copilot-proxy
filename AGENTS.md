@@ -296,6 +296,10 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
 - **A turn can hold several bot messages; assemble text per message.** Each new message's head
   arrives only as a snapshot with a `cursor`; folding everything into one string drops it (it ate
   a fence's backticks). `TurnTextComposer` in `session.ts` — don't "simplify" it away. #29.
+- **A conversation is keyed on the first user message *and* the tool names** (`SessionPool.fingerprint`).
+  opencode's title request shares the task's opener but has no tools; keyed on the opener alone it ran in
+  the task's M365 conversation, concurrently (#83). Don't add the system prompt or tool descriptions to
+  the key: those are where a harness puts per-turn text, and every change starts a new thread.
 - **A tool turn is stopped once the model's own `<tool_response>` after a call runs past 2,000 chars**
   (#65, `runBuffered` in `handler.ts`): waiting for M365 to finish let invented continuations run for
   minutes, past pi's timeout. Not at the tag itself: M365 keeps the whole message, Sonnet 4.6 seems to
@@ -316,6 +320,10 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   an empty `edits:`, which used to arrive as `edits: []` — 44 of its 47 pi `edit` calls, each a wasted
   round trip (#50). `parseYamlBlockValue` in `fenced.ts` reads the YAML subset models write; keep both
   paths. The bench can't catch a regression here (no array-typed tools), so test with real pi's `edit`.
+  Multi-line *strings* have a shape of their own: in a tool whose params are all header lines (no
+  body, no edit pair; opencode's `edit` with `oldString`/`newString`) the model writes `oldString: <first
+  line>` and the rest of the text below it, so a string value runs on to the next `key:` line (#82). A
+  tool with a body still ends its header at the first line that isn't `key:`; don't extend the run-on to it.
 - **Account degradation is THREAD-rate, not message-count** (docs/hypotheses.md §9 F13).
   Microsoft throttles *conversations started*, not messages sent — the per-conversation
   counter resets each thread. A bench that opens one fresh conversation per task burns the

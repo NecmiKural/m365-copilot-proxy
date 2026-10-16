@@ -216,7 +216,7 @@ export function executedOnlyFirstNote(fabricated: boolean, droppedCalls: number,
 const MAX_IDLE_MS = 30 * 60 * 1000; // evict after 30 min idle
 
 export class SessionPool {
-  /** Keyed by the first user message's hash. Several conversations can share
+  /** Keyed by fingerprint (first user message + tool names). Several can share
    *  one: two pi sessions opened with "merhaba", parallel subagents given one
    *  prompt, a session resumed after another started the same way. */
   private conversations = new Map<string, ConversationState[]>();
@@ -228,18 +228,20 @@ export class SessionPool {
 
   /**
    * Resolve the conversation state for an incoming request.
+   * Fingerprint is the hash of the first user message and the request's tool
+   * names — same opener and same tool set = same conversation family.
    *
    * A harness re-sends the whole history and only ever appends, so a
    * continuation carries more messages than its conversation has sent, and at
    * that position it echoes the conversation's last reply (replyKey). The echo
-   * tells apart conversations that share a first message. Without a match it
+   * tells apart conversations that share a fingerprint. Without a match it
    * falls back to the most recent one, so a client that rewrites old replies
-   * still continues (one conversation per first message works as before).
+   * still continues (one conversation per fingerprint works as before).
    */
-  resolve(messages: ParsedMessage[]): ConversationState {
+  resolve(messages: ParsedMessage[], tools?: ChatBody["tools"]): ConversationState {
     this.evictStale();
 
-    const fingerprint = this.fingerprint(messages);
+    const fingerprint = this.fingerprint(messages, tools);
     const bucket = this.conversations.get(fingerprint) ?? [];
     const candidates = bucket.filter((s) => !s.busy && messages.length > s.sentMessageCount);
     const own = candidates.find((s) => s.lastReply !== null && s.lastReply === replyKey(messages[s.sentMessageCount]))
@@ -277,10 +279,20 @@ export class SessionPool {
     return state;
   }
 
-  private fingerprint(messages: ParsedMessage[]): string {
+  // The tool names are in the key because a harness's side requests can share
+  // the session's first user message. opencode sends a title request ("You are
+  // a title generator…", no tools) 4 ms before the task (12 tools): keyed on the
+  // opener alone both went into one M365 conversation, as turns 0 and 1 run at
+  // the same time (#83). pi's and opencode's tool sets don't change within a
+  // session; one that does starts a fresh conversation with the full history,
+  // which costs a thread, not the answer. Names, not definitions: descriptions
+  // can carry per-turn text. The system prompt would separate the title request
+  // too, but it is the likelier place for a date, a time or a git status.
+  private fingerprint(messages: ParsedMessage[], tools?: ChatBody["tools"]): string {
     const firstUser = messages.find(m => m.role === "user");
     const text = firstUser ? getMessageContent(firstUser) : "";
-    return simpleHash(text);
+    const toolNames = [...new Set((tools ?? []).map(t => t.function.name))].sort().join(",");
+    return simpleHash(`${toolNames}\n${text}`);
   }
 
   private evictStale() {
@@ -386,7 +398,7 @@ export async function handleChatCompletion(
   pool: SessionPool,
   opts: { signal?: AbortSignal } = {},
 ): Promise<Response> {
-  const conv = pool.resolve(body.messages);
+  const conv = pool.resolve(body.messages, body.tools);
   const { session } = conv;
   // The harness saved a long command to a script (longCommandAsScript); run it.
   const last = body.messages[body.messages.length - 1];
