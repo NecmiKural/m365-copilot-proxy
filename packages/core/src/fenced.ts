@@ -1308,6 +1308,30 @@ function parseYamlBlockScalar(lines: string[], parentIndent: number, folded: boo
   return chomp === "-" ? text : `${text}\n`;
 }
 
+/** A header-only fence's string value that runs on over `more` lines (#82),
+ *  trailing blank lines dropped. Text after `key: ` is the first line and the
+ *  rest keep their indentation, which is the file's own. Under an empty `key:`
+ *  the lines lose the indent they share, and under `key: |` / `key: >` they
+ *  read as a YAML block scalar. */
+function headerTextValue(inline: string, more: string[]): string {
+  const rows = [...more];
+  while (rows.length && rows[rows.length - 1].trim() === "") rows.pop();
+  if (!rows.length) return inline;
+  const block = inline.match(/^([|>])([-+]?)$/);
+  if (block) {
+    try {
+      return parseYamlBlockScalar(rows, 0, block[1] === ">", block[2]);
+    } catch {
+      // not indented as a block scalar: read it like an empty `key:`
+    }
+  }
+  if (inline === "" || block) {
+    const indent = Math.min(...rows.filter((l) => l.trim() !== "").map(indentOf));
+    return rows.map((l) => l.slice(Math.min(indent, indentOf(l)))).join("\n");
+  }
+  return [inline, ...rows].join("\n");
+}
+
 /** Parse the inner text of one fenced block into an arguments object, schema-aware. */
 function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, unknown> | null {
   const lines = inner.split("\n");
@@ -1317,13 +1341,28 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
   // terminated by a blank line (consumed) or the first non-header line (kept).
   // An array- or object-typed param may instead hold an indented YAML block
   // under an empty `key:` line (#50, see parseYamlBlockValue).
+  //
+  // A tool with no body param and no edit pair is all header (opencode's `edit`:
+  // path, oldString, newString, replaceAll), so nothing else can follow a header
+  // line: a string value runs on over the lines below it, blank ones included,
+  // until the next `key:` line (#82). The model fills `oldString: <oldString>`
+  // with the text as it is in the file, its second line at the code's own
+  // indentation, and reading one line per value cut `oldString` to its first
+  // line and lost `newString` below it. Header-only fences without such lines
+  // read as before (47 of 47 pi `read` fences in the dumps).
+  const headerOnly = !spec.editPair && spec.bodyParam === undefined;
+  let open: { key: string; inline: string; more: string[] } | null = null;
+  const closeOpen = () => {
+    if (open?.more.length) args[open.key] = headerTextValue(open.inline, open.more);
+    open = null;
+  };
   let i = 0;
   if (spec.headerParams.length) {
     for (; i < lines.length; i++) {
       const line = lines[i];
-      if (line.trim() === "") { i++; break; }
       const m = line.match(/^([A-Za-z0-9_]+):[ \t]?(.*)$/);
       if (m && spec.headerParams.includes(m[1])) {
+        closeOpen();
         const key = m[1];
         const type = spec.parameterTypes[key];
         if (m[2].trim() === "" && (type === "array" || type === "object")) {
@@ -1336,10 +1375,17 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
           }
         }
         args[key] = coerceHeaderValue(m[2].trim(), type);
+        if (headerOnly && (type ?? "string") === "string") open = { key, inline: m[2].trim(), more: [] };
+      } else if (open) {
+        open.more.push(line);
+      } else if (line.trim() === "") {
+        i++;
+        break;
       } else {
         break;
       }
     }
+    closeOpen();
   }
 
   const rest = lines.slice(i).join("\n");
