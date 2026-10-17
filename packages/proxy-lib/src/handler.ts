@@ -208,12 +208,13 @@ export class SessionPool {
 
   /**
    * Resolve the conversation state for an incoming request.
-   * Fingerprint is the hash of the first user message — same first user message = same conversation.
+   * Fingerprint is the hash of the first user message and the request's tool
+   * names — same opener and same tool set = same conversation.
    */
-  resolve(messages: ParsedMessage[]): ConversationState {
+  resolve(messages: ParsedMessage[], tools?: ChatBody["tools"]): ConversationState {
     this.evictStale();
 
-    const fingerprint = this.fingerprint(messages);
+    const fingerprint = this.fingerprint(messages, tools);
     const existing = this.conversations.get(fingerprint);
 
     if (existing) {
@@ -251,10 +252,20 @@ export class SessionPool {
     return state;
   }
 
-  private fingerprint(messages: ParsedMessage[]): string {
+  // The tool names are in the key because a harness's side requests can share
+  // the session's first user message. opencode sends a title request ("You are
+  // a title generator…", no tools) 4 ms before the task (12 tools): keyed on the
+  // opener alone both went into one M365 conversation, as turns 0 and 1 run at
+  // the same time (#83). pi's and opencode's tool sets don't change within a
+  // session; one that does starts a fresh conversation with the full history,
+  // which costs a thread, not the answer. Names, not definitions: descriptions
+  // can carry per-turn text. The system prompt would separate the title request
+  // too, but it is the likelier place for a date, a time or a git status.
+  private fingerprint(messages: ParsedMessage[], tools?: ChatBody["tools"]): string {
     const firstUser = messages.find(m => m.role === "user");
     const text = firstUser ? getMessageContent(firstUser) : "";
-    return simpleHash(text);
+    const toolNames = [...new Set((tools ?? []).map(t => t.function.name))].sort().join(",");
+    return simpleHash(`${toolNames}\n${text}`);
   }
 
   private evictStale() {
@@ -345,7 +356,7 @@ export async function handleChatCompletion(
   pool: SessionPool,
   opts: { signal?: AbortSignal } = {},
 ): Promise<Response> {
-  const conv = pool.resolve(body.messages);
+  const conv = pool.resolve(body.messages, body.tools);
   const { session } = conv;
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
   const requestedModel = body.model;

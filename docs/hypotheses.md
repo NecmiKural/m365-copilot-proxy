@@ -3896,6 +3896,22 @@ but left `</parameter>` in the command. Replaying all 11 replies through the cur
 bench's tool definitions: 11 calls, no markup left in any argument. Unit tests use the replies verbatim.
 Not seen in any Sonnet or GPT sweep log.
 
+**Later: the closer glued to the last line, and a restated call (Sonnet 5.5, real pi, Oct 17).** A
+Sonnet 5.5 turn ran nothing: its reply was a ~490-character plan, a ```bash fence whose last line ended
+in `</bash>` with no newline before it, "Oops, that closing fence is wrong. Here is the same command,
+correctly formatted:", and the command again. The closer rule only matched a closer on its own line,
+and the two copies counted as two calls, so the plan made the document guard (`isProseDocument`: a
+lead-in of ≥ 200 chars, prose ≥ 300) return the reply as text. Across the frame dumps 2 of 364 fences end
+in a glued closer (`</bash>`, and a `</parameter>` on a single-call reply whose command then ran as broken
+shell); the guard fired on 3 of 437 replies, the other two genuine "run these yourself" give-ups. **Fixed:**
+a glued closer is stripped too, unless the line also opens the same tag (a file's own
+`<parameter>x</parameter>`), and a call that restates the one before it replaces it: same tool, token
+Jaccard ≥ 0.85, at most 300 chars between, and a sign it is a correction (the first copy carried native
+markup, or the gap says "oops", "wrong", "same command"…). The corrected copy runs, nothing is reported
+as dropped, and the restated pair's span covers both copies, so no speculation note follows. Replayed:
+the live reply gives 1 call, the corrected copy; over all 437 replies only that one changes (guard
+verdicts 3 → 2, the give-ups still caught).
+
 ### F58 — four throttles in one day on the premium account; a fixed "N per 30 min" doesn't fit, a per-turn bucket might 🟡
 Every fresh conversation and every turn the proxy (and the user's probes) sent on the premium account
 on 2026-10-04, against the first `Turn result: Throttled (PerUserThrottled)` of each episode:
@@ -4209,6 +4225,18 @@ real-pi Sonnet 4.6 number above carries those wasted turns, in both arms alike. 
 delta turns' `name="unknown"` label). **Fixed** (PR #51): real pi, relay, 10/10, all
 10 edits YAML and all parsed, none rejected — 5.20 turns per run vs relay's 7.16 here (12:19–12:33Z,
 account P). That is a bigger saving than batching's, and the two should stack; not yet measured together.
+
+**Side finding — opencode's `edit` loses multi-line strings (#82).** opencode's `edit` takes `path`,
+`oldString`, `newString`, `replaceAll`: no body param, and camelCase names that aren't in `SEARCH_KEYS`, so
+all four are header lines (`oldString: <oldString>`). Sonnet 5 fills that in with the text as it is in the
+file, its later lines at the code's own indentation. The parser read one line per value and ended the
+header at the first non-`key:` line, so the call reached opencode as `{"path", "oldString": "<first
+line>"}`, with no `newString` (2 of 2 opencode sessions on Oct 16, 2 or 3 wasted turns each). **Fixed:** in a
+header-only tool a string value runs on to the next `key:` line, blank lines included, trailing ones
+dropped; `key: |` reads as a block scalar. Before relying on that, the dumps were checked for stray lines
+in header-only fences, which the run-on would now glue onto a value: 47 of 47 pi `read` fences had none.
+Live (opencode 2.0.30, `claude-sonnet-5`, premium account): a four-line `oldString` written in exactly
+that shape arrived whole and the edit applied on the first try.
 
 ### F63 — real pi on the premium account: GPT-6 batches cleanly, Sonnet 5 doesn't save turns → the decision 🟢
 Paced runs (`M365_AVOID_THROTTLING=1`), 11:00–11:56Z, confab retry off, no throttled or Disengaged run.
@@ -5019,6 +5047,19 @@ gone. The fresh-conversation path fired on 18 of 20 runs (every repeat of a prom
 referred to an earlier run (5 of 30 before). 7 of the 17 passes were rescued by the forcing retry
 (F80/F81), so the give-up reflex is still there; the retry is carrying it. The 3 failures: one
 mid-task give-up after 2 tool calls, two turn-1 refusals.
+
+**The key needs the tool names too (#83, Oct 16).** opencode 2.0.30 opens a session with two requests
+4 ms apart that share the first user message: a title request ("You are a title generator…", no tools)
+and the task (12 tools). Keyed on the opener alone, both resolved to one `ConversationState` and ran in one
+M365 conversation at the same time, the title prompt as turn 0 and the task as turn 1 (2 of 3 opencode
+sessions; in the third the pair shared the state too, but each request rotated it to a fresh conversation
+because the session switched model, the task's while the title turn was still running). A fake OpenAI server showed that neither pi (4 tools) nor opencode's task thread changes its
+tool names or system prompt between turns, so the key is now the opener plus the sorted tool names. Names,
+not definitions, because a description can carry per-turn text; the system prompt was left out for the
+same reason. A session that changes its tool set starts a fresh conversation with the full history: one
+more thread, but no wrong answer. **Live** (opencode, `claude-sonnet-5`, premium account): the title request
+went into its own conversation and the task into another, and the task's 3 follow-up turns went into
+the task's conversation in delta mode.
 
 ---
 

@@ -36,7 +36,9 @@ const scripted: {
 
 vi.mock("@m365-copilot/core", async (importActual) => {
   const actual = await importActual<typeof import("@m365-copilot/core")>();
+  let sessionsMade = 0;
   class FakeModelSession {
+    readonly uid = ++sessionsMade;
     turnCount = 0;
     conversationId = "conv-test";
     reset() {}
@@ -52,6 +54,7 @@ vi.mock("@m365-copilot/core", async (importActual) => {
       scripted.runs++;
       scripted.texts.push(text);
       scripted.agentFlags.push(useAgent);
+      servedBy.push(this.uid);
       const next = scripted.queue.shift();
       const deltas = next ? (next.fullText ? [next.fullText] : []) : scripted.deltas;
       const full = next ? next.fullText : (scripted.fullText ?? deltas.join(""));
@@ -90,6 +93,9 @@ vi.mock("@m365-copilot/core", async (importActual) => {
   }
   return { ...actual, ModelSession: FakeModelSession, awaitTurnBudget };
 });
+
+/** Which fake ModelSession (by creation order) served every run() call, in order. */
+const servedBy: number[] = [];
 
 const { handleChatCompletion, SessionPool, ChatCompletionRequest } = await import("./index.js");
 const { resetAgentRoutes, resetPriorityAccessState, TurnBudgetHold } = await import("@m365-copilot/core");
@@ -378,6 +384,33 @@ describe("a reply that opens with a tool call and then writes an essay", () => {
     await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet", stream: false, tools, messages }), pool);
     expect(scripted.texts[1]).toContain("was written before its result existed");
     expect(scripted.texts[1]).toContain('{"port": 3000}');
+    scripted.queue = [];
+  });
+});
+
+describe("a reply that restates its call as a correction (Sonnet 5.5)", () => {
+  it("runs the corrected copy and doesn't tell the model its correction was dropped", async () => {
+    const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+    const plan = "The logs are plain text, so the viewer can read them once they are renamed. Two of the files are empty "
+      + "and can go. Next I'll rename the rest to `.log`, delete the two empty ones, and point the index page at the "
+      + "local copies, keeping a backup of the page first so the change is easy to undo if anything looks wrong.";
+    const cmd = (grep: string) => `cd /tmp/proj && rm logs/a.txt && for f in logs/*.txt; do mv "$f" "\${f%.txt}.log"; done && ls logs; grep -n '${grep}' index.html`;
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: `${plan}\n\n\`\`\`bash\n${cmd("href\\|src")}</bash>\n\`\`\`\n\nOops, that closing fence is wrong. Here is the same command, correctly formatted:\n\n\`\`\`bash\n${cmd("href")}\n\`\`\`` },
+      { fullText: "Done." },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `rename the logs ${Math.random()}` }];
+    const r1 = await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5.5", stream: false, tools, messages }), pool)).json();
+    const calls = r1.choices[0].message.tool_calls;
+    expect(calls).toHaveLength(1); // the document guard used to return the whole reply as text
+    expect(JSON.parse(calls[0].function.arguments).command).toBe(cmd("href"));
+    messages.push({ role: "assistant", content: null, tool_calls: calls });
+    messages.push({ role: "tool", tool_call_id: calls[0].id, content: "c.log" });
+    await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5.5", stream: false, tools, messages }), pool);
+    expect(scripted.texts[1]).not.toContain("(Note:");
     scripted.queue = [];
   });
 });
@@ -804,6 +837,70 @@ describe("a new harness session that shares the first user message", () => {
     await ask(msgs, pool);
     expect(scripted.newConversations).toBe(0);
     expect(scripted.texts[1]).toContain('<tool_response tool="bash"'); // a delta
+    scripted.queue = [];
+  });
+});
+
+describe("a side request that shares the session's first user message (#83)", () => {
+  const tools = [
+    { type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } },
+    { type: "function", function: { name: "read", parameters: { type: "object", properties: { path: { type: "string" } } } } },
+  ];
+  const post = (pool: InstanceType<typeof SessionPool>, messages: any[], withTools?: unknown[]) =>
+    handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5", stream: false, ...(withTools ? { tools: withTools } : {}), messages }), pool);
+
+  it("puts opencode's title request in a conversation of its own, though it arrives with the task", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    servedBy.length = 0;
+    scripted.newConversations = 0;
+    scripted.queue = [{ fullText: "Fix calc bug" }, { fullText: "```bash\nls\n```" }, { fullText: "Done." }];
+    const pool = new SessionPool();
+    const opener = { role: "user", content: `calc.py prints the wrong result ${Math.random()}` };
+    // Like opencode: the title request (no tools) and the task (tools), at the same time.
+    const [, task] = await Promise.all([
+      post(pool, [{ role: "system", content: "You are a title generator. You output ONLY a thread title." }, opener]),
+      post(pool, [{ role: "system", content: "You are an AI agent running in OpenCode." }, opener], tools),
+    ]);
+    expect(pool.size).toBe(2);
+    expect(servedBy[0]).not.toBe(servedBy[1]);
+    const call = (await task.json()).choices[0].message.tool_calls[0];
+    // The task's next turn continues the task's conversation, as a delta.
+    await post(pool, [
+      { role: "system", content: "You are an AI agent running in OpenCode." }, opener,
+      { role: "assistant", content: null, tool_calls: [call] },
+      { role: "tool", tool_call_id: call.id, content: "calc.py" },
+    ], tools);
+    expect(servedBy[2]).toBe(servedBy[1]);
+    expect(scripted.texts[2]).toContain('<tool_response tool="bash"');
+    expect(scripted.newConversations).toBe(0);
+    scripted.queue = [];
+  });
+
+  it("keys on the tool names, not their order or descriptions", async () => {
+    scripted.result = null;
+    servedBy.length = 0;
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }];
+    const pool = new SessionPool();
+    const opener = { role: "user", content: `list it ${Math.random()}` };
+    const call = (await (await post(pool, [opener], tools)).json()).choices[0].message.tool_calls[0];
+    const reordered = [{ ...tools[1], function: { ...tools[1].function, description: "Read a file (cwd: /tmp/x)" } }, tools[0]];
+    await post(pool, [opener, { role: "assistant", content: null, tool_calls: [call] }, { role: "tool", tool_call_id: call.id, content: "a.txt" }], reordered);
+    expect(pool.size).toBe(1);
+    expect(servedBy[1]).toBe(servedBy[0]);
+    scripted.queue = [];
+  });
+
+  it("sends the whole history when a session changes its tool set", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: "```bash\nls\n```" }, { fullText: "Done." }];
+    const pool = new SessionPool();
+    const opener = { role: "user", content: `look ${Math.random()}` };
+    const call = (await (await post(pool, [opener], [tools[0]])).json()).choices[0].message.tool_calls[0];
+    await post(pool, [opener, { role: "assistant", content: null, tool_calls: [call] }, { role: "tool", tool_call_id: call.id, content: "a.txt" }], tools);
+    expect(pool.size).toBe(2);
+    expect(scripted.texts[1]).toContain(opener.content); // the full prompt, not a delta into a fresh conversation
     scripted.queue = [];
   });
 });
