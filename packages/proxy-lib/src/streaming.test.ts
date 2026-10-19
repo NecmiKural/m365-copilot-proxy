@@ -32,10 +32,12 @@ const scripted: {
   convs: string[];
   ids: number;
   /** What awaitTurnBudget (M365_AVOID_THROTTLING) throws before every turn, or null to let it through. */
-  paceHold: Error | null;
+  budgetHold: Error | null;
   /** The options of every awaitTurnBudget call, in order. */
-  paceCalls: Array<{ maxWaitMs?: number; signal?: AbortSignal }>;
-} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, models: [], images: [], gate: null, signals: [], stoppedAfter: null, paceHold: null, paceCalls: [], convs: [], ids: 0 };
+  awaitTurnBudgetCalls: Array<{ maxWaitMs?: number; signal?: AbortSignal }>;
+  /** The `waitForBudget` argument of every run() call, in order (one function per call). */
+  budgetWaits: Array<(() => Promise<unknown>) | undefined>;
+} = { deltas: [], runs: 0, texts: [], queue: [], agentFlags: [], newConversations: 0, models: [], images: [], gate: null, signals: [], stoppedAfter: null, budgetHold: null, awaitTurnBudgetCalls: [], budgetWaits: [], convs: [], ids: 0 };
 
 vi.mock("@m365-copilot/core", async (importActual) => {
   const actual = await importActual<typeof import("@m365-copilot/core")>();
@@ -47,8 +49,9 @@ vi.mock("@m365-copilot/core", async (importActual) => {
     reset() {}
     newConversation() { this.conversationId = `conv-${++scripted.ids}`; this.turnCount = 0; scripted.newConversations++; }
     async refreshAgent() { return false; }
-    async run(text: string, model?: string, signal?: AbortSignal, useAgent?: boolean, images: string[] = []) {
+    async run(text: string, model?: string, signal?: AbortSignal, useAgent?: boolean, images: string[] = [], waitForBudget?: () => Promise<unknown>) {
       if (scripted.gate) await scripted.gate;
+      scripted.budgetWaits.push(waitForBudget);
       scripted.models.push(model ?? "");
       scripted.images.push(images);
       scripted.signals.push(signal);
@@ -91,8 +94,8 @@ vi.mock("@m365-copilot/core", async (importActual) => {
   }
   // awaitTurnBudget reads the account's real logs; script its verdict instead.
   async function awaitTurnBudget(opts: { maxWaitMs?: number; signal?: AbortSignal } = {}) {
-    scripted.paceCalls.push(opts);
-    if (scripted.paceHold) throw scripted.paceHold;
+    scripted.awaitTurnBudgetCalls.push(opts);
+    if (scripted.budgetHold) throw scripted.budgetHold;
     return { waitedMs: 0 };
   }
   return { ...actual, ModelSession: FakeModelSession, awaitTurnBudget };
@@ -386,6 +389,33 @@ describe("a reply that opens with a tool call and then writes an essay", () => {
   });
 });
 
+describe("a reply that restates its call as a correction (Sonnet 5.5)", () => {
+  it("runs the corrected copy and doesn't tell the model its correction was dropped", async () => {
+    const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+    const plan = "The logs are plain text, so the viewer can read them once they are renamed. Two of the files are empty "
+      + "and can go. Next I'll rename the rest to `.log`, delete the two empty ones, and point the index page at the "
+      + "local copies, keeping a backup of the page first so the change is easy to undo if anything looks wrong.";
+    const cmd = (grep: string) => `cd /tmp/proj && rm logs/a.txt && for f in logs/*.txt; do mv "$f" "\${f%.txt}.log"; done && ls logs; grep -n '${grep}' index.html`;
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: `${plan}\n\n\`\`\`bash\n${cmd("href\\|src")}</bash>\n\`\`\`\n\nOops, that closing fence is wrong. Here is the same command, correctly formatted:\n\n\`\`\`bash\n${cmd("href")}\n\`\`\`` },
+      { fullText: "Done." },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `rename the logs ${Math.random()}` }];
+    const r1 = await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5.5", stream: false, tools, messages }), pool)).json();
+    const calls = r1.choices[0].message.tool_calls;
+    expect(calls).toHaveLength(1); // the document guard used to return the whole reply as text
+    expect(JSON.parse(calls[0].function.arguments).command).toBe(cmd("href"));
+    messages.push({ role: "assistant", content: null, tool_calls: calls });
+    messages.push({ role: "tool", tool_call_id: calls[0].id, content: "c.log" });
+    await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5.5", stream: false, tools, messages }), pool);
+    expect(scripted.texts[1]).not.toContain("(Note:");
+    scripted.queue = [];
+  });
+});
+
 describe("an explicitly Throttled turn (result.value = Throttled)", () => {
   // Verbatim from the Sep 28 dumps: no content frames, only this final result.
   const THROTTLED = {
@@ -430,10 +460,10 @@ describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for"
   it("answers 429 with Retry-After and never sends the turn", async () => {
     scripted.result = null;
     scripted.runs = 0;
-    scripted.paceHold = hold();
+    scripted.budgetHold = hold();
     const body = ChatCompletionRequest.parse({ model: "claude-sonnet", stream: false, messages: [{ role: "user", content: "held" }] });
     const res = await handleChatCompletion(body, new SessionPool());
-    scripted.paceHold = null;
+    scripted.budgetHold = null;
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe(String(65 * 60));
     const err = (await res.json()).error;
@@ -445,9 +475,9 @@ describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for"
 
   it("carries the code and retry_after through the streaming path", async () => {
     scripted.runs = 0;
-    scripted.paceHold = new TurnBudgetHold("refill", 20 * 60_000, null);
+    scripted.budgetHold = new TurnBudgetHold("refill", 20 * 60_000, null);
     const { contents, errors } = await streamRaw([], "");
-    scripted.paceHold = null;
+    scripted.budgetHold = null;
     expect(contents).toHaveLength(0);
     expect(errors).toHaveLength(1);
     expect(errors[0].code).toBe("m365_turn_budget");
@@ -458,17 +488,17 @@ describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for"
   it("lets a streamed request wait as long as configured, an unstreamed one 2 min, and passes the client's signal", async () => {
     scripted.result = null;
     scripted.queue = [];
-    scripted.paceCalls = [];
+    scripted.awaitTurnBudgetCalls = [];
     await streamContents(["hi"]);
     const ac = new AbortController();
     const body = ChatCompletionRequest.parse({ model: "m365-copilot", stream: false, messages: [{ role: "user", content: "hi" }] });
     await handleChatCompletion(body, new SessionPool(), { signal: ac.signal });
-    expect(scripted.paceCalls.map((c) => c.maxWaitMs)).toEqual([undefined, 2 * 60_000]);
-    expect(scripted.paceCalls[1]!.signal).toBe(ac.signal);
+    expect(scripted.awaitTurnBudgetCalls.map((c) => c.maxWaitMs)).toEqual([undefined, 2 * 60_000]);
+    expect(scripted.awaitTurnBudgetCalls[1]!.signal).toBe(ac.signal);
   });
 
   it("makes the forcing retry wait for the budget too: every upstream turn goes through awaitTurnBudget", async () => {
-    scripted.paceCalls = [];
+    scripted.awaitTurnBudgetCalls = [];
     scripted.runs = 0;
     scripted.queue = [
       { fullText: "I can't access your files from here. Please paste the contents of calc.py." },
@@ -479,8 +509,24 @@ describe("M365_AVOID_THROTTLING holds a turn it would have to wait too long for"
     const res = await handleChatCompletion(body, new SessionPool());
     expect(res.status).toBe(200);
     expect(scripted.runs).toBe(2);
-    expect(scripted.paceCalls).toHaveLength(2);
+    expect(scripted.awaitTurnBudgetCalls).toHaveLength(2);
     scripted.queue = [];
+  });
+
+  it("hands run() the same wait for its reconnect's turn (#77)", async () => {
+    scripted.result = null;
+    scripted.queue = [];
+    scripted.awaitTurnBudgetCalls = [];
+    scripted.budgetWaits = [];
+    const ac = new AbortController();
+    const body = ChatCompletionRequest.parse({ model: "claude-sonnet", stream: false, messages: [{ role: "user", content: "hi" }] });
+    await handleChatCompletion(body, new SessionPool(), { signal: ac.signal });
+    expect(scripted.budgetWaits).toHaveLength(1);
+    await scripted.budgetWaits[0]!(); // what run() does before it reconnects
+    expect(scripted.awaitTurnBudgetCalls).toHaveLength(2);
+    expect(scripted.awaitTurnBudgetCalls[1]).toEqual(scripted.awaitTurnBudgetCalls[0]);
+    expect(scripted.awaitTurnBudgetCalls[1]!.maxWaitMs).toBe(2 * 60_000);
+    expect(scripted.awaitTurnBudgetCalls[1]!.signal).toBe(ac.signal);
   });
 });
 

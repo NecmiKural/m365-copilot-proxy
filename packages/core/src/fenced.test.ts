@@ -245,6 +245,22 @@ describe("native call closer leaking into a fence (Opus)", () => {
     return { calls, leftover, args: calls[0] ? JSON.parse(calls[0].function.arguments) : null };
   }
 
+  it("strips a closer glued to the command's last line (Sonnet 5.5: `…</bash>`)", () => {
+    const { args } = argsOf("```bash\ncd /tmp/proj && ls logs</bash>\n```");
+    expect(args).toEqual({ command: "cd /tmp/proj && ls logs" });
+  });
+
+  it("strips a glued </parameter>, with native lines after it", () => {
+    const { args } = argsOf("```bash\ngit diff --stat | sort -u</parameter>\n</invoke>\n```");
+    expect(args).toEqual({ command: "git diff --stat | sort -u" });
+  });
+
+  it("keeps a last line that is the file's own balanced markup", () => {
+    const xml = "<config>\n<parameter>x</parameter>";
+    const { args } = argsOf(`\`\`\`write_file\npath: a.xml\n\n${xml}\n\`\`\``);
+    expect(args).toEqual({ path: "a.xml", content: xml });
+  });
+
   it("keeps </invoke> out of the file when the fence is closed too", () => {
     const { args } = argsOf(`\`\`\`write_file\npath: count.sh\n\n${SCRIPT}\n</invoke>\n\`\`\``);
     expect(args).toEqual({ path: "count.sh", content: SCRIPT });
