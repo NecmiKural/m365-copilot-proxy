@@ -224,7 +224,7 @@ pnpm test:live      # M365_LIVE=1; live tests that hit real M365 (uses quota)
   so rank framings by Disengaged turns and turns per task, not the solve rate — the `<system>`-tagged
   ones tripped the jailbreak classifier on a third of tasks (§24 F56), and relay_batch's "put as much
   as you can into one block" cut turns per task 37% (F60), which is what Opus 5.5's budget counts. Opus 4.5 sometimes ended a tool fence with its native call
-  markup (`</invoke>`, `</parameter>`…); the parser strips it (F57), don't "simplify" that away. Only a premium account can
+  markup (`</invoke>`, `</parameter>`…); the parser strips it (F57), on its own line or glued to the last one (Sonnet 5.5 too), don't "simplify" that away. A call the model writes again as a correction ("Oops… here is the same command") replaces the first copy rather than counting as two. Only a premium account can
   bench it. See docs/hypotheses.md §24, §36.
 - **Entitlement-gated ≠ metered.** `gpt-6-think-deeper` (`Gpt_6_Reasoning`) and `claude-sonnet-5`
   (`Claude_Sonnet_5`) need the same paid

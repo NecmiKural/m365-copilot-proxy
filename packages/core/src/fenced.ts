@@ -1160,10 +1160,30 @@ function nativeCloserRegex(name: string): RegExp {
   );
 }
 
+// The closer can also come glued to the end of the last line, with no newline
+// before it: `…index.html</bash>`, `… | sort -u</parameter>` (2 of 364
+// fences in the frame dumps, Sonnet 5.5 among them). Left in, it is the
+// command's last word, and bash reads `</bash>` as a redirect: a syntax error.
+// A line that also opens the same tag is a file's own markup
+// (`<parameter>x</parameter>`), so it is kept.
+function gluedNativeCloserRegex(name: string): RegExp {
+  return new RegExp(
+    String.raw`(?<=\S)[ \t]*<\/(invoke|function_calls|parameter|${escapeRegExp(name)})>[ \t]*(?:\r?\n${NATIVE_TRAILER_LINE})*\s*$`,
+    "u",
+  );
+}
+
 /** The fence body without a trailing native-call closer line, or null if it has none. */
 function stripNativeCloser(inner: string, name: string): string | null {
   const m = nativeCloserRegex(name).exec(inner);
-  return m ? inner.slice(0, m.index) : null;
+  const rest = m ? inner.slice(0, m.index) : inner;
+  // A glued closer can also come before closer lines (`…</parameter>` then `</invoke>`).
+  const g = gluedNativeCloserRegex(name).exec(rest);
+  if (g) {
+    const line = rest.slice(rest.lastIndexOf("\n", g.index) + 1, g.index);
+    if (!new RegExp(String.raw`<${escapeRegExp(g[1])}\b`).test(line)) return rest.slice(0, g.index);
+  }
+  return m ? rest : null;
 }
 
 /** The top-level fence left open at the end of the text, as a tool call, when
@@ -1178,14 +1198,9 @@ function unclosedToolCall(
   const u = scan.unclosed;
   const spec = u && resolveSpec(specs, u.info);
   if (!u || !spec) return null;
-  const inner = stripNativeCloser(u.inner, u.info);
+  const inner = stripNativeCloser(u.inner, spec.name);
   if (inner === null) return null;
   return { start: u.start, end: textLength, spec, inner };
-}
-
-/** A closed fence's body, minus a trailing native-call closer line. */
-function fenceInner(name: string, raw: string): string {
-  return stripNativeCloser(raw, name) ?? raw;
 }
 
 function makeCall(name: string, args: Record<string, unknown>): ParsedToolCall {
@@ -1514,6 +1529,70 @@ export interface FencedParseResult {
   leftover: string;
 }
 
+// A model that notices its own call came out malformed sometimes writes it
+// again in the same reply: "Oops, that closing fence is wrong. Here is the same
+// command, correctly formatted:" and the command once more (Sonnet 5.5, with a
+// glued `</bash>` on the first copy). Counted as two calls, the reply's long
+// lead-in made the document guard return it all as text and nothing ran; and
+// without the guard, one-call-per-turn would have run the first copy and told
+// the model its correction never ran. A restatement replaces the call before
+// it: same tool, nearly the same arguments (token Jaccard ≥ 0.85), a short gap
+// between them, and a sign it is a correction (the first copy carried native
+// markup, or the gap says so). Different commands, or the same one without
+// such a sign, stay two calls.
+const RESTATED_SIMILARITY = 0.85;
+const RESTATEMENT_GAP_CHARS = 300;
+const CORRECTION_WORDS = /\b(?:oops|sorry|apolog\w*|mistake|typo|wrong|malformed|broken|incorrect\w*|corrected|correctly|fixed|same command|re-?formatted|properly formatted|try(?:ing)? again|let me redo)\b/i;
+
+interface ToolFence {
+  start: number;
+  end: number;
+  name: string;
+  args: Record<string, unknown>;
+  /** The body ended in native-call markup, which was stripped. */
+  hadNativeCloser: boolean;
+}
+
+function argTokens(args: Record<string, unknown>): Set<string> {
+  const text = Object.values(args).map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(" ");
+  return new Set(text.split(/\s+/).filter(Boolean));
+}
+
+function restates(prev: ToolFence, next: ToolFence, gap: string): boolean {
+  if (prev.name !== next.name || gap.trim().length > RESTATEMENT_GAP_CHARS) return false;
+  if (!prev.hadNativeCloser && !CORRECTION_WORDS.test(gap)) return false;
+  const a = argTokens(prev.args);
+  const b = argTokens(next.args);
+  const shared = [...a].filter((t) => b.has(t)).length;
+  return shared / Math.max(1, new Set([...a, ...b]).size) >= RESTATED_SIMILARITY;
+}
+
+/** The closed tool fences in `text`, in order, a restated call replacing the
+ *  one it corrects (its span then covers both copies and the gap). */
+function toolFences(
+  text: string,
+  specs: Map<string, FencedToolSpec>,
+  scan = scanFences(text, (info) => resolveSpec(specs, info) !== undefined),
+): ToolFence[] {
+  const fences: ToolFence[] = [];
+  for (const block of scan.blocks) {
+    const spec = resolveSpec(specs, block.info);
+    if (!spec) continue; // ```python illustration etc. — not a tool, leave in prose
+    const stripped = stripNativeCloser(block.inner, spec.name);
+    const args = parseFencedInner(spec, stripped ?? block.inner);
+    if (!args) continue;
+    const fence: ToolFence = { start: block.start, end: block.end, name: spec.name, args, hadNativeCloser: stripped !== null };
+    const prev = fences[fences.length - 1];
+    if (prev && restates(prev, fence, text.slice(prev.end, fence.start))) {
+      log.info(`Restated ${spec.name} call: running the corrected copy, not the first`);
+      fences[fences.length - 1] = { ...fence, start: prev.start };
+      continue;
+    }
+    fences.push(fence);
+  }
+  return fences;
+}
+
 /** Parse all fenced tool calls whose info-string matches a known tool name. */
 export function parseFencedToolCalls(
   text: string,
@@ -1523,13 +1602,9 @@ export function parseFencedToolCalls(
   let leftover = text;
   const scan = scanFences(text, (info) => resolveSpec(specs, info) !== undefined);
 
-  for (const block of scan.blocks) {
-    const spec = resolveSpec(specs, block.info);
-    if (!spec) continue; // ```python illustration etc. — not a tool, leave in prose
-    const args = parseFencedInner(spec, fenceInner(block.info, block.inner));
-    if (!args) continue;
-    calls.push(makeCall(spec.name, args));
-    leftover = leftover.replace(text.slice(block.start, block.end), "");
+  for (const fence of toolFences(text, specs, scan)) {
+    calls.push(makeCall(fence.name, fence.args));
+    leftover = leftover.replace(text.slice(fence.start, fence.end), "");
   }
 
   if (calls.length === 0) {
@@ -1545,16 +1620,16 @@ export function parseFencedToolCalls(
 }
 
 /** Where the first fence that parses as a real tool call starts and ends —
- *  the same acceptance rule as parseFencedToolCalls — or null if there is none. */
+ *  the same acceptance rule as parseFencedToolCalls — or null if there is none.
+ *  A restated call spans both copies, so the text after it is what follows the
+ *  corrected one. */
 export function findFirstToolFence(
   text: string,
   specs: Map<string, FencedToolSpec>,
 ): { start: number; end: number } | null {
   const scan = scanFences(text, (info) => resolveSpec(specs, info) !== undefined);
-  for (const block of scan.blocks) {
-    const spec = resolveSpec(specs, block.info);
-    if (spec && parseFencedInner(spec, fenceInner(block.info, block.inner))) return { start: block.start, end: block.end };
-  }
+  const first = toolFences(text, specs, scan)[0];
+  if (first) return { start: first.start, end: first.end };
   const open = unclosedToolCall(scan, specs, text.length);
   if (open && parseFencedInner(open.spec, open.inner)) return { start: open.start, end: open.end };
   return null;
@@ -1580,7 +1655,8 @@ export function unreadableToolFence(
   for (const block of scan.blocks) {
     const spec = resolveSpec(specs, block.info);
     if (!spec) continue;
-    if (parseFencedInner(spec, fenceInner(block.info, block.inner))) return null;
+    const stripped = stripNativeCloser(block.inner, spec.name);
+    if (parseFencedInner(spec, stripped ?? block.inner)) return null;
     found ??= { name: block.info, reason: spec.editPair ? "its SEARCH/REPLACE markers are missing" : "it could not be read" };
   }
   const open = unclosedToolCall(scan, specs, text.length);

@@ -3902,6 +3902,22 @@ but left `</parameter>` in the command. Replaying all 11 replies through the cur
 bench's tool definitions: 11 calls, no markup left in any argument. Unit tests use the replies verbatim.
 Not seen in any Sonnet or GPT sweep log.
 
+**Later: the closer glued to the last line, and a restated call (Sonnet 5.5, real pi, Oct 17).** A
+Sonnet 5.5 turn ran nothing: its reply was a ~490-character plan, a ```bash fence whose last line ended
+in `</bash>` with no newline before it, "Oops, that closing fence is wrong. Here is the same command,
+correctly formatted:", and the command again. The closer rule only matched a closer on its own line,
+and the two copies counted as two calls, so the plan made the document guard (`isProseDocument`: a
+lead-in of ≥ 200 chars, prose ≥ 300) return the reply as text. Across the frame dumps 2 of 364 fences end
+in a glued closer (`</bash>`, and a `</parameter>` on a single-call reply whose command then ran as broken
+shell); the guard fired on 3 of 437 replies, the other two genuine "run these yourself" give-ups. **Fixed:**
+a glued closer is stripped too, unless the line also opens the same tag (a file's own
+`<parameter>x</parameter>`), and a call that restates the one before it replaces it: same tool, token
+Jaccard ≥ 0.85, at most 300 chars between, and a sign it is a correction (the first copy carried native
+markup, or the gap says "oops", "wrong", "same command"…). The corrected copy runs, nothing is reported
+as dropped, and the restated pair's span covers both copies, so no speculation note follows. Replayed:
+the live reply gives 1 call, the corrected copy; over all 437 replies only that one changes (guard
+verdicts 3 → 2, the give-ups still caught).
+
 ### F58 — four throttles in one day on the premium account; a fixed "N per 30 min" doesn't fit, a per-turn bucket might 🟡
 Every fresh conversation and every turn the proxy (and the user's probes) sent on the premium account
 on 2026-10-04, against the first `Turn result: Throttled (PerUserThrottled)` of each episode:

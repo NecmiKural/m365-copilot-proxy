@@ -431,6 +431,33 @@ describe("a reply that opens with a tool call and then writes an essay", () => {
   });
 });
 
+describe("a reply that restates its call as a correction (Sonnet 5.5)", () => {
+  it("runs the corrected copy and doesn't tell the model its correction was dropped", async () => {
+    const tools = [{ type: "function", function: { name: "bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
+    const plan = "The logs are plain text, so the viewer can read them once they are renamed. Two of the files are empty "
+      + "and can go. Next I'll rename the rest to `.log`, delete the two empty ones, and point the index page at the "
+      + "local copies, keeping a backup of the page first so the change is easy to undo if anything looks wrong.";
+    const cmd = (grep: string) => `cd /tmp/proj && rm logs/a.txt && for f in logs/*.txt; do mv "$f" "\${f%.txt}.log"; done && ls logs; grep -n '${grep}' index.html`;
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: `${plan}\n\n\`\`\`bash\n${cmd("href\\|src")}</bash>\n\`\`\`\n\nOops, that closing fence is wrong. Here is the same command, correctly formatted:\n\n\`\`\`bash\n${cmd("href")}\n\`\`\`` },
+      { fullText: "Done." },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `rename the logs ${Math.random()}` }];
+    const r1 = await (await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5.5", stream: false, tools, messages }), pool)).json();
+    const calls = r1.choices[0].message.tool_calls;
+    expect(calls).toHaveLength(1); // the document guard used to return the whole reply as text
+    expect(JSON.parse(calls[0].function.arguments).command).toBe(cmd("href"));
+    messages.push({ role: "assistant", content: null, tool_calls: calls });
+    messages.push({ role: "tool", tool_call_id: calls[0].id, content: "c.log" });
+    await handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet-5.5", stream: false, tools, messages }), pool);
+    expect(scripted.texts[1]).not.toContain("(Note:");
+    scripted.queue = [];
+  });
+});
+
 describe("an explicitly Throttled turn (result.value = Throttled)", () => {
   // Verbatim from the Sep 28 dumps: no content frames, only this final result.
   const THROTTLED = {
