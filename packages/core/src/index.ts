@@ -147,7 +147,7 @@ export {
   replay,
   decide,
   budgetStatus,
-  paceStatus,
+  proxyBudgetStatus,
   awaitTurnBudget,
   recordTurn,
   recordThrottle,
