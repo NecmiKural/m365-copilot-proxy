@@ -150,6 +150,11 @@ Review relevant implementations for reusable ideas, considering licence,
 protocol, authentication, streaming, tools, usage, retries, and Windows
 behaviour.
 
+Watch-list:
+
+- https://github.com/AlenPelin/m365-copilot-proxy — fork that builds on Necmi's
+  upstream PRs (#70/#71/#78); watch-list, review later.
+
 ### Phase 6: Maintenance candidates
 
 Track the two known Windows upstream test failures, Windows phase-sweep
