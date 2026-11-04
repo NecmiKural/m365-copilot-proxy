@@ -1150,6 +1150,36 @@ describe("Hermes terminal argument compatibility", () => {
     });
   });
 
+  it("preserves text when string is an allowed union alternative", () => {
+    const mixedTerminal: ToolDef = {
+      type: "function",
+      function: {
+        name: "terminal",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string" },
+            mode: {
+              type: "string",
+              anyOf: [{ type: "integer" }],
+            },
+          },
+          required: ["command"],
+        },
+      },
+    };
+    const mixedSpecs = buildSpecMap([mixedTerminal]);
+    const { calls } = parseFencedToolCalls(
+      "```terminal\nmode: 42\n\nprintf ok\n```",
+      mixedSpecs,
+    );
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0].function.arguments)).toEqual({
+      mode: "42",
+      command: "printf ok",
+    });
+  });
+
 });
 
 describe("multi-line string values in a header-only fence (#82)", () => {

@@ -1231,6 +1231,11 @@ const TRUE_WORDS = new Set(["true", "yes", "y", "1", "on"]);
 const FALSE_WORDS = new Set(["false", "no", "n", "0", "off"]);
 
 function coerceHeaderValue(value: string, declaredTypes: string[] | undefined): unknown {
+  // Header input is already text. If string is an allowed alternative,
+  // preserving it avoids coercing an ambiguous value such as "42" through a
+  // later numeric union branch.
+  if (declaredTypes?.includes("string")) return value;
+
   for (const declaredType of declaredTypes ?? []) {
     const coerced = coerceHeaderValueAs(value, declaredType);
     if (coerced !== value) return coerced;
