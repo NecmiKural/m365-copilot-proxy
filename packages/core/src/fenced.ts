@@ -204,8 +204,8 @@ export function findShellTool(tools: ToolDef[]): ToolDef | undefined {
 export interface FencedToolSpec {
   name: string;
   description?: string;
-  /** Declared JSON-Schema `type` per param, for coercing header values. */
-  parameterTypes: Record<string, string>;
+  /** Declared JSON-Schema types per param, including anyOf/oneOf alternatives. */
+  parameterTypes: Record<string, string[]>;
   /** Scalar params rendered as `key: value` header lines. */
   headerParams: string[];
   /** The free-form param carried as the fence body (mutually exclusive with editPair). */
@@ -222,10 +222,13 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
   const props = Object.keys(propsSchema);
 
   const parameterTypes = Object.fromEntries(
-    Object.entries(propsSchema).map(([k, v]: any) => [
-      k,
-      v?.type ?? "string",
-    ]),
+    Object.entries(propsSchema).map(([k, v]: any) => {
+      const direct = typeof v?.type === "string" ? [v.type] : [];
+      const alternatives = [...(v?.anyOf ?? []), ...(v?.oneOf ?? [])]
+        .map((option: any) => option?.type)
+        .filter((type: unknown): type is string => typeof type === "string");
+      return [k, [...new Set([...direct, ...alternatives])]];
+    }),
   );
 
   const search = props.find((p) => SEARCH_KEYS.includes(p));
@@ -1227,7 +1230,15 @@ function makeCall(name: string, args: Record<string, unknown>): ParsedToolCall {
 const TRUE_WORDS = new Set(["true", "yes", "y", "1", "on"]);
 const FALSE_WORDS = new Set(["false", "no", "n", "0", "off"]);
 
-function coerceHeaderValue(value: string, declaredType: string | undefined): unknown {
+function coerceHeaderValue(value: string, declaredTypes: string[] | undefined): unknown {
+  for (const declaredType of declaredTypes ?? []) {
+    const coerced = coerceHeaderValueAs(value, declaredType);
+    if (coerced !== value) return coerced;
+  }
+  return value;
+}
+
+function coerceHeaderValueAs(value: string, declaredType: string): unknown {
   switch (declaredType) {
     case "boolean": {
       const v = value.toLowerCase();
@@ -1482,18 +1493,19 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
       if (m && spec.headerParams.includes(m[1])) {
         closeOpen();
         const key = m[1];
-        const type = spec.parameterTypes[key];
-        if (m[2].trim() === "" && (type === "array" || type === "object")) {
-          const end = yamlBlockEnd(lines, i + 1, type === "array");
-          const value = end > i + 1 ? parseYamlBlockValue(lines.slice(i + 1, end), type) : undefined;
+        const types = spec.parameterTypes[key];
+        const blockType = types?.find((type) => type === "array" || type === "object");
+        if (m[2].trim() === "" && blockType) {
+          const end = yamlBlockEnd(lines, i + 1, blockType === "array");
+          const value = end > i + 1 ? parseYamlBlockValue(lines.slice(i + 1, end), blockType) : undefined;
           if (value !== undefined) {
             args[key] = value;
             i = end - 1;
             continue;
           }
         }
-        args[key] = coerceHeaderValue(m[2].trim(), type);
-        if (headerOnly && (type ?? "string") === "string") open = { key, inline: m[2].trim(), more: [] };
+        args[key] = coerceHeaderValue(m[2].trim(), types);
+        if (headerOnly && (!types?.length || types.includes("string"))) open = { key, inline: m[2].trim(), more: [] };
       } else if (open) {
         open.more.push(line);
       } else if (line.trim() === "") {
