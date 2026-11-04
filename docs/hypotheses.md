@@ -6014,3 +6014,34 @@ a real call.
 **Evidence.** Commit `d27098734f64279d47c0117fdf6f64a921004544` changes `FencedToolSpec.parameterTypes` from one type to an ordered set of direct and union alternatives and applies coercion against those alternatives. The focused parser suite passed 130/130 tests. The isolated Hermes run completed plain chat, a terminal call, a create/read/delete/verify loop, and missing-file recovery through `chat_completions`.
 
 **Conclusion.** Confirmed for the tested Hermes terminal schema. The concrete `"false"` coercion defect is fixed. Broader `oneOf`, block-array, mixed direct/union, numeric-ambiguity, and invalid-container cases remain to be covered before treating union-schema handling as complete.
+
+---
+
+## 42. 4 November 2026 — Hermes tool-mode give-up escaped the detector
+
+### H42 — a repeated give-up exhausts the single forcing retry
+
+**Observation.** During the isolated Hermes parallel probe, M365 made no tool
+call and returned “I can't execute terminal commands in this session because no
+terminal tool is enabled” and “Terminal aracı bu oturumda etkin değil”
+(`runtime/proxy/debug-4142.log`, lines 2837 and 2895). Tools were present in the
+request. The response therefore blocked the probe before parsing, execution,
+history handling, or parallel-call behaviour could be measured.
+
+**Hypothesis.** Pattern coverage and handler routing are not the defect. The
+first English reply was detected and the handler performed its configured
+single forcing retry. The retry then produced the Turkish give-up, after which
+the retry budget was exhausted. A second bounded retry should recover cases
+where the model repeats the same detected failure once.
+
+**Falsification.** The exact English and Turkish replies must already pass the
+detector unit tests. A scripted handler sequence containing both replies and
+then a valid tool call must fail with the one-retry default. Raising only the
+bounded default to two must make that sequence pass while retaining
+`M365_NO_CONFAB_RETRY` and `M365_CONFAB_RETRIES` as explicit controls. The
+isolated live probe determines whether the extra attempt is sufficient for the
+observed route.
+
+**Scope.** This is the same give-up family addressed by PR #78, but these noun
+and word-order variants were not covered. It is not evidence for or against
+parallel tool-call support.

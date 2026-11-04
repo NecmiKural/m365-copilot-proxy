@@ -815,6 +815,23 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
   // Live: after a real tool result showed no PDF tool installed, the model said
   // "bash is not enabled"; the forcing prompt then claimed "you have not run any
   // command yet", and the model refused that too.
+  it("retries a repeated turn-1 tool-unavailable give-up once more", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: "Terminal aracı bu oturumda etkin değil; komutları çalıştıramam." },
+      { fullText: "```bash\npwd\n```" },
+    ];
+    const m = await ask(
+      [{ role: "user", content: `run two read-only commands ${Math.random()}` }],
+      new SessionPool(),
+    );
+    expect(scripted.texts).toHaveLength(3);
+    expect(JSON.parse(m.tool_calls[0].function.arguments).command).toBe("pwd");
+    scripted.queue = [];
+  });
+
   it("doesn't tell a model that already ran tools that it ran nothing", async () => {
     scripted.result = null;
     scripted.texts = [];

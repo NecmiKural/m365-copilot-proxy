@@ -360,6 +360,18 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Bunu hazırlayabilmem için **data.csv dosyasının içeriğine erişmem gerekiyor**. Dosyayı buraya yüklediğinizde kısa raporu şu yapıda sunabilirim:")).toBe(true);
   });
 
+  it("flags tool-unavailable claims when the request contains tools", () => {
+    // Exact replies from the Hermes parallel probe (debug-4142.log:2837,2895).
+    expect(looksLikeConfabulation("I can't execute terminal commands in this session because no terminal tool is enabled.")).toBe(true);
+    expect(looksLikeConfabulation("Terminal aracı bu oturumda etkin değil.")).toBe(true);
+
+    // Narrow equivalents from the same failure family.
+    expect(looksLikeConfabulation("No terminal tool is enabled in this session.")).toBe(true);
+    expect(looksLikeConfabulation("The terminal tool is unavailable in this session.")).toBe(true);
+    expect(looksLikeConfabulation("Bu oturumda terminal aracı etkin değil.")).toBe(true);
+    expect(looksLikeConfabulation("Terminal aracı bu oturumda kullanılamıyor.")).toBe(true);
+  });
+
   it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
     // Exact strings from live Windows/pi runs that went straight to the user.
     expect(looksLikeConfabulation("I’m sorry, but I wasn’t able to complete and verify the code change in this run.")).toBe(true);
