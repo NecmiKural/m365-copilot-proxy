@@ -15,6 +15,13 @@ evidence captured on 4 November 2026.
 4. Do not modify Hermes source code. Hermes changes are limited to an isolated
    configuration and home directory.
 5. Keep this plan and its status tracking in the repository and push updates.
+6. All future development, both Hermes and non-Hermes, continues on
+   `dev/integration`. This branch was created from
+   `feat/hermes-agent-integration`; it is based on `daily` at `d4af8e34` and
+   includes `feat/hermes-compatibility` at `d270987`. Existing history and
+   committer identity are not rewritten. Any committer correction is deferred
+   until an upstream pull request is prepared by cherry-picking focused commits
+   from this branch onto a later topic branch.
 
 ## Status
 
@@ -29,9 +36,10 @@ evidence captured on 4 November 2026.
 | Phase 1, bind isolation | ENFORCED | Test port 4142 must bind only to `127.0.0.1`; wildcard listeners fail the safety gate |
 | Step 0, correct test P classification | COMPLETE | Summary says NOT TESTED and records the give-up blocker |
 | Step 1, add plan and status | COMPLETE | Commit containing this document |
-| Phase 2a, hypothesis and RED test | PENDING | English and Turkish tool-unavailable claims |
-| Phase 2a, minimum fix and GREEN verification | PENDING | Build, Vitest, and TypeScript checks |
-| Phase 2a, commit and push | PENDING | Commit SHA to be recorded |
+| Phase 2a, hypothesis and RED test | COMPLETE | Assertion-level RED: `runtime/reports/phase2a-handler-red.txt` |
+| Phase 2a, minimum fix and GREEN verification | COMPLETE | Focused GREEN, build, Vitest, and TypeScript evidence under `runtime/reports/phase2a-*` |
+| Phase 2a, commit and push | COMPLETE | `67e8f6a1272c33886a3124432de9f6e9087042dd` |
+| Development branch migration | COMPLETE | `dev/integration` created from the pushed Phase 2a HEAD |
 | Isolated E2E, test P retry | PENDING | One live run on loopback-only port 4142 |
 | Isolated E2E, tests C and G regressions | PENDING | Run only after test P reaches the intended layer |
 | Final shutdown and status update | PENDING | PID-matched shutdown evidence and final commit |
@@ -41,7 +49,9 @@ evidence captured on 4 November 2026.
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
   `d4af8e34d33adc3ae11ad954969e3b028b7b4cd6`, clean.
 - Production port 4141 remains on PID `16996` and returns HTTP 200.
-- Development checkout: `feat/hermes-agent-integration`.
+- Development checkout: `dev/integration`. Preserve
+  `feat/hermes-agent-integration` unchanged as the branch from which it was
+  created.
 - Live tests use only an isolated proxy on port 4142 and an isolated Hermes
   home/configuration.
 - Port 4142 must listen only on `127.0.0.1`. A listener on `0.0.0.0` or `[::]`
@@ -143,5 +153,8 @@ behaviour.
 ### Phase 6: Maintenance candidates
 
 Track the two known Windows upstream test failures, Windows phase-sweep
-adaptations, automatic restart behaviour, open contribution branches, and the
-upstream merge routine as separate authorised work.
+adaptations, automatic restart behaviour, open contributions, and the upstream
+merge routine as authorised work on `dev/integration`. If an upstream pull
+request is later warranted, create its focused topic branch by cherry-picking
+the relevant commits from `dev/integration`; do not develop it separately in
+advance.
