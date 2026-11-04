@@ -5999,3 +5999,18 @@ this repo's own docs, which a project summary resembles, there is one new hit: a
 quoted in §27 ("I can't create or run scripts in this session").
 **Not measured:** how often the forcing retry then turns this give-up. It is the mid-task prompt, sent after
 a real call.
+
+---
+
+## 42. Nov 4 2026 — Hermes union-typed fenced arguments
+
+### F105 — `anyOf` / `oneOf` types must survive fenced-spec derivation 🟢
+**Hypothesis.** Hermes terminal fields declared through JSON Schema unions lose their intended scalar or container type when `deriveFencedSpec()` reads only a property's direct `type`.
+
+**Prediction.** On the old implementation, Hermes's `notify: false` fenced header remains the truthy string `"false"` because `notify` declares `anyOf: [{ type: "boolean" }, { type: "array" }]`. Retaining direct, `anyOf`, and `oneOf` alternatives makes `notify: false`, `notify: true`, and array values preserve their JSON types.
+
+**Probe.** Register the real Hermes terminal argument shape in `packages/core/src/fenced.test.ts`, parse fenced calls containing typed scalar fields, multiline commands, and both `notify` alternatives, then run Hermes end to end against an isolated proxy on port 4142.
+
+**Evidence.** Commit `d27098734f64279d47c0117fdf6f64a921004544` changes `FencedToolSpec.parameterTypes` from one type to an ordered set of direct and union alternatives and applies coercion against those alternatives. The focused parser suite passed 130/130 tests. The isolated Hermes run completed plain chat, a terminal call, a create/read/delete/verify loop, and missing-file recovery through `chat_completions`.
+
+**Conclusion.** Confirmed for the tested Hermes terminal schema. The concrete `"false"` coercion defect is fixed. Broader `oneOf`, block-array, mixed direct/union, numeric-ambiguity, and invalid-container cases remain to be covered before treating union-schema handling as complete.
