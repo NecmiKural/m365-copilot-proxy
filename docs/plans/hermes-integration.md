@@ -40,9 +40,12 @@ evidence captured on 4 November 2026.
 | Phase 2a, minimum fix and GREEN verification | COMPLETE | Focused GREEN, build, Vitest, and TypeScript evidence under `runtime/reports/phase2a-*` |
 | Phase 2a, commit and push | COMPLETE | `67e8f6a1272c33886a3124432de9f6e9087042dd` |
 | Development branch migration | COMPLETE | `dev/integration` created from the pushed Phase 2a HEAD |
-| Isolated E2E, test P retry | PENDING | One live run on loopback-only port 4142 |
-| Isolated E2E, tests C and G regressions | PENDING | Run only after test P reaches the intended layer |
-| Final shutdown and status update | PENDING | PID-matched shutdown evidence and final commit |
+| Isolated E2E, test P first attempt | INVALID RUN, harness bug | `runtime/reports/test-p-phase2-stderr-20261104-213944.txt`: empty `--in`; Hermes exited 2 before any request |
+| Isolated E2E, test P logging-off attempt | INVALID RUN, logging off | `runtime/reports/test-p-valid-evidence-20261105-022438.txt`: usage recorded `provider=custom` and two API calls, but the inactive debug log made the run unprovable |
+| Isolated E2E, test P valid run | FAIL, Phase 2 finding | `runtime/reports/test-p-valid-evidence-20261105-025055.txt`; debug line 3006 contains one malformed terminal call and no parallel call |
+| Isolated E2E, test C regression | PASS | `runtime/reports/test-c-regression-evidence-20261105-031613.txt`; two real terminal calls at absolute debug lines 3256 and 3379 |
+| Isolated E2E, test G regression | FAIL, malformed adjacent fences | `runtime/reports/test-g-regression-debug-range-20261105-031613.txt`; one parsed call at absolute line 3650, then give-up at 3699 |
+| Final isolated shutdown | COMPLETE | `runtime/reports/shutdown-4142-20261105-031613.txt`; PID file and listener both 18060, then listener absent and health 000 |
 
 ## Invariants
 
@@ -125,9 +128,33 @@ If the give-up is fixed but the request still does not reach parallel
 execution, diagnose the precise blocking layer. Keep parallel execution
 disabled by default until evidence supports enabling it.
 
-After test P, repeat tests C and G once as regressions. Stop at the first
-failure. Finally, stop port 4142 only after verifying that the PID file matches
-the listener PID, record shutdown evidence, update this status table, and push.
+The first Phase 2 test P attempt is an **INVALID RUN**, not an upstream
+give-up result. Its harness passed an empty value to `--in`; Hermes exited 2
+with `argument --in: expected one argument`, sent no proxy request, and
+produced an empty debug range. A valid retry must pass an explicit working
+directory (or use the successful test C invocation shape) before any parallel
+or give-up conclusion is drawn.
+
+The logging-off retry at 20261105-022438 is also an **INVALID RUN**. Its
+usage record shows the custom provider completed two API calls, but the
+configured debug log was not active, so the proxy path and retry behaviour
+cannot be proved from that run.
+
+The valid 20261105-025055 run is **FAIL** with three Phase 2 findings:
+
+- **F1, argument wrapper leak:** the terminal command reached the handler as
+  `<command>\npwd\n</command>` at absolute debug line 3006. This is the first
+  Phase 2b terminal-argument rejection case.
+- **F2, single-tool-per-message claim:** the model said this runtime permits
+  only one tool call per assistant message. Whether that comes from the proxy
+  prompt or protocol is part of the parallel-call investigation.
+- **F3, retry gap:** commit `67e8f6a1272c33886a3124432de9f6e9087042dd`
+  did not classify that sentence as confabulation, so no forcing retry ran.
+
+The independent C regression passed with two real terminal calls. G failed:
+two adjacent terminal fences were emitted, the parser/execution path acted on
+one malformed combined command, and the model then gave up. Port 4142 was
+stopped only after PID-file/listener equality was verified.
 
 ## Later phases
 
