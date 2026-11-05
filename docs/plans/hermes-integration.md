@@ -5,9 +5,9 @@ evidence captured on 4 November 2026.
 
 ## Decisions
 
-1. Commits and pushes are permitted only on `feat/hermes-agent-integration`.
-   Do not open a pull request or merge, and do not modify `daily`, `main`, or
-   production port 4141.
+1. Commits and pushes are permitted only on `dev/integration` (see 6;
+   `feat/hermes-agent-integration` is preserved unchanged). Do not open a pull
+   request or merge, and do not modify `daily`, `main`, or production port 4141.
 2. Token usage must contain only real upstream values. Estimated token usage is
    prohibited.
 3. Find a viable parallel-tool-call path unless parallel execution is
@@ -22,6 +22,15 @@ evidence captured on 4 November 2026.
    committer identity are not rewritten. Any committer correction is deferred
    until an upstream pull request is prepared by cherry-picking focused commits
    from this branch onto a later topic branch.
+
+## Goal
+
+Use pi and OpenClaw (and Hermes) through this proxy as full general-purpose
+agents on the Windows work machine: repository discovery, writing and fixing
+code, using skills, data analysis, and producing Word/PDF documents. The main
+problem to eliminate is the model giving up ("I can't", "my tools are
+disabled") or emitting tool calls as plain text. Find these failures in the
+debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 ## Status
 
@@ -46,6 +55,8 @@ evidence captured on 4 November 2026.
 | Isolated E2E, test C regression | PASS | `runtime/reports/test-c-regression-evidence-20261105-031613.txt`; two real terminal calls at absolute debug lines 3256 and 3379 |
 | Isolated E2E, test G regression | FAIL, malformed adjacent fences | `runtime/reports/test-g-regression-debug-range-20261105-031613.txt`; one parsed call at absolute line 3650, then give-up at 3699 |
 | Final isolated shutdown | COMPLETE | `runtime/reports/shutdown-4142-20261105-031613.txt`; PID file and listener both 18060, then listener absent and health 000 |
+| Phase 2c: test G A/B (pre-`67e8f6a` vs HEAD), F1 fix, F2 design note | PENDING, blocked | The worker agent's model hit its daily M365 quota (429, resets 2026-11-06 00:00 UTC); no Phase 2c change was made |
+| Plan completeness fix | COMPLETE | This commit: watch-list links, Phase 2b, final report format, working rules, goal, Decision 1 |
 
 ## Invariants
 
@@ -65,6 +76,33 @@ evidence captured on 4 November 2026.
   `scripts/bench/phase-sweep-win.sh`.
 - Use the user's Git identity and English commit messages. Do not add generated
   or co-author metadata.
+- Production 4141 also serves pi, OpenClaw, the user's Hermes (including its
+  Telegram gateway) and alook; never restart or reconfigure it. Never run
+  `pnpm dev` on 4141.
+- Health gate before and after every mutation: 4141 LISTENING PID equals the
+  recorded PID, `GET http://127.0.0.1:4141/health` returns 200, and `daily` is
+  clean at the recorded commit.
+- Process IDs: Git Bash `$!` is not the Windows PID. Write the `netstat`
+  LISTENING PID of `127.0.0.1:4142` to the PID file and stop only on PID-file
+  equals listener PID.
+- A live test may start only after `debug-4142.log` is shown to grow (for
+  example after a `/health` request) and the isolated Hermes `base_url` is shown
+  to be `http://127.0.0.1:4142/v1`. Always pass a valid `--in` directory.
+- Classify harness, logging, or environment faults as INVALID RUN, never as
+  FAIL.
+- Run only one live M365 measurement at a time. The work account throttles
+  after roughly 100-200 messages per hour (about 70 minutes); schedule heavy
+  runs outside working hours and tell the user. Check processes and ports, not
+  log freshness, before starting.
+- Ask the user before opening a pull request, commenting on a PR or issue, or
+  requesting a review.
+- Never show API keys or tokens in reports.
+- Do not link `node_modules` into a temporary worktree via a junction; install
+  there with `pnpm install --frozen-lockfile` instead.
+- Do not write to the user's databases and do not close open Office
+  applications.
+- Code, commits, PR text and documentation are in English; reports to the user
+  are in Turkish.
 
 ## Phase 1: Complete the original E2E matrix
 
@@ -84,6 +122,22 @@ event. Standard token counts were zero; no estimated values may replace them.
 
 The long-chain run completed eight sequential terminal calls and returned
 `LONG_CHAIN_OK:8`.
+
+Contract items from the original prompt to record with evidence in the final
+report: `POST /v1/chat/completions`, streaming/SSE, `tools` and `tool_choice`,
+`assistant.tool_calls`, `role=tool` with `tool_call_id`, the `developer` role,
+and `stream_options`.
+
+### Final report format
+
+Every phase-closing report uses the original format: Hermes version/commit,
+proxy version/commit, base URL, model, Hermes provider config (no secrets);
+PASS/FAIL for plain chat, single tool call, multi-step tool loop, error
+recovery, typed arguments (PASS/FAIL/NOT APPLICABLE), streaming, long chain,
+and parallel tool calls (PASS/FAIL/NOT TESTED); the first failing
+request/response difference; relevant log lines; root cause; a Hermes
+reliability verdict given separately for chat only, simple agent tasks, and
+long coding-agent tasks; and the smallest proposed fix.
 
 ## Phase 2a: Give-up detection
 
@@ -158,6 +212,26 @@ stopped only after PID-file/listener equality was verified.
 
 ## Later phases
 
+### Phase 2b: Terminal argument rejection
+
+The most valuable reliability fix. Start from F1 (`<command>...</command>`
+wrapper leak, debug line 3006) in `docs/hypotheses.md`.
+
+1. Collect rejected or malformed terminal calls from the debug logs (the
+   production 4141 log may be read, never written) and classify them: missing
+   field, wrong type, wrapper leak, PowerShell syntax on a POSIX shell, extra
+   field.
+2. RED tests, then the minimum proxy fix: argument normalisation that keeps
+   required fields and respects `additionalProperties: false`; on a validation
+   error, return the error to the model once and allow one correction attempt,
+   behind a kill-switch environment variable (in the style of
+   `M365_NO_FENCE_RETRY`).
+3. Isolated Hermes configuration only (no Hermes source change): state in the
+   terminal tool guidance that the host is Windows with a POSIX Git Bash shell
+   and PowerShell syntax must not be used.
+4. Re-run the Phase 1 matrix on isolated 4142 and compare the rejection rate
+   before and after.
+
 ### Phase 3: Token usage telemetry
 
 Inspect documented and captured upstream frames for real usage fields. Map only
@@ -181,12 +255,33 @@ Watch-list:
 
 - https://github.com/AlenPelin/m365-copilot-proxy — fork that builds on Necmi's
   upstream PRs (#70/#71/#78); watch-list, review later.
+- https://github.com/cramt/m365-copilot-proxy/pull/46
+- https://github.com/cramt/m365-copilot-proxy/pull/90
+- https://github.com/kuchris/m365-copilot-openai-proxy
+- https://github.com/MurasameCyan/Ciallo-Ms-365-OpenAI-Proxy-Docker
+- https://github.com/HEXUXIU/M365-Copilot2API
+- https://github.com/faprikaa/augloop-copilot-proxy
+- https://github.com/suimi8/augloop-copilot-proxy
+- https://github.com/KilimcininKorOglu/M365Bridge
+
+Output: a table of concrete ideas that can feed Phases 2b-4.
 
 ### Phase 6: Maintenance candidates
 
-Track the two known Windows upstream test failures, Windows phase-sweep
-adaptations, automatic restart behaviour, open contributions, and the upstream
-merge routine as authorised work on `dev/integration`. If an upstream pull
+Authorised work on `dev/integration`; each item is confirmed with the user
+before starting:
+
+- Fix the two upstream tests that fail on Windows because of POSIX path
+  assumptions: `log.test.ts` and `scripts/bench/turn-budget.test.mjs`.
+- Windows phase-sweep adaptations (`owns_port`, a port check instead of
+  `kill -0`, stopping via `Get-NetTCPConnection`).
+- Restart-on-crash for the autostart scheduled task (today the proxy does not
+  come back after a crash).
+- Watch the open upstream PRs #70 (gpt56-relay), #71 (fence-parsing) and #78
+  (giveup-patterns): fix and draft replies for new reviews (shown to the user
+  first), and apply the upstream merge routine when upstream/main moves
+  (`git merge --no-ff --no-commit upstream/main`, no rebase or force push;
+  upstream sections first in `hypotheses.md`, ours renumbered after). If an upstream pull
 request is later warranted, create its focused topic branch by cherry-picking
 the relevant commits from `dev/integration`; do not develop it separately in
 advance.
