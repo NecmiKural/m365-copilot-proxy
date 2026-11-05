@@ -6045,3 +6045,75 @@ observed route.
 **Scope.** This is the same give-up family addressed by PR #78, but these noun
 and word-order variants were not covered. It is not evidence for or against
 parallel tool-call support.
+
+---
+
+## 43. 5 November 2026 — Hermes parallel probes expose prompt and fence-shape conflicts
+
+### F106 — terminal argument wrapper leak
+
+**Observation.** Test P produced one terminal call whose parsed `command` was
+`<command>\npwd\n</command>` (`runtime/proxy/debug-4142.log`, absolute line
+3006). The registered Hermes schema expects the command as the fence body:
+`packages/core/src/fenced.ts:1469-1540` assigns the remaining body directly to
+`bodyParam`, and `packages/core/src/fenced.test.ts:1080-1110` proves that a
+plain `pwd` body becomes `{ command: "pwd" }`. The proxy does not add XML
+`<command>` tags in this path.
+
+**Hypothesis.** The upstream model copied a schema-style wrapper into the fence
+body. Because the parser intentionally preserves body text verbatim, the
+wrapper reached Hermes as shell input and was rejected there.
+
+**Prediction.** An offline parser fixture containing `<command>pwd</command>`
+will preserve those tags, while a plain-body fixture will return `pwd`.
+Capturing the raw upstream response before parsing will show the wrapper was
+already present.
+
+**Proposed test.** Add parser-only fixtures for plain, XML-wrapped, and
+Markdown-fenced Hermes terminal bodies. Then replay the captured response
+offline. Do not normalize arbitrary XML until the raw-response origin is
+confirmed.
+
+**Minimum candidate fix.** If replay confirms this exact model emission,
+strip one exact outer `<command>...</command>` wrapper only for a tool whose
+derived body parameter is `command`, with tests that preserve literal XML in
+ordinary shell scripts.
+
+### F107 — the proxy explicitly teaches one tool call per response
+
+**Observation.** Test P ended with the model claiming that the runtime permits
+only one tool call per assistant message. That statement is consistent with
+the proxy's own instructions, not a fundamental parser limitation:
+`packages/core/src/agent.ts:49-65` says “exactly one fenced tool call per turn”;
+`packages/core/src/fenced.ts:622-633` says “Never emit two fenced blocks”; and
+the softened framing repeats the rule at `packages/core/src/fenced.ts:672-680`.
+Conversely, `packages/core/src/fenced.test.ts:170-173` proves the parser can
+return two fenced calls. `packages/proxy-lib/src/handler.ts:198-212` also tells
+the model that only the first of multiple calls was run.
+
+**Hypothesis.** The parallel target conflicts with the shipped fenced protocol:
+the prompt requires serialization and the handler deliberately reports
+first-call-only execution. The model's claim is therefore prompt-grounded.
+The current confabulation detector in `packages/core/src/tools.ts:280-448`
+does not match “permits only one tool call per assistant message”, so commit
+`67e8f6a` did not retry it.
+
+**Prediction.** Offline prompt snapshots will always contain the single-call
+rule for baseline and softened variants. A parser-only two-fence test will
+still return two calls, demonstrating that prompt and execution policy, rather
+than syntax parsing, block parallel use. The Test G response supports the
+distinction: adjacent fences were emitted, but only one combined malformed
+call ran at absolute debug line 3650 before the give-up at 3699.
+
+**Proposed test.** Add an offline framing variant that explicitly permits two
+independent read-only fences, then feed a fixed two-fence response through
+parse and handler unit tests. Assert two distinct calls, stable IDs, two
+matching tool results in history, and unchanged single-call behaviour for the
+default variant. No live test is required for this hypothesis stage.
+
+**Minimum candidate fix.** Keep the existing serialized default. Add a
+request-scoped parallel framing and execution path only when
+`parallel_tool_calls` is true and every parsed call is read-only; execute all
+accepted calls and return every result with its matching `tool_call_id`.
+Separately expand retry detection only if a one-call limitation claim appears
+despite that parallel framing.
