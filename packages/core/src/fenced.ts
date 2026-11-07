@@ -1535,7 +1535,8 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
     args[spec.editPair.replace] = sr[2];
   } else if (spec.bodyParam !== undefined) {
     const exactCommandWrapper =
-      spec.bodyParam === "command" && rest.match(/^<command>\n?([\s\S]*?)\n?<\/command>$/);
+      spec.bodyParam === "command" &&
+      rest.match(/^<command>\n?((?:(?!<\/command>)[\s\S])*?)(?:\n)?<\/command>$/);
     args[spec.bodyParam] = exactCommandWrapper ? exactCommandWrapper[1] : rest;
   }
 

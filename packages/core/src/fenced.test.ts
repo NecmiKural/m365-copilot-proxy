@@ -1116,6 +1116,9 @@ describe("Hermes terminal argument compatibility", () => {
     expect(argsOf("```terminal\n\n<command>pwd</command> suffix\n```")).toEqual({
       command: "<command>pwd</command> suffix",
     });
+    expect(argsOf("```terminal\n\n<command>a</command>\n<command>b</command>\n```")).toEqual({
+      command: "<command>a</command>\n<command>b</command>",
+    });
   });
 
   it("preserves every scalar field from the registered Hermes terminal schema", () => {
