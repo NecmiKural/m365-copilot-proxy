@@ -1106,6 +1106,18 @@ describe("Hermes terminal argument compatibility", () => {
     expect(argsOf("```terminal\n\npwd\n```")).toEqual({ command: "pwd" });
   });
 
+  it("strips one exact outer command wrapper from a command body", () => {
+    expect(argsOf("```terminal\n\n<command>\nprintf 'wrapped'\n</command>\n```")).toEqual({
+      command: "printf 'wrapped'",
+    });
+    expect(argsOf("```terminal\n\nprefix <command>pwd</command>\n```")).toEqual({
+      command: "prefix <command>pwd</command>",
+    });
+    expect(argsOf("```terminal\n\n<command>pwd</command> suffix\n```")).toEqual({
+      command: "<command>pwd</command> suffix",
+    });
+  });
+
   it("preserves every scalar field from the registered Hermes terminal schema", () => {
     expect(argsOf(
       "```terminal\nworkdir: C:/Users/NecmiKural/project\ntimeout: 30\nbackground: true\nheartbeat: 60\npersist_on_release: false\npty: true\n\nserver --port 8080\n```",
