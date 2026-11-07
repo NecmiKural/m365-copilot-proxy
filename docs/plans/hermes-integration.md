@@ -55,7 +55,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | Isolated E2E, test C regression | PASS | `runtime/reports/test-c-regression-evidence-20261105-031613.txt`; two real terminal calls at absolute debug lines 3256 and 3379 |
 | Isolated E2E, test G regression | FAIL, malformed adjacent fences | `runtime/reports/test-g-regression-debug-range-20261105-031613.txt`; one parsed call at absolute line 3650, then give-up at 3699 |
 | Final isolated shutdown | COMPLETE | `runtime/reports/shutdown-4142-20261105-031613.txt`; PID file and listener both 18060, then listener absent and health 000 |
-| Phase 2c: test G A/B (pre-`67e8f6a` vs HEAD), F1 fix, F2 design note | IN PROGRESS: A/B and F1 complete | Four G runs were nondeterministic: baseline `b56440cb` 1/2 PASS, HEAD `d42a591c` 0/2 PASS (`runtime/reports/phase2c-ab-summary.txt`). F1 exact `<command>...</command>` unwrapping is GREEN in `873f1de`; build and core/proxy-lib TypeScript checks pass, with only the two known upstream Windows Vitest failures. Port 4142 is closed. F2 design note remains. |
+| Phase 2c: test G A/B (pre-`67e8f6a` vs HEAD), F1 fix, F2 design note | COMPLETE | Four G runs were nondeterministic: baseline `b56440cb` 1/2 PASS, HEAD `d42a591c` 0/2 PASS (`runtime/reports/phase2c-ab-summary.txt`). F1 exact `<command>...</command>` unwrapping is GREEN in `873f1de`; build and core/proxy-lib TypeScript checks pass, with only the two known upstream Windows Vitest failures. F2 design: `docs/plans/phase2c-f2-parallel-design.md`. Port 4142 is closed. |
 | Plan completeness fix | COMPLETE | This commit: watch-list links, Phase 2b, final report format, working rules, goal, Decision 1 |
 
 ## Invariants
