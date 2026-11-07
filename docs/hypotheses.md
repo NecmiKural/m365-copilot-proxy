@@ -6117,3 +6117,26 @@ request-scoped parallel framing and execution path only when
 accepted calls and return every result with its matching `tool_call_id`.
 Separately expand retry detection only if a one-call limitation claim appears
 despite that parallel framing.
+
+---
+
+## 44. 8 November 2026 — Phase 2c G A/B is nondeterministic
+
+### F108 — the additional pair does not isolate `67e8f6a` as a regression
+
+**Observation.** Four isolated G measurements compared pre-`67e8f6a`
+`b56440cb48d316448c198f908ca09e6b4c49c410` with HEAD
+`d42a591cc4c396ce7caa87ff2d77abddeefff518`. The baseline passed its first
+run with `LONG_CHAIN_OK:8` and eight terminal calls, but its second run gave up
+before making a terminal call. HEAD failed both runs, after two and one terminal
+calls respectively. The complete table is in
+`runtime/reports/phase2c-ab-summary.txt`; per-run evidence records valid
+`--in`, isolated `http://127.0.0.1:4142/v1`, debug-log growth, and absolute
+debug ranges.
+
+**Conclusion.** This is nondeterminism, not a confirmed `67e8f6a` regression:
+baseline is 1/2 PASS and HEAD is 0/2 PASS, so the required baseline 2/2 versus
+HEAD 0/2 split was not observed. The second HEAD run did exercise the bounded
+retry at absolute debug lines 5613 and 5647, but the baseline's independent
+give-up shows that retry behaviour alone cannot explain the live outcome. No
+code change follows from this A/B result.
