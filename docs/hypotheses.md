@@ -6455,3 +6455,30 @@ recovery twice, no run observed HTTP 429, and production port 4141 remained heal
 **Conclusion and Status.** Supported and fixed. The failure was handler control flow,
 not curly-apostrophe matching alone. Recovery now remains selective after unreadable
 syntax: capability denials retry, ordinary answers do not.
+
+### H52 — an explicit incomplete-work final answer can stop an active tool loop
+
+**Observed.** On production, pi received a tool result on turn 5 and then returned
+`Çalışma tamamlanmadı. Kalan adımlar: ...`, listing the documentation, code,
+tests, build, live probes, reports, tracker update, commit, and push still to do.
+The handler parsed no tool call and ended the turn. Phase 7b also produced
+`LONG_CHAIN_INCOMPLETE:2` after only two calls.
+
+**Signal.** Recovery is appropriate only when all of these are true:
+
+1. the request defines tools;
+2. the latest client message is a tool result;
+3. the model returns no tool call; and
+4. the answer explicitly says the requested work is unfinished and enumerates
+   remaining steps, using a narrow completion signal such as Turkish
+   `tamamlanmadı` plus `kalan adımlar`, English `not complete` plus
+   `remaining steps`, or the harness sentinel `INCOMPLETE`.
+
+A question to the user, a genuine completed summary, ordinary prose that merely
+contains “remaining”, and normal Turkish progress information are not this
+signal.
+
+**Prediction.** Extending `looksLikeConfabulation` with this narrow paired signal
+will send the response through the existing H51 full-history recovery path,
+including its existing `M365_CONFAB_RETRIES` maximum of 2. No new retry loop or
+configuration is needed.
