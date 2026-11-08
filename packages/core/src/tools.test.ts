@@ -338,6 +338,7 @@ describe("looksLikeConfabulation", () => {
   });
 
   it("flags real M365 give-up confabulations", () => {
+    expect(looksLikeConfabulation("I can’t create or read files because terminal execution isn’t available in this session.")).toBe(true); // Exact Phase 7 C attempt 1
     expect(looksLikeConfabulation("I'm unable to access or list any files in the working directory (all shell commands are returning no output).")).toBe(true);
     expect(looksLikeConfabulation("I don't have access to your project files or the ability to run python3 check.py here.")).toBe(true);
     expect(looksLikeConfabulation("To move forward, please paste the contents of calc.py and check.py.")).toBe(true);

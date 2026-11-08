@@ -476,6 +476,7 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // Phase 2e live replies. Require a named tool and an explicit availability
   // state, in either word order, to avoid matching ordinary tool documentation.
   /\b(?:terminal|shell|bash|command|execution|file)(?:\s+[\w-]+){0,2}\s+tools?\b[^.\n]{0,40}\b(?:unavailable|not\s+available|no\s+longer\s+available|disabled)\b/i,
+  /\bterminal\s+execution\b[^.\n]{0,40}\b(?:unavailable|isn.?t\s+available|not\s+available|disabled)\b/i,
   /\bno\s+(?:[\w-]+\s+){0,3}(?:terminal|shell|bash|command|execution|file)(?:\s+[\w-]+){0,2}\s+tools?\b[^.\n]{0,30}\bavailable\b/i,
   /\bthis\s+runtime\s+permits\s+only\s+one\s+tool\s+call\s+per\s+assistant\s+message\b/i,
   /\btools?\s+(?:aren.?t|isn.?t|are\s+not|is\s+not)\s+(?:currently\s+)?enabled\s+(?:in\s+this|for\s+this|here|(?:to|for)\s+me)/i,

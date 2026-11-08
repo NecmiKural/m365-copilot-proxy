@@ -358,11 +358,13 @@ case if it can be provoked.
 Status: COMPLETE. Validation now runs after fenced parsing and before tool
 calls are returned. Required fields, scalar types, and
 `additionalProperties: false` are enforced; only lossless scalar conversions
-are accepted. A genuine violation receives one correction request and fails
-closed if the corrected response is still invalid or omits the tool call.
-Set `M365_NO_ARG_VALIDATION=1` to bypass validation. Serial and parallel RED
-tests cover missing, wrong-type, extra-field, conversion, unchanged-valid,
-kill-switch, whole-batch retry, and the one-retry bound. Build, full Vitest
+are accepted. A genuine violation receives one correction request; if the
+corrected response is still invalid or omits the tool call, validation fails
+open by returning the original parsed calls after lossless conversions.
+Set `M365_NO_ARG_VALIDATION=1` to bypass validation. Serial, parallel, JSON,
+and SSE RED tests cover missing, wrong-type, extra-field, conversion,
+unchanged-valid, kill-switch, whole-batch retry, and the one-retry bound.
+Build, full Vitest
 (494 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. On
 loopback-only 4142, C passed with two calls, G passed twice with eight calls
 each, and a malformed timeout was provoked and corrected. Evidence is under
@@ -398,7 +400,8 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S18 | Two tests failed on Windows because of POSIX path assumptions | proxy | FIXED `c30252b` |
 | S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
 | S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
-| S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy? | OPEN: H51 should recover a first-turn denial; check in phase7 debug range why it did not (Phase 7b) |
+| S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy | FIXED Phase 7b: `phase7-c-attempt1-debug.txt:48-50` shows exact reply "terminal execution isn’t available" followed by no retry; detector required the word `tool`. Exact RED fixture and minimum detector pattern added. |
+| S22 | Phase 7b live runs were stochastic: the first G run stopped after two calls with `LONG_CHAIN_INCOMPLETE:2`; the first G2 attempt still ended in a capability denial after recovery, while immediate reruns passed with eight calls | model | NOTED: H51 recovery ran; no deterministic proxy fault found. G1 and G2 passed on isolated reruns; evidence in `phase7b-g*-*.txt`. |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests

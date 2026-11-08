@@ -955,6 +955,10 @@ export async function handleChatCompletion(
     if (parsed.hasToolCalls && process.env.M365_NO_ARG_VALIDATION !== "1") {
       let validation = validateToolArguments(parsed.toolCalls, body.tools);
       if (validation.errors.length > 0) {
+        // Preserve the original parsed calls after lossless conversions. Argument
+        // repair is best-effort: a failed repair must not break clients that apply
+        // their own looser schema validation.
+        const originalCalls = validation.calls;
         log.info(`Tool argument validation failed — asking once for correction: ${validation.errors.join("; ")}`);
         text = `(Note: your tool call arguments failed validation: ${validation.errors.join("; ")}. Nothing ran. Fix only these argument errors and send the corrected tool call once, with no prose.)`;
         const retry = await runBuffered();
@@ -964,29 +968,15 @@ export async function handleChatCompletion(
         ({ parsed, judged } = parseReply(fullText, body.tools));
         if (parsed.hasToolCalls) {
           validation = validateToolArguments(parsed.toolCalls, body.tools);
-          parsed.toolCalls = validation.calls;
-          if (validation.errors.length > 0) {
-            log.info(`Corrected tool arguments remain invalid: ${validation.errors.join("; ")}`);
-            return {
-              kind: "error",
-              resp: jsonResponse(502, {
-                error: {
-                  message: `M365 returned invalid tool arguments after one correction request: ${validation.errors.join("; ")}`,
-                  type: "tool_argument_validation_error",
-                },
-              }),
-            };
+          if (validation.errors.length === 0) {
+            parsed.toolCalls = validation.calls;
+          } else {
+            log.info(`Corrected tool arguments remain invalid; returning original calls: ${validation.errors.join("; ")}`);
+            parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
           }
         } else {
-          return {
-            kind: "error",
-            resp: jsonResponse(502, {
-              error: {
-                message: "M365 did not return a tool call after one argument correction request.",
-                type: "tool_argument_validation_error",
-              },
-            }),
-          };
+          log.info("Argument correction returned no tool call; returning original calls");
+          parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
         }
       } else {
         parsed.toolCalls = validation.calls;

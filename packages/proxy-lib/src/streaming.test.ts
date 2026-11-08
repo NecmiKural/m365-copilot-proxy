@@ -1816,25 +1816,41 @@ describe("tool argument schema validation", () => {
     expect(message.tool_calls.map((c: any) => JSON.parse(c.function.arguments).retries)).toEqual([1, 2]);
   });
 
-  it("asks only once and never returns a still-invalid corrected call", async () => {
+  it("fails open to the losslessly transformed original call when correction remains invalid", async () => {
+    const invalid = "```configure\ntarget: app\nretries: \"30\"\nextra: kept\n```";
+    const message = await ask([invalid, "```configure\ntarget: app\nretries: many\n```"]);
+    expect(scripted.texts).toHaveLength(2);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: 30, extra: "kept",
+    });
+  });
+
+  it("fails open to the original call when correction returns plain text", async () => {
+    const invalid = "```configure\ntarget: app\n```";
+    const message = await ask([invalid, "I cannot correct that call."]);
+    expect(scripted.texts).toHaveLength(2);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({ target: "app" });
+  });
+
+  it.each([false, true])("applies fail-open validation to stream=%s", async (stream) => {
     const invalid = "```configure\ntarget: app\n```";
     scripted.result = null;
     scripted.texts = [];
-    scripted.queue = [
-      { fullText: invalid },
-      { fullText: invalid },
-      { fullText: "```configure\ntarget: app\nretries: 3\n```" },
-    ];
+    scripted.queue = [{ fullText: invalid }, { fullText: "No corrected call." }];
     const response = await handleChatCompletion(ChatCompletionRequest.parse({
       model: "claude-sonnet",
-      stream: false,
+      stream,
       tools: [configure],
-      messages: [{ role: "user", content: `configure ${Math.random()}` }],
+      messages: [{ role: "user", content: `configure stream ${Math.random()}` }],
     }), new SessionPool());
-    expect(scripted.texts).toHaveLength(2);
-    expect(response.status).toBe(502);
-    const body = await response.json();
-    expect(body.error.type).toBe("tool_argument_validation_error");
-    expect(body.error.message).toContain('required property "retries"');
+    const raw = await response.text();
+    const chunks = raw.split("\n")
+      .filter((line) => line.startsWith("data: {"))
+      .map((line) => JSON.parse(line.slice(6)));
+    const call = stream
+      ? chunks.flatMap((chunk) => chunk.choices ?? [])
+          .flatMap((choice) => choice.delta?.tool_calls ?? [])[0]
+      : JSON.parse(raw).choices[0].message.tool_calls[0];
+    expect(JSON.parse(call.function.arguments)).toEqual({ target: "app" });
   });
 });
