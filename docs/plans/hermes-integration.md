@@ -69,6 +69,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | FAIL, recovery not exercised | Pushed build `49bc1235` ran G twice with valid `--in`: 0/2 PASS, terminal calls 2 and 0, give-up 2/2, full-contract resend 0/2. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`. Port 4142 is closed. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-08 (4) | COMPLETE | Phase 4d H51 `e03b990` (first-turn and EN/TR capability-denial give-ups recovered); live G 2/2 (recovery 2x each), C 1/1; `upstream/main` had no new commits; `daily` merged as `ad4213b`, pushed; backup tag `daily-backup-20261108d`; build, tsc green, Vitest 484 passed with the 2 known Windows failures; 4141 PID 59484 -> 44764, `/health` 200, live chat `DEPLOY4_OK`. |
 | Deploy 2026-11-08 (3) | COMPLETE | Phase 4c gate `db53d35` (parallel only with `M365_PARALLEL_TOOLS=1` and request flag); serial G 1/2 (G1 first-turn give-up before any tool use, no recovery path), C 1/1; parallel P PASS on second run (recovery, then 2 calls in one response, `PARALLEL_OK`); `upstream/main` had no new commits; `daily` merged as `f6297d7`, pushed; backup tag `daily-backup-20261108c`; build, tsc green, Vitest 480 passed with the 2 known Windows failures; 4141 PID 26156 -> 59484, `/health` 200, live chat `DEPLOY3_OK`. |
 | Deploy 2026-11-08 (2) | COMPLETE | Phase 2g green (G 2/2, C 1/1, recovery 4x, no probe call, no fence leak); `upstream/main` had no new commits; `daily` merged `dev/integration` at `467b0cc` as `816bccc` and was pushed; backup tag `daily-backup-20261108b`; build and typecheck green, Vitest 470 passed with only the 2 known Windows failures; 4141 restarted (PID 14384 -> 26156), `/health` 200, live chat `DEPLOY2_OK`. Evidence: external `runtime/reports/deploy-20261108b-*`. |
 | Deploy 2026-11-08 | COMPLETE | `upstream/main` had no new commits; `daily` merged `dev/integration` at `866039f` as `a3ed0ba` and was pushed; backup tag `daily-backup-20261108`; build, typecheck green, Vitest 467 passed with only the 2 known Windows failures; 4141 restarted (PID 16996 -> 14384), `/health` 200, live chat returned `DEPLOY_OK`. Evidence: external `runtime/reports/deploy-20261108-*`. |
@@ -83,10 +84,10 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `f6297d7` (third deploy 2026-11-08; rollback tags `daily-backup-20261108c` =
-  `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
+  `ad4213b` (fourth deploy 2026-11-08; rollback tags `daily-backup-20261108d` =
+  `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `59484` (since the third 2026-11-08 deploy; it
+- Production port 4141 runs PID `44764` (since the fourth 2026-11-08 deploy; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Development checkout: `dev/integration`. Preserve
