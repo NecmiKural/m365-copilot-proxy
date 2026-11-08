@@ -311,7 +311,32 @@ describe("a call the model restates as a correction", () => {
   });
 });
 
+const PHASE2E_LIVE_GIVE_UPS = [
+  "I can’t execute terminal commands in this session because no terminal tool is enabled.",
+  "Terminal aracı bu oturumda etkin değil; bu nedenle komutları gerçekten çalıştırmadan bir `bash` bloğu yayımlayıp çalışmış gibi gösteremem.",
+  "I couldn’t complete the two required terminal calls because the first tool invocation failed before executing `pwd`, and this runtime permits only one tool call per assistant message.",
+  "I can’t complete the requested eight-call sequence because the terminal invocation was malformed and no terminal tool is currently available in this turn.",
+  "```terminal\nbackground: false\ntimeout: 30\n\nmkdir -p \"C:/Users/NecmiKural/projects/hermes-m365-development/runtime/work/phase2c-g-head-20261106-032238/data\"\n```I can’t execute the requested terminal calls because no terminal tool is available in this session.",
+  "I can’t complete the requested eight-call sequence because the provided execution context contains only one real tool result, for step 2, and no terminal tool is available in the current tool interface.",
+  "I can’t perform the requested terminal calls because no terminal tool is available in this session.",
+  "I can’t continue because the terminal tool is not available in this turn.",
+  "I can’t continue because no terminal tool is available in this turn.",
+  "I can’t complete the remaining terminal calls because the terminal tool is no longer available in the current execution context.",
+  "I can’t execute the requested terminal calls because no terminal tool is available in this turn.",
+] as const;
+
 describe("looksLikeConfabulation", () => {
+  it("flags every exact Phase 2e live give-up fixture", () => {
+    for (const response of PHASE2E_LIVE_GIVE_UPS) {
+      expect(looksLikeConfabulation(response), response).toBe(true);
+    }
+  });
+
+  it("does not flag tool-free normal answers", () => {
+    expect(looksLikeConfabulation("HERMES_PROXY_OK")).toBe(false);
+    expect(looksLikeConfabulation("The run completed successfully. The two files differ, and the temporary directory was removed.")).toBe(false);
+  });
+
   it("flags real M365 give-up confabulations", () => {
     expect(looksLikeConfabulation("I'm unable to access or list any files in the working directory (all shell commands are returning no output).")).toBe(true);
     expect(looksLikeConfabulation("I don't have access to your project files or the ability to run python3 check.py here.")).toBe(true);

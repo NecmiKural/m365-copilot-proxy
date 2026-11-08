@@ -335,6 +335,11 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // is scoped to the whole task or run: "I couldn't complete the integration
   // tests because they need Docker" is an honest partial report, not a give-up.
   /\bno\s+(?:[\w-]+\s+){0,4}tools?\s+(?:is|are)\s+(?:currently\s+)?enabled\b/i,
+  // Phase 2e live replies. Require a named tool and an explicit availability
+  // state, in either word order, to avoid matching ordinary tool documentation.
+  /\b(?:terminal|shell|bash|command|execution|file)(?:\s+[\w-]+){0,2}\s+tools?\b[^.\n]{0,40}\b(?:unavailable|not\s+available|no\s+longer\s+available|disabled)\b/i,
+  /\bno\s+(?:[\w-]+\s+){0,3}(?:terminal|shell|bash|command|execution|file)(?:\s+[\w-]+){0,2}\s+tools?\b[^.\n]{0,30}\bavailable\b/i,
+  /\bthis\s+runtime\s+permits\s+only\s+one\s+tool\s+call\s+per\s+assistant\s+message\b/i,
   /\btools?\s+(?:aren.?t|isn.?t|are\s+not|is\s+not)\s+(?:currently\s+)?enabled\s+(?:in\s+this|for\s+this|here|(?:to|for)\s+me)/i,
   /\bI\s+(?:wasn.?t\s+able\s+to|was\s+not\s+able\s+to|was\s+unable\s+to|couldn.?t|could\s+not)\s+(?:complete|finish)\b[^.\n]{0,80}\b(?:in\s+this\s+(?:run|session|turn|chat|conversation|environment)|(?:the|this|your)\s+(?:task|request))/i,
   // Turkish. The model answers in the user's language, so every pattern above was
