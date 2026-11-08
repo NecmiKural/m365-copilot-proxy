@@ -60,6 +60,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | Give-up root-cause offline analysis | COMPLETE | `docs/hypotheses.md` H45; first-turn full-prompt and follow-up delta paths compared with successful runs; no live test or code fix |
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | FAIL, recovery not exercised | Pushed build `49bc1235` ran G twice with valid `--in`: 0/2 PASS, terminal calls 2 and 0, give-up 2/2, full-contract resend 0/2. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`. Port 4142 is closed. |
+| Phase 2e, give-up detector and H45 live recovery | COMPLETE, mixed live result | Detector fix `c9114be` is GREEN. On the pushed build, G ran twice with valid `--in`: 1/2 PASS, 8 and 2 terminal calls, give-up 2/2, detector/full-contract resend 2/2, and model continuation after resend 2/2. C passed 1/1 with two terminal calls and no recovery. Absolute debug ranges: G1 `9776-11421`, G2 `11422-12054`, C `12055-12479`. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2e-summary.txt`. Port 4142 is closed; production 4141 remained healthy on PID 16996. |
 
 ## Invariants
 
