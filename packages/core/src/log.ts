@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -20,6 +20,18 @@ const enabled = !!process.env.M365_DEBUG || trace;
 // one terminal is enough. Safe here because the proxy speaks HTTP — stdout is
 // not a protocol channel.
 const stdoutEnabled = !!process.env.M365_LOG_STDOUT;
+const configuredMaxBytes = Number(process.env.M365_LOG_MAX_BYTES);
+const maxBytes = Number.isFinite(configuredMaxBytes) && configuredMaxBytes > 0
+  ? configuredMaxBytes
+  : null;
+let writtenBytes = 0;
+if (maxBytes !== null) {
+  try {
+    writtenBytes = statSync(LOG_FILE).size;
+  } catch {
+    // The file does not exist yet.
+  }
+}
 
 function timestamp(): string {
   return new Date().toISOString();
