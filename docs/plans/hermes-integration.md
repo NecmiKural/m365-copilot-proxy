@@ -26,10 +26,21 @@ evidence captured on 4 November 2026.
    verified green (unit tests, typecheck, and the relevant live tests show no
    regression), merge `upstream/main` directly into `daily` if it has new
    commits, then merge `dev/integration` into `daily`, build, test, push, and
-   restart production 4141 at any time. Open upstream PR branches (#70, #71,
-   #78) are left untouched. Create a `daily-backup-<date>` tag first for
+   restart production 4141 at any time. Create a `daily-backup-<date>` tag first for
    rollback. The supervisor performs the restart (the worker agent itself runs
    on 4141).
+8. Scope (user decision, 2026-11-08): only `daily`, `dev/integration` and
+   upstream `main` matter. Open upstream PRs (#70, #71, #78) are neither
+   tracked nor touched.
+9. Stall tracker (user decision, 2026-11-08): every stall or wrong turn the
+   worker agent shows while developing the proxy through the proxy is logged
+   in the Stall tracker below. Model-independent bugs and integration gaps
+   get fixed; pure model behaviour is noted only.
+10. Production operations (user decision, 2026-11-08): production writes the
+    truncated debug log (`M365_DEBUG=1`) and a watchdog task restarts the
+    proxy after a crash.
+11. Next feature (user decision, 2026-11-08): schema validation of tool
+    arguments (Phase 5 idea 2), as Phase 7.
 
 ## Goal
 
@@ -88,9 +99,18 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
   `ad4213b` (fourth deploy 2026-11-08; rollback tags `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `44764` (since the fourth 2026-11-08 deploy; it
+- Production port 4141 runs PID `55104` (since the 2026-11-08 watchdog test; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
+- Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
+  sets `M365_DEBUG=1`, so the proxy writes `debug.log` in that folder. The
+  scheduled task `M365 Copilot Proxy Watchdog` runs `proxy-watchdog.ps1`
+  every 2 minutes: if nothing listens on 4141 and the `M365 Copilot Proxy`
+  task is not running, it starts that task; it rotates `debug.log` to
+  `debug.log.1` above 100 MB; actions go to `watchdog.log`. Verified
+  2026-11-08: killed PID 44764, watchdog restarted the proxy in 60 s (PID
+  55104), `/health` 200, live chat OK. Backups of the original task XML and
+  start script are in the external `runtime/reports/`.
 - Development checkout: `dev/integration`. Preserve
   `feat/hermes-agent-integration` unchanged as the branch from which it was
   created.
@@ -289,8 +309,7 @@ behaviour.
 
 Watch-list:
 
-- https://github.com/AlenPelin/m365-copilot-proxy — fork that builds on Necmi's
-  upstream PRs (#70/#71/#78); watch-list, review later.
+- https://github.com/AlenPelin/m365-copilot-proxy
 - https://github.com/cramt/m365-copilot-proxy/pull/46
 - https://github.com/cramt/m365-copilot-proxy/pull/90
 - https://github.com/kuchris/m365-copilot-openai-proxy
@@ -311,13 +330,52 @@ before starting:
   assumptions: `log.test.ts` and `scripts/bench/turn-budget.test.mjs`.
 - Windows phase-sweep adaptations (`owns_port`, a port check instead of
   `kill -0`, stopping via `Get-NetTCPConnection`).
-- Restart-on-crash for the autostart scheduled task (today the proxy does not
-  come back after a crash).
-- Watch the open upstream PRs #70 (gpt56-relay), #71 (fence-parsing) and #78
-  (giveup-patterns): fix and draft replies for new reviews (shown to the user
-  first), and apply the upstream merge routine when upstream/main moves
+- Restart-on-crash for the autostart scheduled task: DONE 2026-11-08 by a
+  watchdog task (see Invariants). A task-level `RestartOnFailure` policy was
+  not used because it does not cover a process that exits after a
+  successful start.
+- Apply the upstream merge routine when upstream/main moves
   (`git merge --no-ff --no-commit upstream/main`, no rebase or force push;
   upstream sections first in `hypotheses.md`, ours renumbered after). If an upstream pull
 request is later warranted, create its focused topic branch by cherry-picking
 the relevant commits from `dev/integration`; do not develop it separately in
 advance.
+
+### Phase 7: Tool argument schema validation
+
+Source: Phase 5 review, idea 2 (`docs/plans/phase5-inspiration-review.md`).
+After fenced argument parsing and before `tool_calls` are returned, check the
+arguments against the request's tool JSON schema (required fields, scalar
+types, `additionalProperties: false`). Coerce only lossless cases (for
+example `"30"` to `30` for an integer field); on a real violation, ask the
+model once to correct the call with the validation error, behind a kill
+switch. Use what the codebase already has before adding a dependency. RED
+tests first; live G x2 + C x1 for regression; one malformed-argument live
+case if it can be provoked.
+
+## Stall tracker
+
+Stalls and wrong turns of the worker agent (pi, which itself runs through
+production 4141) and of Hermes during this work. Class: `proxy` =
+model-independent proxy bug, `integration` = missing integration behaviour,
+`worker` = worker harness or briefing issue, `model` = model behaviour only.
+
+| ID | Observed | Class | Status |
+|---|---|---|---|
+| S1 | Follow-up (delta) turns lost the tool contract; model said it has no tools | proxy | FIXED H45 (`35722f1`) |
+| S2 | Forcing probe after a give-up executed an extra real tool call | proxy | FIXED H46 (`1244d69`) |
+| S3 | Adjacent fences leaked header lines into the first command | proxy | FIXED H47 (`7271d58`) |
+| S4 | `<command>` wrapper leaked into the shell command | proxy | FIXED F1 (`873f1de`) |
+| S5 | First-turn give-up (no tool call yet) was not recovered | proxy | FIXED H51 (`e03b990`) |
+| S6 | Turkish capability denial ("terminal erisimi yeniden etkinlestirilmeli") stopped pi on production | proxy | FIXED H51 (`e03b990`) |
+| S7 | Model reports a success sentinel without running the requested calls | integration | OPEN, H50 documented |
+| S8 | In parallel mode the model claims "one tool call per turn" | model | OPEN, recovery mitigates; parallel stays env-gated |
+| S9 | pi ends its turn with "work not completed" while steps remain and no capability claim is made | integration | OPEN, investigate with the production debug log: should a "remaining steps" final answer trigger recovery? |
+| S10 | pi ran an unbounded whole-disk `find` and blocked for 48 min | worker | MITIGATED by brief rule (timeouts, no disk scans) |
+| S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | OPEN: consider a 127.0.0.1 default bind in the proxy |
+| S12 | pi wrote reports into the repository `runtime/` folder and committed them | worker | MITIGATED by absolute report paths in briefs |
+| S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
+
+Add new rows as they are observed; fix `proxy` and `integration` rows in
+their own phase with RED tests first.
+
