@@ -6424,6 +6424,12 @@ tool results, and the sentinel. No proxy code is proposed in Phase 4b.
 
 ## 51. 8 November 2026 — capability denial after an unreadable tool call
 
+**Phase 8 review.** The proxy cannot safely verify a success sentinel by
+itself: it does not know the harness's requested call count or whether a
+task-specific sentinel is semantically justified. Treating the sentinel as a
+proxy-level failure would risk retrying valid completions. S7 therefore remains
+a harness/integration concern; no detector or recovery code is added.
+
 ### H51 — an unreadable-call re-ask suppressed recovery for a real capability denial
 
 **Observation.** In the Phase 4d G2 trace, after a real terminal result the model
