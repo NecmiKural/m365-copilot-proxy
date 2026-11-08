@@ -46,7 +46,14 @@ function write(level: string, component: string, ...args: unknown[]) {
   if (stdoutEnabled) process.stdout.write(line);
   try {
     mkdirSync(LOG_DIR, { recursive: true });
+    const lineBytes = Buffer.byteLength(line);
+    if (maxBytes !== null && writtenBytes > 0 && writtenBytes + lineBytes > maxBytes) {
+      rmSync(`${LOG_FILE}.1`, { force: true });
+      renameSync(LOG_FILE, `${LOG_FILE}.1`);
+      writtenBytes = 0;
+    }
     appendFileSync(LOG_FILE, line);
+    writtenBytes += lineBytes;
   } catch {
     // best effort
   }
