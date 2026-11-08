@@ -85,6 +85,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | FAIL, recovery not exercised | Pushed build `49bc1235` ran G twice with valid `--in`: 0/2 PASS, terminal calls 2 and 0, give-up 2/2, full-contract resend 0/2. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`. Port 4142 is closed. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-09 (7) | COMPLETE | S16 in-process log rotation (`961304f`, `bc1df74`, enabled in production at 100 MB) and wider H52 unfinished-work detection (`b9216e5`, S23); `upstream/main` had no new commits; `daily` merged as `e279384`, pushed; backup tag `daily-backup-20261109b`; build, tsc green, Vitest 502 passed, 0 failed; 4141 PID 60320 -> 7736, `/health` 200, live chat `DEPLOY7_OK`. |
 | Deploy 2026-11-09 (6) | COMPLETE | Phase 8 H52 incomplete-work recovery (`68be4b9`, `7cf50c8`); S9 and S22 closed for the explicit forms; `upstream/main` had no new commits; `daily` merged as `8acee58`, pushed; backup tag `daily-backup-20261109`; build, tsc green, Vitest 499 passed, 0 failed; 4141 PID 27900 -> 60320, `/health` 200, live chat `DEPLOY6_OK`. |
 | Deploy 2026-11-08 (5) | COMPLETE | Phase 7/7b tool argument validation (`1e57455`, fail-open `b8f812a`), S21 detector fix, Windows test fixes (`c30252b`); `upstream/main` had no new commits; `daily` merged as `8906531`, pushed; backup tag `daily-backup-20261108e`; build, tsc green, Vitest 497 passed, 0 failed; 4141 PID 55104 -> 27900, `/health` 200, live chat `DEPLOY5_OK`. |
 | Deploy 2026-11-08 (4) | COMPLETE | Phase 4d H51 `e03b990` (first-turn and EN/TR capability-denial give-ups recovered); live G 2/2 (recovery 2x each), C 1/1; `upstream/main` had no new commits; `daily` merged as `ad4213b`, pushed; backup tag `daily-backup-20261108d`; build, tsc green, Vitest 484 passed with the 2 known Windows failures; 4141 PID 59484 -> 44764, `/health` 200, live chat `DEPLOY4_OK`. |
@@ -102,16 +103,18 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `8acee58` (sixth deploy 2026-11-09; rollback tags `daily-backup-20261109` =
+  `e279384` (seventh deploy 2026-11-09; rollback tags `daily-backup-20261109b` =
+  `8acee58`, `daily-backup-20261109` =
   `8906531`, `daily-backup-20261108e` =
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `60320` (since the sixth deploy, 2026-11-09; it
+- Production port 4141 runs PID `7736` (since the seventh deploy, 2026-11-09; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
-  sets `M365_DEBUG=1`, so the proxy writes `debug.log` in that folder. The
+  sets `M365_DEBUG=1` and `M365_LOG_MAX_BYTES=104857600` (in-process rotation
+  to `debug.log.1`, S16), so the proxy writes `debug.log` in that folder. The
   scheduled task `M365 Copilot Proxy Watchdog` runs `proxy-watchdog.ps1`
   every 2 minutes: if nothing listens on 4141 and the `M365 Copilot Proxy`
   task is not running, it starts that task; it rotates `debug.log` to
