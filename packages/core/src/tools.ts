@@ -594,12 +594,13 @@ export function looksLikeConfabulation(text: string | null, afterToolResult = fa
   // H52: after a real tool result, an explicit unfinished-work summary is a
   // mid-task give-up. The context gate prevents ordinary prose containing
   // "remaining" from being retried.
+  const incompleteText = normalized.replace(/ı/g, "i");
   const incompleteWork = afterToolResult && (
-    /\blong_chain_incomplete:\d+\b/.test(normalized) ||
-    (/\bcalisma tamamlanmadi\b/.test(normalized) &&
-      /\bkalan adimlar\s*:/.test(normalized)) ||
-    (/\bwork is not complete\b/.test(normalized) &&
-      /\bremaining steps\s*:/.test(normalized))
+    /\blong_chain_incomplete:\d+\b/.test(incompleteText) ||
+    (/\bcalisma tamamlanmadi\b/.test(incompleteText) &&
+      /\bkalan adimlar\s*:/.test(incompleteText)) ||
+    (/\bwork is not complete\b/.test(incompleteText) &&
+      /\bremaining steps\s*:/.test(incompleteText))
   );
   // Only first-person/session-scoped claims about the model's own execution
   // capability belong here. General API, user-access, and environment facts
