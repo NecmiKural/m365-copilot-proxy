@@ -6225,3 +6225,42 @@ numbered-step accounting should continue. No live test is needed.
 submission defect. Full-history recovery behaved as designed, but the earlier
 generic `ls -la`/`cat` forcing probe consumed one real terminal call before an
 exact-call-count task began.
+
+---
+
+## 47. 8 November 2026 — Phase 2b terminal rejection inventory
+
+### H47 — observed terminal failures are body-shape corruption, not schema-field rejection
+
+**Observation.** A read-only inventory of the isolated and production debug
+logs found 46 terminal executions: 45 isolated and one production. Three
+isolated executions were malformed. One is the wrapper leak at
+`debug-4142.log:3006`, whose text includes
+`"command":"<command>\npwd\n</command>"`; its shell rejection at line 3009
+includes `syntax error ... '<command>'`. Two are adjacent-fence leaks:
+line 3653 includes `terminal: command not found ... background:: command not
+found ... timeout:: command not found ... workdir:: command not found`, and
+line 5957 includes the same `terminal`, `background:` and `timeout:` shell
+errors. No missing-field, wrong-type, extra-field, or PowerShell-in-POSIX case
+was observed. The production log's sole terminal call is well formed; its
+nonzero result is an expected empty-directory loop outcome.
+
+**Hypothesis.** For the inspected corpus, reliability work should target
+command-body boundaries before adding generic argument normalisation. XML
+wrapper removal addresses one observed shape, while adjacent-fence leakage is a
+separate scanner/body-boundary defect. There is no log evidence yet that
+required-field insertion, type coercion beyond the existing union fix, unknown
+field removal, or PowerShell translation would repair an observed rejection.
+
+**Prediction.** Offline replay of the three captured raw replies will reproduce
+one XML-wrapped command and two commands containing a second fence's marker and
+headers. Replaying all other logged terminal calls will not yield a
+missing-field, wrong-type, extra-field, or PowerShell classification.
+
+**Proposed test.** Add parser-only fixtures for the exact wrapper reply and both
+adjacent-fence shapes, then assert either a clean single command or an explicit
+unreadable-call result. Separately add synthetic schema-validation fixtures for
+missing, wrong-type, and extra fields before implementing normalisation; do not
+claim those classes as production defects until a real or synthetic failing
+case exists. Full counts and redacted evidence are in
+`docs/plans/phase2b-terminal-argument-classification.md`.
