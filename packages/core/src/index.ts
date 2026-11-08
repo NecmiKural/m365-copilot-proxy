@@ -121,6 +121,7 @@ export {
   formatToolChoiceInstruction,
   getMessageContent,
   parseToolCalls,
+  validateToolArguments,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
   looksLikeRemoteArtifactCompletion,
@@ -136,6 +137,7 @@ export {
   type ToolChoice,
   type ParsedToolCall,
   type ParseResult,
+  type ToolArgumentValidation,
 } from "./tools.js";
 
 export { createLogger, trunc, LOG_PATH, FRAME_DIR, fileLoggingEnabled } from "./log.js";

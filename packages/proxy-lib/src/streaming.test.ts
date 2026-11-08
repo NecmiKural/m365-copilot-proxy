@@ -1727,3 +1727,114 @@ describe("request-scoped parallel tool calls", () => {
     expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
   });
 });
+
+describe("tool argument schema validation", () => {
+  const configure = {
+    type: "function",
+    function: {
+      name: "configure",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string" },
+          retries: { type: "integer" },
+          enabled: { type: "boolean" },
+        },
+        required: ["target", "retries"],
+        additionalProperties: false,
+      },
+    },
+  };
+
+  afterEach(() => {
+    delete process.env.M365_NO_ARG_VALIDATION;
+    delete process.env.M365_PARALLEL_TOOLS;
+    scripted.queue = [];
+  });
+
+  async function ask(replies: string[], options: { parallel?: boolean; tools?: any[] } = {}) {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = replies.map((fullText) => ({ fullText }));
+    if (options.parallel) process.env.M365_PARALLEL_TOOLS = "1";
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: options.parallel,
+      tools: options.tools ?? [configure],
+      messages: [{ role: "user", content: `configure ${Math.random()}` }],
+    }), new SessionPool());
+    return (await response.json()).choices[0].message;
+  }
+
+  it.each([
+    ["missing required field", "```configure\ntarget: app\n```", "required property \"retries\""],
+    ["wrong scalar type", "```configure\ntarget: app\nretries: many\n```", "property \"retries\" must be an integer"],
+    ["additional property", "```configure\ntarget: app\nretries: 3\nextra: nope\n```", "additional property \"extra\" is not allowed"],
+  ])("asks exactly once to correct a %s", async (_name, invalid, error) => {
+    const valid = "```configure\ntarget: app\nretries: 3\n```";
+    const message = await ask([invalid, valid]);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain(error);
+    expect(scripted.texts[1]).toContain("send the corrected tool call once");
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({ target: "app", retries: 3 });
+  });
+
+  it("coerces only lossless integer and boolean strings", async () => {
+    const message = await ask(["```configure\ntarget: app\nretries: \"30\"\nenabled: \"true\"\n```"]);
+    expect(scripted.texts).toHaveLength(1);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: 30, enabled: true,
+    });
+  });
+
+  it("passes a valid call through unchanged", async () => {
+    const message = await ask(["```configure\ntarget: app\nretries: 30\nenabled: true\n```"]);
+    expect(scripted.texts).toHaveLength(1);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: 30, enabled: true,
+    });
+  });
+
+  it("bypasses validation under M365_NO_ARG_VALIDATION=1", async () => {
+    process.env.M365_NO_ARG_VALIDATION = "1";
+    const message = await ask(["```configure\ntarget: app\nretries: many\nextra: kept\n```"]);
+    expect(scripted.texts).toHaveLength(1);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: "many", extra: "kept",
+    });
+  });
+
+  it("validates every call in parallel mode and retries the whole batch once", async () => {
+    const invalid = "```configure\ntarget: first\nretries: 1\n```\n```configure\ntarget: second\n```";
+    const valid = "```configure\ntarget: first\nretries: 1\n```\n```configure\ntarget: second\nretries: 2\n```";
+    const message = await ask([invalid, valid], { parallel: true });
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("call 2");
+    expect(scripted.texts[1]).toContain("required property \"retries\"");
+    expect(message.tool_calls).toHaveLength(2);
+    expect(message.tool_calls.map((c: any) => JSON.parse(c.function.arguments).retries)).toEqual([1, 2]);
+  });
+
+  it("asks only once and never returns a still-invalid corrected call", async () => {
+    const invalid = "```configure\ntarget: app\n```";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: invalid },
+      { fullText: invalid },
+      { fullText: "```configure\ntarget: app\nretries: 3\n```" },
+    ];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      tools: [configure],
+      messages: [{ role: "user", content: `configure ${Math.random()}` }],
+    }), new SessionPool());
+    expect(scripted.texts).toHaveLength(2);
+    expect(response.status).toBe(502);
+    const body = await response.json();
+    expect(body.error.type).toBe("tool_argument_validation_error");
+    expect(body.error.message).toContain('required property "retries"');
+  });
+});

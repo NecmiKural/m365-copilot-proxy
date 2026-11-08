@@ -27,6 +27,7 @@ export interface ToolFunction {
   parameters?: {
     properties?: Record<string, { type?: string; [k: string]: unknown }>;
     required?: string[];
+    additionalProperties?: boolean;
     [k: string]: unknown;
   };
 }
@@ -322,6 +323,96 @@ export interface ParseResult {
   hasToolCalls: boolean;
   toolCalls: ParsedToolCall[];
   textContent: string | null;
+}
+
+export interface ToolArgumentValidation {
+  calls: ParsedToolCall[];
+  errors: string[];
+}
+
+function losslessScalar(value: unknown, type: string): { ok: boolean; value: unknown } {
+  if (type === "string") return { ok: typeof value === "string", value };
+  if (type === "integer") {
+    if (typeof value === "number" && Number.isInteger(value)) return { ok: true, value };
+    if (typeof value === "string" && /^-?(?:0|[1-9]\d*)$/.test(value)) {
+      const converted = Number(value);
+      if (Number.isSafeInteger(converted) && String(converted) === value.replace(/^\+/, "")) {
+        return { ok: true, value: converted };
+      }
+    }
+    return { ok: false, value };
+  }
+  if (type === "number") {
+    if (typeof value === "number" && Number.isFinite(value)) return { ok: true, value };
+    if (typeof value === "string" && value.trim() === value && value !== "") {
+      const converted = Number(value);
+      if (Number.isFinite(converted) && String(converted) === value) return { ok: true, value: converted };
+    }
+    return { ok: false, value };
+  }
+  if (type === "boolean") {
+    if (typeof value === "boolean") return { ok: true, value };
+    if (value === "true") return { ok: true, value: true };
+    if (value === "false") return { ok: true, value: false };
+    return { ok: false, value };
+  }
+  if (type === "null") return { ok: value === null, value };
+  return { ok: true, value };
+}
+
+/** Validate parsed calls against the request schemas without adding a JSON-schema dependency. */
+export function validateToolArguments(calls: ParsedToolCall[], tools?: ToolDef[]): ToolArgumentValidation {
+  if (!tools?.length || process.env.M365_NO_ARG_VALIDATION === "1") return { calls, errors: [] };
+  const schemas = new Map(tools.map((tool) => [tool.function.name, tool.function.parameters]));
+  const errors: string[] = [];
+  const validated = calls.map((call, index) => {
+    const schema = schemas.get(call.function.name);
+    if (!schema) return call;
+    let args: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(call.function.arguments);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      args = parsed;
+    } catch {
+      errors.push(`call ${index + 1} (${call.function.name}): arguments must be an object`);
+      return call;
+    }
+    for (const key of schema.required ?? []) {
+      if (!Object.prototype.hasOwnProperty.call(args, key)) {
+        errors.push(`call ${index + 1} (${call.function.name}): required property "${key}" is missing`);
+      }
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(args)) {
+        if (!Object.prototype.hasOwnProperty.call(schema.properties ?? {}, key)) {
+          errors.push(`call ${index + 1} (${call.function.name}): additional property "${key}" is not allowed`);
+        }
+      }
+    }
+    for (const [key, property] of Object.entries(schema.properties ?? {})) {
+      if (!Object.prototype.hasOwnProperty.call(args, key) || typeof property.type !== "string") continue;
+      let value = args[key];
+      // Fenced scalar headers preserve explicit YAML/JSON quotes for non-string
+      // fields. Unwrap exactly one valid JSON string before applying the schema;
+      // this is lossless because parsing and re-encoding preserves its contents.
+      if (property.type !== "string" && typeof value === "string" && value.startsWith('"') && value.endsWith('"')) {
+        try {
+          const unquoted = JSON.parse(value);
+          if (typeof unquoted === "string") value = unquoted;
+        } catch {
+          // Leave malformed quoting untouched so validation reports the type error.
+        }
+      }
+      const result = losslessScalar(value, property.type);
+      if (!result.ok) {
+        errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be ${property.type === "integer" ? "an integer" : `a ${property.type}`}`);
+      } else {
+        args[key] = result.value;
+      }
+    }
+    return { ...call, function: { ...call.function, arguments: JSON.stringify(args) } };
+  });
+  return { calls: validated, errors };
 }
 
 // Patterns of M365's stochastic turn-1 "give-up" confabulation: it claims it can't

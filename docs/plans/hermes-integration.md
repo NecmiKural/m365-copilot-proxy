@@ -55,6 +55,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 7, tool argument schema validation | COMPLETE | Validates required properties, scalar types, and `additionalProperties: false`; permits lossless scalar conversion; retries exactly once on genuine violations; `M365_NO_ARG_VALIDATION=1` bypasses validation. RED then GREEN serial/parallel coverage; build, 494-test Vitest suite, and core/proxy-lib TypeScript checks pass. Isolated 4142 live: G 2/2, C 1/1, malformed arguments provoked and corrected once. External evidence: `runtime/reports/phase7-*.txt`. |
 | Phase 6a, Windows path tests and maintenance review | COMPLETE | Two POSIX-only test fixtures made platform-independent; build, 486-test Vitest suite, and core/proxy-lib TypeScript checks pass. Reports: `runtime/reports/phase6a-*.txt`; autostart design: `docs/plans/phase6-autostart.md`. No live M365 test, port 4142 start, production change, or PR mutation. |
 | Phase 1, tests A-D | PASS | `runtime/reports/hermes-m365-integration-summary.md` |
 | Phase 1, test E typed arguments | PASS | Phase 1 integration evidence |
@@ -353,6 +354,19 @@ switch. Use what the codebase already has before adding a dependency. RED
 tests first; live G x2 + C x1 for regression; one malformed-argument live
 case if it can be provoked.
 
+Status: COMPLETE. Validation now runs after fenced parsing and before tool
+calls are returned. Required fields, scalar types, and
+`additionalProperties: false` are enforced; only lossless scalar conversions
+are accepted. A genuine violation receives one correction request and fails
+closed if the corrected response is still invalid or omits the tool call.
+Set `M365_NO_ARG_VALIDATION=1` to bypass validation. Serial and parallel RED
+tests cover missing, wrong-type, extra-field, conversion, unchanged-valid,
+kill-switch, whole-batch retry, and the one-retry bound. Build, full Vitest
+(494 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. On
+loopback-only 4142, C passed with two calls, G passed twice with eight calls
+each, and a malformed timeout was provoked and corrected. Evidence is under
+the external absolute `runtime/reports/phase7-*.txt` path.
+
 ## Stall tracker
 
 Stalls and wrong turns of the worker agent (pi, which itself runs through
@@ -375,6 +389,7 @@ model-independent proxy bug, `integration` = missing integration behaviour,
 | S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | OPEN: consider a 127.0.0.1 default bind in the proxy |
 | S12 | pi wrote reports into the repository `runtime/` folder and committed them | worker | MITIGATED by absolute report paths in briefs |
 | S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
+| S14 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | model | NOTED: nondeterministic capability denial; existing recovery mitigates and no Phase 7 proxy defect was observed |
 
 Add new rows as they are observed; fix `proxy` and `integration` rows in
 their own phase with RED tests first.
