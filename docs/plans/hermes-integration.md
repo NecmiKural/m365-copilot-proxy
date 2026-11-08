@@ -32,10 +32,11 @@ evidence captured on 4 November 2026.
 8. Scope (user decision, 2026-11-08): only `daily`, `dev/integration` and
    upstream `main` matter. Open upstream PRs (#70, #71, #78) are neither
    tracked nor touched.
-9. Stall tracker (user decision, 2026-11-08): every stall or wrong turn the
-   worker agent shows while developing the proxy through the proxy is logged
-   in the Stall tracker below. Model-independent bugs and integration gaps
-   get fixed; pure model behaviour is noted only.
+9. Issue tracker (user decision, 2026-11-08): every stall or wrong turn of
+   the worker agent, and every unplanned bug or gap met along the way
+   (proxy, integration, tooling, operations), is logged in the Issue tracker
+   below. Model-independent bugs and integration gaps get fixed even when no
+   phase planned them; pure model behaviour is noted only.
 10. Production operations (user decision, 2026-11-08): production writes the
     truncated debug log (`M365_DEBUG=1`) and a watchdog task restarts the
     proxy after a crash.
@@ -367,12 +368,13 @@ loopback-only 4142, C passed with two calls, G passed twice with eight calls
 each, and a malformed timeout was provoked and corrected. Evidence is under
 the external absolute `runtime/reports/phase7-*.txt` path.
 
-## Stall tracker
+## Issue tracker
 
 Stalls and wrong turns of the worker agent (pi, which itself runs through
-production 4141) and of Hermes during this work. Class: `proxy` =
-model-independent proxy bug, `integration` = missing integration behaviour,
-`worker` = worker harness or briefing issue, `model` = model behaviour only.
+production 4141) and of Hermes, plus unplanned bugs and gaps found along the
+way. Class: `proxy` = model-independent proxy bug, `integration` = missing
+integration behaviour, `ops` = production operations or tooling, `worker` =
+worker harness or briefing issue, `model` = model behaviour only.
 
 | ID | Observed | Class | Status |
 |---|---|---|---|
@@ -389,8 +391,16 @@ model-independent proxy bug, `integration` = missing integration behaviour,
 | S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | OPEN: consider a 127.0.0.1 default bind in the proxy |
 | S12 | pi wrote reports into the repository `runtime/` folder and committed them | worker | MITIGATED by absolute report paths in briefs |
 | S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
+| S14 | Production wrote no debug log (stale since 2026-11-05), so real pi failures were invisible | ops | FIXED 2026-11-08: `M365_DEBUG=1` in `start-proxy.cmd` |
+| S15 | Proxy stayed down after a crash until the next logon | ops | FIXED 2026-11-08: watchdog task |
+| S16 | Debug log has no size limit or rotation | ops | MITIGATED: watchdog rotates above 100 MB; in-process rotation still open |
+| S17 | Hermes sends `parallel_tool_calls=true` on every request, so request-flag opt-in turned parallel mode on for all Hermes traffic | integration | FIXED `db53d35`: env gate `M365_PARALLEL_TOOLS=1` |
+| S18 | Two tests failed on Windows because of POSIX path assumptions | proxy | FIXED `c30252b` |
+| S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
+| S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
 | S14 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | model | NOTED: nondeterministic capability denial; existing recovery mitigates and no Phase 7 proxy defect was observed |
 
-Add new rows as they are observed; fix `proxy` and `integration` rows in
-their own phase with RED tests first.
+Add new rows as they are observed, whether or not a phase planned them; fix
+`proxy`, `integration` and `ops` rows in their own small phase with RED tests
+first where code is involved.
 
