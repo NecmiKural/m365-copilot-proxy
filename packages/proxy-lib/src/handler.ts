@@ -407,6 +407,7 @@ export async function handleChatCompletion(
   conv.chain = null;
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
   const parallelToolCalls = body.parallel_tool_calls === true &&
+    process.env.M365_PARALLEL_TOOLS === "1" &&
     process.env.M365_NO_PARALLEL_TOOLS !== "1" &&
     process.env.M365_NO_PARALLEL_TOOL_CALLS !== "1";
   const requestedModel = body.model;

@@ -1511,6 +1511,7 @@ describe("request-scoped parallel tool calls", () => {
   const two = "```bash\npwd\n```\n\n```bash\nprintf parallel\n```";
 
   afterEach(() => {
+    delete process.env.M365_PARALLEL_TOOLS;
     delete process.env.M365_NO_PARALLEL_TOOLS;
     scripted.queue = [];
   });
@@ -1535,7 +1536,15 @@ describe("request-scoped parallel tool calls", () => {
     expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
   });
 
-  it("returns two ordered, uniquely identified calls when explicitly enabled", async () => {
+  it("stays fully serial when only the request flag is enabled", async () => {
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("returns two ordered, uniquely identified calls when env and request flag are enabled", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
     const response = await request(false, true);
     const message = (await response.json()).choices[0].message;
     expect(message.tool_calls).toHaveLength(2);
@@ -1547,6 +1556,7 @@ describe("request-scoped parallel tool calls", () => {
   });
 
   it("streams two independently indexed calls", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
     const response = await request(true, true);
     const chunks = (await response.text()).split("\n")
       .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
@@ -1558,6 +1568,7 @@ describe("request-scoped parallel tool calls", () => {
   });
 
   it("maps both tool results by tool_call_id on the next delta turn", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
     scripted.result = null;
     scripted.texts = [];
     scripted.queue = [{ fullText: two }, { fullText: "PARALLEL_OK" }];
@@ -1580,7 +1591,34 @@ describe("request-scoped parallel tool calls", () => {
     expect(scripted.texts[1]).not.toContain("only the first");
   });
 
+  it("keeps full-contract give-up recovery active in parallel mode", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: two },
+    ];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `recover parallel ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).toContain("PARALLEL TOOL CALLS ARE ENABLED");
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    expect(message.tool_calls).toHaveLength(2);
+  });
+
   it("honors the environment kill switch", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
     process.env.M365_NO_PARALLEL_TOOLS = "1";
     const response = await request(false, true);
     const message = (await response.json()).choices[0].message;
