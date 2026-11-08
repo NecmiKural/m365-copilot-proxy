@@ -6419,3 +6419,39 @@ not affect ordinary requests that do not declare a measurable call set.
 returns `PARALLEL_OK` after one of two requested calls, and assert a
 false-success verdict. Add a passing fixture with two call IDs, two matching
 tool results, and the sentinel. No proxy code is proposed in Phase 4b.
+
+---
+
+## 51. 8 November 2026 — capability denial after an unreadable tool call
+
+### H51 — an unreadable-call re-ask suppressed recovery for a real capability denial
+
+**Observation.** In the Phase 4d G2 trace, after a real terminal result the model
+returned: `I’m sorry, but I can’t complete the remaining terminal calls in this
+response because the terminal tool is not currently available.` The response used a
+curly apostrophe. The detector recognizes this sentence, but the handler previously
+set the confabulation retry budget to zero whenever the preceding reply contained an
+unreadable tool call. Recovery therefore did not run even though the re-asked answer
+was a genuine capability denial. The earlier live process also predated the rebuilt
+detector, which explains why detector-only checks did not match that run.
+
+**Minimum fix.** Normalize apostrophes and diacritics for narrowly scoped first-person
+or session capability denials, while retaining the existing patterns. After an
+unreadable call, preserve an ordinary prose answer, but allow the existing full-contract
+recovery when that answer is classified as a capability denial.
+
+**Regression coverage.** The exact observed curly-apostrophe sentence is in
+`packages/core/src/tools.test.ts`. English and Turkish capability denials recover in
+`packages/proxy-lib/src/streaming.test.ts`. Five EN/TR statements about API, project,
+guest-user, or user access remain false, and an ordinary answer after an unreadable
+call remains final without recovery.
+
+**Verification.** Focused tests pass. Build and both core and proxy-lib TypeScript
+checks pass. Full Vitest reports 484 passed and only the two known Windows absolute-path
+failures. With parallel guidance and `M365_LIVE` unset, isolated port 4142 produced G
+2/2 PASS with eight calls per run and C 1/1 PASS with two calls. Both G runs exercised
+recovery twice, no run observed HTTP 429, and production port 4141 remained healthy.
+
+**Conclusion and Status.** Supported and fixed. The failure was handler control flow,
+not curly-apostrophe matching alone. Recovery now remains selective after unreadable
+syntax: capability denials retry, ordinary answers do not.

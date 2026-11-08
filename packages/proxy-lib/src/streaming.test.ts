@@ -301,11 +301,12 @@ describe("a tool call the proxy can't read", () => {
     expect(scripted.texts).toHaveLength(2);
   });
 
-  it("doesn't force a call after asking again, whatever the answer to that was", async () => {
-    // The re-ask told the model it could reply without the call; a confab retry
-    // on that reply would force the call anyway (review, #71).
-    const msg = await ask([UNCLOSED, "I don't have access to your project files or the ability to run commands here.", "```bash\nls\n```"]);
+  it("doesn't force an ordinary answer after asking again", async () => {
+    // A valid prose answer remains final; only a capability denial enters the
+    // existing give-up recovery path after the syntax re-ask.
+    const msg = await ask([UNCLOSED, "The requested analysis is complete.", "```bash\nls\n```"]);
     expect(msg.tool_calls).toBeUndefined();
+    expect(msg.content).toContain("analysis is complete");
     expect(scripted.texts).toHaveLength(2);
   });
 
@@ -815,6 +816,106 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
   // Live: after a real tool result showed no PDF tool installed, the model said
   // "bash is not enabled"; the forcing prompt then claimed "you have not run any
   // command yet", and the model refused that too.
+  async function askStreaming(messages: any[], pool: InstanceType<typeof SessionPool>) {
+    const res = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-5.6-think-deeper", stream: true, tools, messages,
+    }), pool);
+    const chunks = (await res.text()).split("\n")
+      .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+      .map((line) => JSON.parse(line.slice(6)));
+    const toolCalls = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+    const content = chunks.map((chunk) => chunk.choices?.[0]?.delta?.content ?? "").join("");
+    return { toolCalls, content };
+  }
+
+  it("recovers a first harness turn streaming give-up after an unreadable call", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf step-one\n```LONG_CHAIN_OK:8" },
+      { fullText: "I can't execute the requested terminal calls because no terminal tool is available in this session." },
+      { fullText: "```bash\nprintf recovered\n```" },
+    ];
+
+    const recovered = await askStreaming(
+      [{ role: "user", content: `run a command ${Math.random()}` }],
+      new SessionPool(),
+    );
+
+    expect(scripted.texts).toHaveLength(3);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(JSON.parse(recovered.toolCalls[0].function.arguments).command).toBe("printf recovered");
+    expect(recovered.content).toBe("");
+    scripted.queue = [];
+  });
+
+  it("recovers the observed curly-apostrophe capability denial after a real tool result", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "I’m sorry, but I can’t complete the remaining terminal calls in this response because the terminal tool is not currently available." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `run two commands ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    const recovered = await ask(messages, pool);
+
+    expect(scripted.texts).toHaveLength(3);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf beta");
+    scripted.queue = [];
+  });
+
+  it("recovers a Turkish capability denial after a real tool result", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "Devam edebilmem icin terminal erisimi yeniden etkinlestirilmeli." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `run two commands ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    const recovered = await ask(messages, pool);
+
+    expect(scripted.texts).toHaveLength(3);
+    expect(scripted.newConversations).toBe(1);
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf beta");
+    scripted.queue = [];
+  });
+
+  it("does not recover an ordinary final answer when tools were available but unused", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    scripted.queue = [{ fullText: "The requested analysis is complete. No further action is needed." }];
+
+    const answer = await ask(
+      [{ role: "user", content: `summarize the result ${Math.random()}` }],
+      new SessionPool(),
+    );
+
+    expect(scripted.texts).toHaveLength(1);
+    expect(scripted.newConversations).toBe(0);
+    expect(answer.content).toContain("analysis is complete");
+    scripted.queue = [];
+  });
+
   it("retries a repeated turn-1 tool-unavailable give-up once more", async () => {
     scripted.result = null;
     scripted.texts = [];
