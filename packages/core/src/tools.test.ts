@@ -823,17 +823,39 @@ describe("parallel tool-call framing", () => {
     expect(out).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
   });
 
-  it("relaxes the single-fence contract only for an opted-in request", () => {
-    const out = formatMessages(
-      [{ role: "user", content: "inspect independently" }],
-      tools,
-      undefined,
-      undefined,
-      "baseline",
-      true,
-    );
-    expect(out).toContain("PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST");
-    expect(out).toContain("multiple complete fenced tool calls");
-    expect(out).not.toContain("Never emit two fenced blocks in one response.");
+  it("removes every serial-only instruction from opted-in framing variants", () => {
+    const serialOnly = [
+      /single fenced code block/i,
+      /single ```(?:bash|<tool_name>)? block/i,
+      /ONE ```bash block/i,
+      /exactly one fenced tool call/i,
+      /one tool call per (?:response|reply)/i,
+      /one self-contained ```bash block per turn/i,
+      /one block per (?:reply|turn)/i,
+      /never (?:emit )?two (?:fenced )?blocks/i,
+      /one command at a time/i,
+      /one at a time/i,
+      /each turn is exactly one/i,
+      /Exactly one Thought line and exactly one ```bash block/i,
+    ];
+    const variants = [
+      "baseline", "minimal", "softened", "recency", "fewshot",
+      "proof_demand", "persona", "react", "negative", "honest",
+      "terse_user", "relay", "relay_batch", "retag",
+    ];
+
+    for (const variant of variants) {
+      const out = formatMessages(
+        [{ role: "user", content: "inspect independently" }],
+        tools,
+        undefined,
+        undefined,
+        variant,
+        true,
+      );
+      expect(out, variant).toContain("PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST");
+      expect(out, variant).toContain("multiple complete fenced tool calls");
+      for (const forbidden of serialOnly) expect(out, `${variant}: ${forbidden}`).not.toMatch(forbidden);
+    }
   });
 });
