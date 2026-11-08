@@ -6166,3 +6166,62 @@ The failures split into three observable states. First-turn failures at `runtime
 **Phase 2e live result.** The detector coverage gap was fixed by exact live fixtures and narrow named-tool availability patterns in pushed commit `c9114be`. The isolated build then ran G twice and C once with valid `--in` directories. G1 passed with `LONG_CHAIN_OK:8` after eight real terminal calls; the detector activated and the fresh-conversation full-contract resend occurred at absolute debug line 10192, after which the model continued at line 10336 and completed at line 11358 (`debug-4142.log:9776-11421`). G2 failed after two real terminal calls: recovery activated at line 11785 and the model continued at line 11915, but it stopped with the incorrect claim that an extra call made the requested sequence impossible at line 12004 (`debug-4142.log:11422-12054`). C passed with `HERMES_TOOL_LOOP_OK`, two terminal calls at lines 12226 and 12373, and no detector or resend activation (`debug-4142.log:12055-12479`). Thus G was 1/2 PASS, detector activation was 2/2, full-contract resend was 2/2, and continuation after resend was 2/2. Evidence is outside the repository at `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2e-summary.txt`; port 4142 was closed afterward.
 
 **Updated conclusion.** Phase 2e validates both detector coverage and the recovery mechanism's ability to restore tool use: each detected G give-up caused a fresh-conversation full-contract resend, and the model resumed terminal calls in both runs. It does not establish reliable end-to-end recovery because only one of the two G runs completed. The remaining failure is no longer a missing-tool-contract claim; it is a task-accounting error after recovery, where the model counted the recovery probe as violating the requested eight-step sequence. H45 is therefore partially supported: conversational-state recovery can restore action, but it is not sufficient by itself to preserve exact multi-call task semantics.
+
+---
+
+## 46. 8 November 2026 — Phase 2e G2 recovery replayed a real pre-step probe
+
+### H46 — full-history recovery preserves the forcing probe, so exact-call tasks count it as an extra call
+
+**Observation.** G2 did not duplicate the first numbered call. Before any numbered
+step ran, the initial give-up triggered the ordinary same-conversation forcing
+retry. That retry emitted and executed an inspection call, shown by
+`grep -n debug-4142.log` at line 7377 (`After forcing retry:
+hasToolCalls=true, count=1`) and the following logged command at line 7378
+(`Tool call: terminal {"command":"ls -la\ncat .../data/first.txt .../data/second.txt"}`).
+Its real result then reached the model at lines 7380-7383, including
+`No such file or directory`.
+
+After that result, the model gave up again at line 7443
+(`The inspection completed ... I cannot perform the required eight terminal
+calls`). The H45 recovery activated at line 7445
+(`re-sending full history and tool contract in a fresh conversation`). In the
+fresh conversation, the first numbered command was emitted once and executed
+once: line 7523 says `After forcing retry: hasToolCalls=true, count=1`, line
+7524 records `Tool call: terminal ... "mkdir -p .../data"`, and its result is
+sent at lines 7525-7528. The final refusal appears at lines 7578-7580 and says
+the prior assistant had made an extra call before step 1.
+
+**Hypothesis.** The model's accounting was grounded in the client-held history,
+not in a duplicate proxy submission. Commit `35722f1` calls
+`session.newConversation()` and then rebuilds the recovery prompt with
+`formatMessages(body.messages, body.tools, ...)` (`handler.ts:900-907` at that
+commit). `body.messages` already contains the assistant inspection call and its
+real tool result. The recovery code then invokes `runBuffered()` once
+(`handler.ts:916`) and only afterward records the request message count
+(`handler.ts:918`). Thus the fresh upstream conversation correctly receives the
+full harness history, including the real pre-step inspection call; it does not
+re-send the current in-flight give-up turn or execute step 1 twice. For a task
+requiring exactly eight total terminal calls, however, preserving that probe
+makes the recovered history visibly contain nine calls if all eight numbered
+steps are completed.
+
+**Prediction.** An offline scripted recovery snapshot for this G2 history will
+contain exactly one assistant inspection call/result pair before exactly one
+step-1 `mkdir` call. Removing only the pre-step forcing probe from the fixture,
+or defining the requirement as eight numbered calls rather than eight total
+calls, will remove the model's “extra call before step 1” rationale. Replaying
+the same history unchanged will preserve it.
+
+**Proposed test.** Add a handler-only scripted sequence: initial give-up,
+forcing-probe tool call, probe result, second give-up, full-history recovery,
+and step-1 tool call. Capture the fresh-conversation formatted prompt and assert
+that the probe occurs once, step 1 occurs once, and no assistant give-up turn is
+fabricated into the history. Then compare two scripted model outcomes: strict
+total-call accounting should reject the remaining eight calls, while
+numbered-step accounting should continue. No live test is needed.
+
+**Conclusion.** G2 is evidence of a recovery-policy conflict, not a duplicate
+submission defect. Full-history recovery behaved as designed, but the earlier
+generic `ls -la`/`cat` forcing probe consumed one real terminal call before an
+exact-call-count task began.
