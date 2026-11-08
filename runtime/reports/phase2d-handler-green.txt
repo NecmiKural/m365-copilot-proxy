@@ -1,0 +1,8 @@
+
+ RUN  v4.1.2 C:/Users/NecmiKural/projects/hermes-m365-development/m365-copilot-proxy
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 79 skipped (82)
+   Start at  05:12:39
+   Duration  730ms (transform 215ms, setup 0ms, import 524ms, tests 21ms, environment 0ms)

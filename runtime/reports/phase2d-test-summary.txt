@@ -1,0 +1,27 @@
+Phase 2d offline verification
+==============================
+TDD RED:
+- runtime/reports/phase2d-handler-red.txt
+- Behavioral failure: expected one fresh conversation, received zero.
+
+Focused GREEN:
+- runtime/reports/phase2d-handler-green.txt
+- 3 passed, 79 skipped.
+
+Build:
+- runtime/reports/phase2d-build.txt
+- exit 0.
+
+Full Vitest:
+- runtime/reports/phase2d-vitest.txt
+- 465 passed, 6 skipped, 2 known Windows path failures:
+  - packages/core/src/log.test.ts
+  - scripts/bench/turn-budget.test.mjs
+
+Prior a41fff3 regression:
+- runtime/reports/phase2d-a41fff3-regression.txt
+- Hermes terminal argument compatibility: 9 passed, including adjacent command elements.
+
+TypeScript:
+- runtime/reports/phase2d-tsc-core.txt: exit 0.
+- runtime/reports/phase2d-tsc-proxy-lib.txt: exit 0.

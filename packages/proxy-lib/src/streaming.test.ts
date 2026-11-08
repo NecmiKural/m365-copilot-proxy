@@ -832,6 +832,66 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     scripted.queue = [];
   });
 
+  it("rebuilds a detected mid-task give-up with the full tool contract in a fresh conversation", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `run two commands ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    const recovered = await ask(messages, pool);
+
+    // Normal continuation stays compact and preserves the exact call/result pair.
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash" command="printf alpha">');
+    expect(scripted.texts[1]).toContain("alpha");
+    expect(scripted.texts[1]).not.toContain("<tools>");
+
+    // A detected give-up is recovered outside the state that lost the contract.
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.convs[2]).not.toBe(scripted.convs[1]);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(scripted.texts[2]).toContain("<tools>\nbash\n```bash");
+    expect(scripted.texts[2]).toContain('<tool_response tool="bash" command="printf alpha">');
+    expect(scripted.texts[2]).toContain("alpha");
+    expect(scripted.texts[2]).not.toContain("only the first");
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf beta");
+    scripted.queue = [];
+  });
+
+  it("keeps the same-conversation forcing retry when full give-up resend is disabled", async () => {
+    process.env.M365_NO_GIVEUP_FULL_RESEND = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "Terminal aracı bu oturumda etkin değil; komutları çalıştıramam." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `kill switch ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    await ask(messages, pool);
+
+    expect(scripted.newConversations).toBe(0);
+    expect(scripted.convs[2]).toBe(scripted.convs[1]);
+    expect(scripted.texts[2]).not.toContain("<tools>");
+    expect(scripted.texts[2]).toContain("Your tools are working");
+    delete process.env.M365_NO_GIVEUP_FULL_RESEND;
+    scripted.queue = [];
+  });
+
   it("doesn't tell a model that already ran tools that it ran nothing", async () => {
     scripted.result = null;
     scripted.texts = [];
@@ -847,7 +907,9 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     messages.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "none" });
     const m2 = await ask(messages, pool);
     expect(scripted.texts).toHaveLength(3);
-    expect(scripted.texts[2]).toContain("Your tools are working");
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(scripted.texts[2]).toContain('<tool_response tool="bash" command="command -v pandoc || echo none">');
     expect(scripted.texts[2]).not.toContain("you have not run any command yet");
     expect(JSON.parse(m2.tool_calls[0].function.arguments).command).toBe("py -m pip install fpdf2");
     scripted.queue = [];
