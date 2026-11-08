@@ -887,9 +887,11 @@ export async function handleChatCompletion(
     const everActed = (body.messages ?? []).some(
       (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0,
     );
-    // Not after asking again: the model was just told it could reply without the
-    // call, and a forcing retry would override the answer it gave to that.
-    for (let attempt = 0; attempt < (unreadable ? 0 : maxConfabRetries) && !parsed.hasToolCalls; attempt++) {
+    // Preserve an ordinary plain answer after the syntax re-ask. The only
+    // unreadable-call exception is a capability denial, which still needs the
+    // same full-contract recovery as every other give-up.
+    const retryAfterUnreadable = !unreadable || looksLikeConfabulation(judged);
+    for (let attempt = 0; attempt < (retryAfterUnreadable ? maxConfabRetries : 0) && !parsed.hasToolCalls; attempt++) {
       const confab = looksLikeConfabulation(judged);
       const remoteArtifact = looksLikeRemoteArtifactCompletion(parsed.textContent);
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);

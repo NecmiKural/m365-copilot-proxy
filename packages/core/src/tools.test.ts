@@ -395,6 +395,8 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("The terminal tool is unavailable in this session.")).toBe(true);
     expect(looksLikeConfabulation("Bu oturumda terminal aracı etkin değil.")).toBe(true);
     expect(looksLikeConfabulation("Terminal aracı bu oturumda kullanılamıyor.")).toBe(true);
+    expect(looksLikeConfabulation("Devam edebilmem icin terminal erisimi yeniden etkinlestirilmeli.")).toBe(true);
+    expect(looksLikeConfabulation("I’m sorry, but I can’t complete the remaining terminal calls in this response because the terminal tool is not currently available.")).toBe(true);
   });
 
   it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
@@ -408,6 +410,11 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("I couldn't complete the integration tests because they need Docker; the 12 unit tests pass.")).toBe(false);
     expect(looksLikeConfabulation("The bash tool is enabled by default; set M365_HOST_SHELL to override the dialect.")).toBe(false);
     expect(looksLikeConfabulation("Tools are not enabled for requests without a tools array, so the proxy answers in plain text.")).toBe(false);
+    expect(looksLikeConfabulation("The requested analysis is complete. No further action is needed.")).toBe(false);
+    expect(looksLikeConfabulation("I checked: the API access is unavailable on weekends.")).toBe(false);
+    expect(looksLikeConfabulation("My report says terminal access is disabled for guest users.")).toBe(false);
+    expect(looksLikeConfabulation("Bu projede API erişimi bakım sırasında kullanılamıyor.")).toBe(false);
+    expect(looksLikeConfabulation("Kontrol ettim: kullanıcının terminal erişimi bu ortamda etkin değil.")).toBe(false);
   });
 
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
