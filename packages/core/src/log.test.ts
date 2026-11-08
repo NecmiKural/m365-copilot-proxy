@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 
 const CONFIG_DIR = join(homedir(), ".config", "opencode-m365");
 
@@ -14,7 +13,20 @@ async function load(env: Record<string, string | undefined>) {
 }
 
 describe("debug log and frame dump paths", () => {
-  afterEach(() => vi.unstubAllEnvs());
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function tempLog(name = "debug.log") {
+    const dir = mkdtempSync(join(tmpdir(), "m365-log-"));
+    tempDirs.push(dir);
+    return join(dir, name);
+  }
 
   it("default to debug.log and frames/ in the config dir", async () => {
     const m = await load({ M365_LOG_FILE: undefined, M365_FRAME_DIR: undefined });
