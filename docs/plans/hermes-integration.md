@@ -56,6 +56,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 9b, H52 production coverage extension | COMPLETE | Production coverage found two unique explicit unfinished-work variants after tool results, including source snapshot `debug.log:74697`. Narrow EN/TR incomplete-statement plus remaining-work detection is covered by RED/GREEN tests. Build, full Vitest (502 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Isolated 4142: G 2/2 and C 1/1 passed, with zero genuine HTTP 429 responses; port closed. External evidence: `runtime/reports/phase9-*.txt`. |
 | Phase 8, incomplete-work recovery | COMPLETE | H52 detects explicit unfinished-work summaries only after a tool result and reuses H51 full-history recovery. Focused tests, build, full Vitest (499 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Isolated 4142: G 3/3 and C 1/1 passed; an initial stochastic C failure is retained. External evidence: `runtime/reports/phase8-*.txt`. |
 | Phase 7, tool argument schema validation | COMPLETE | Validates required properties, scalar types, and `additionalProperties: false`; permits lossless scalar conversion; retries exactly once on genuine violations; `M365_NO_ARG_VALIDATION=1` bypasses validation. RED then GREEN serial/parallel coverage; build, 494-test Vitest suite, and core/proxy-lib TypeScript checks pass. Isolated 4142 live: G 2/2, C 1/1, malformed arguments provoked and corrected once. External evidence: `runtime/reports/phase7-*.txt`. |
 | Phase 6a, Windows path tests and maintenance review | COMPLETE | Two POSIX-only test fixtures made platform-independent; build, 486-test Vitest suite, and core/proxy-lib TypeScript checks pass. Reports: `runtime/reports/phase6a-*.txt`; autostart design: `docs/plans/phase6-autostart.md`. No live M365 test, port 4142 start, production change, or PR mutation. |
@@ -84,6 +85,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | FAIL, recovery not exercised | Pushed build `49bc1235` ran G twice with valid `--in`: 0/2 PASS, terminal calls 2 and 0, give-up 2/2, full-contract resend 0/2. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`. Port 4142 is closed. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-09 (6) | COMPLETE | Phase 8 H52 incomplete-work recovery (`68be4b9`, `7cf50c8`); S9 and S22 closed for the explicit forms; `upstream/main` had no new commits; `daily` merged as `8acee58`, pushed; backup tag `daily-backup-20261109`; build, tsc green, Vitest 499 passed, 0 failed; 4141 PID 27900 -> 60320, `/health` 200, live chat `DEPLOY6_OK`. |
 | Deploy 2026-11-08 (5) | COMPLETE | Phase 7/7b tool argument validation (`1e57455`, fail-open `b8f812a`), S21 detector fix, Windows test fixes (`c30252b`); `upstream/main` had no new commits; `daily` merged as `8906531`, pushed; backup tag `daily-backup-20261108e`; build, tsc green, Vitest 497 passed, 0 failed; 4141 PID 55104 -> 27900, `/health` 200, live chat `DEPLOY5_OK`. |
 | Deploy 2026-11-08 (4) | COMPLETE | Phase 4d H51 `e03b990` (first-turn and EN/TR capability-denial give-ups recovered); live G 2/2 (recovery 2x each), C 1/1; `upstream/main` had no new commits; `daily` merged as `ad4213b`, pushed; backup tag `daily-backup-20261108d`; build, tsc green, Vitest 484 passed with the 2 known Windows failures; 4141 PID 59484 -> 44764, `/health` 200, live chat `DEPLOY4_OK`. |
 | Deploy 2026-11-08 (3) | COMPLETE | Phase 4c gate `db53d35` (parallel only with `M365_PARALLEL_TOOLS=1` and request flag); serial G 1/2 (G1 first-turn give-up before any tool use, no recovery path), C 1/1; parallel P PASS on second run (recovery, then 2 calls in one response, `PARALLEL_OK`); `upstream/main` had no new commits; `daily` merged as `f6297d7`, pushed; backup tag `daily-backup-20261108c`; build, tsc green, Vitest 480 passed with the 2 known Windows failures; 4141 PID 26156 -> 59484, `/health` 200, live chat `DEPLOY3_OK`. |
@@ -100,11 +102,12 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `8906531` (fifth deploy 2026-11-08; rollback tags `daily-backup-20261108e` =
+  `8acee58` (sixth deploy 2026-11-09; rollback tags `daily-backup-20261109` =
+  `8906531`, `daily-backup-20261108e` =
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `27900` (since the fifth 2026-11-08 deploy; it
+- Production port 4141 runs PID `60320` (since the sixth deploy, 2026-11-09; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
@@ -398,13 +401,14 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
 | S14 | Production wrote no debug log (stale since 2026-11-05), so real pi failures were invisible | ops | FIXED 2026-11-08: `M365_DEBUG=1` in `start-proxy.cmd` |
 | S15 | Proxy stayed down after a crash until the next logon | ops | FIXED 2026-11-08: watchdog task |
-| S16 | Debug log has no size limit or rotation | ops | MITIGATED: watchdog rotates above 100 MB; in-process rotation still open |
+| S16 | Debug log has no size limit or rotation | ops | FIXED: in-process size limiting and rotation implemented and covered by tests (`8208213`..`bc1df74`) |
 | S17 | Hermes sends `parallel_tool_calls=true` on every request, so request-flag opt-in turned parallel mode on for all Hermes traffic | integration | FIXED `db53d35`: env gate `M365_PARALLEL_TOOLS=1` |
 | S18 | Two tests failed on Windows because of POSIX path assumptions | proxy | FIXED `c30252b` |
 | S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
 | S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
 | S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy | FIXED Phase 7b: `phase7-c-attempt1-debug.txt:48-50` shows exact reply "terminal execution isn’t available" followed by no retry; detector required the word `tool`. Exact RED fixture and minimum detector pattern added. |
 | S22 | Phase 7b live runs were stochastic: the first G run stopped after two calls with `LONG_CHAIN_INCOMPLETE:2`; the first G2 attempt still ended in a capability denial after recovery, while immediate reruns passed with eight calls | proxy / model | FIXED H52 for the explicit incomplete sentinel; H51 continues to mitigate stochastic capability denials. Phase 8 G passed 3/3. |
+| S23 | Production stopped after a tool result with an explicit Turkish unfinished-work summary that listed pending Phase 9 work (`debug.log:74697`) | proxy | FIXED: narrow H52 incomplete-statement plus remaining-work detection after tool results; exact production regression and EN/TR variants pass; external `runtime/reports/phase9-h52-coverage.txt` |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests

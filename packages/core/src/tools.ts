@@ -595,12 +595,14 @@ export function looksLikeConfabulation(text: string | null, afterToolResult = fa
   // mid-task give-up. The context gate prevents ordinary prose containing
   // "remaining" from being retried.
   const incompleteText = normalized.replace(/ı/g, "i");
+  const incompleteStatement =
+    /(?:^|[.!;]\s*)(?:is|calisma|gorev) tamamlanmadi\b/.test(incompleteText) ||
+    /(?:^|[.!;]\s*)work (?:is )?not (?:complete|completed|finished|done)\b/.test(incompleteText);
+  const remainingWork =
+    /\b(?:henuz|kalan|remaining|pending|not yet)\b|\bstill (?:need|needs|needed|remain|remains)\b/.test(incompleteText);
   const incompleteWork = afterToolResult && (
     /\blong_chain_incomplete:\d+\b/.test(incompleteText) ||
-    (/\bcalisma tamamlanmadi\b/.test(incompleteText) &&
-      /\bkalan adimlar\s*:/.test(incompleteText)) ||
-    (/\bwork is not complete\b/.test(incompleteText) &&
-      /\bremaining steps\s*:/.test(incompleteText))
+    (incompleteStatement && remainingWork)
   );
   // Only first-person/session-scoped claims about the model's own execution
   // capability belong here. General API, user-access, and environment facts

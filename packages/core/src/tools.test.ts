@@ -409,15 +409,21 @@ describe("looksLikeConfabulation", () => {
 
   it("flags explicit incomplete-work summaries after a tool result", () => {
     expect(looksLikeConfabulation("Çalışma tamamlanmadı. Kalan adımlar: H52 dokümantasyonu ve kod değişikliği, RED testler, build ve tam test, 4142 canlı G x3 + C x1, raporlar, issue tracker güncellemesi, commit ve push.", true)).toBe(true);
+    expect(looksLikeConfabulation("İş tamamlanmadı. S16 kodu ve testleri pushlandı, ancak H52 kapsam raporu, tam doğrulamalar, plan güncellemeleri ve final commit henüz tamamlanmadı.", true)).toBe(true);
+    expect(looksLikeConfabulation("Görev tamamlanmadı; kalan doğrulamalar henüz çalıştırılmadı.", true)).toBe(true);
     expect(looksLikeConfabulation("LONG_CHAIN_INCOMPLETE:2", true)).toBe(true);
     expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code, run the tests, and commit the result.", true)).toBe(true);
+    expect(looksLikeConfabulation("Work is not finished; I still need to run the tests.", true)).toBe(true);
+    expect(looksLikeConfabulation("Work is not done. The final commit is not yet created.", true)).toBe(true);
   });
 
   it("does NOT flag incomplete-work lookalikes", () => {
     expect(looksLikeConfabulation("Would you like me to continue with the remaining steps?", true)).toBe(false);
     expect(looksLikeConfabulation("All steps complete. The remaining temporary files were removed.", true)).toBe(false);
-    expect(looksLikeConfabulation("The remaining capacity is 20 GB.", true)).toBe(false);
-    expect(looksLikeConfabulation("İlk iki adım tamamlandı; kalan süre yaklaşık beş dakika.", true)).toBe(false);
+    expect(looksLikeConfabulation("Tüm adımlar tamamlandı; kalan geçici dosyalar silindi.", true)).toBe(false);
+    expect(looksLikeConfabulation("Is the work not finished yet?", true)).toBe(false);
+    expect(looksLikeConfabulation("The remaining budget is 3 GB.", true)).toBe(false);
+    expect(looksLikeConfabulation("İlk iki adım tamamlandı; kalan doğrulamalar hakkında kullanıcıya bilgi verildi.", true)).toBe(false);
     expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code and run tests.")).toBe(false);
   });
 
