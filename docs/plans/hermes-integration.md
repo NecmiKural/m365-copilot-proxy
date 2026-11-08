@@ -22,6 +22,14 @@ evidence captured on 4 November 2026.
    committer identity are not rewritten. Any committer correction is deferred
    until an upstream pull request is prepared by cherry-picking focused commits
    from this branch onto a later topic branch.
+7. Deploy rule (user decision, 2026-11-08): when work on `dev/integration` is
+   verified green (unit tests, typecheck, and the relevant live tests show no
+   regression), merge `upstream/main` directly into `daily` if it has new
+   commits, then merge `dev/integration` into `daily`, build, test, push, and
+   restart production 4141 at any time. Open upstream PR branches (#70, #71,
+   #78) are left untouched. Create a `daily-backup-<date>` tag first for
+   rollback. The supervisor performs the restart (the worker agent itself runs
+   on 4141).
 
 ## Goal
 
@@ -60,13 +68,19 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | Give-up root-cause offline analysis | COMPLETE | `docs/hypotheses.md` H45; first-turn full-prompt and follow-up delta paths compared with successful runs; no live test or code fix |
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | FAIL, recovery not exercised | Pushed build `49bc1235` ran G twice with valid `--in`: 0/2 PASS, terminal calls 2 and 0, give-up 2/2, full-contract resend 0/2. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`. Port 4142 is closed. |
+| Deploy 2026-11-08 | COMPLETE | `upstream/main` had no new commits; `daily` merged `dev/integration` at `866039f` as `a3ed0ba` and was pushed; backup tag `daily-backup-20261108`; build, typecheck green, Vitest 467 passed with only the 2 known Windows failures; 4141 restarted (PID 16996 -> 14384), `/health` 200, live chat returned `DEPLOY_OK`. Evidence: external `runtime/reports/deploy-20261108-*`. |
 | Phase 2e, give-up detector and H45 live recovery | COMPLETE, mixed live result | Detector fix `c9114be` is GREEN. On the pushed build, G ran twice with valid `--in`: 1/2 PASS, 8 and 2 terminal calls, give-up 2/2, detector/full-contract resend 2/2, and model continuation after resend 2/2. C passed 1/1 with two terminal calls and no recovery. Absolute debug ranges: G1 `9776-11421`, G2 `11422-12054`, C `12055-12479`. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2e-summary.txt`. Port 4142 is closed; production 4141 remained healthy on PID 16996. |
+| Phase 2f, G2 recovery-history analysis | COMPLETE | H46 shows one real pre-step inspection probe was preserved by full-history recovery; step 1 was not duplicated. Analysis only, no live test. |
+| Phase 2b step 1, terminal rejection classification | COMPLETE | 46 terminal executions inspected across isolated and production logs: wrapper leak 1, adjacent-fence leakage 2, missing field 0, wrong type 0, PowerShell-in-POSIX 0, extra field 0. Report: `docs/plans/phase2b-terminal-argument-classification.md`; no live test. |
 
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `d4af8e34d33adc3ae11ad954969e3b028b7b4cd6`, clean.
-- Production port 4141 remains on PID `16996` and returns HTTP 200.
+  `a3ed0ba` (deployed 2026-11-08; rollback tag `daily-backup-20261108` =
+  `d4af8e34`), clean.
+- Production port 4141 runs PID `14384` (since the 2026-11-08 deploy; it
+  changes on every restart, so read the current LISTENING PID and record it
+  before a run) and returns HTTP 200.
 - Development checkout: `dev/integration`. Preserve
   `feat/hermes-agent-integration` unchanged as the branch from which it was
   created.

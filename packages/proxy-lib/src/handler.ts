@@ -892,7 +892,7 @@ export async function handleChatCompletion(
       if (!confab && !remoteArtifact && !halluc) break;
       const retryKind = remoteArtifact ? "Remote artifact completion" : confab ? "Confabulation" : "Hallucinated completion";
       const fullGiveUpRecovery =
-        confab && everActed && !process.env.M365_NO_GIVEUP_FULL_RESEND;
+        confab && !process.env.M365_NO_GIVEUP_FULL_RESEND;
       if (fullGiveUpRecovery) {
         // H45: a delta continuation can outlive M365's retained tool contract.
         // Recover outside that state by replaying the complete client-held

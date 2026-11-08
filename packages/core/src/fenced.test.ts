@@ -1093,6 +1093,58 @@ describe("Hermes terminal argument compatibility", () => {
     });
   });
 
+  it("separates adjacent terminal fences without leaking the second header into the first command", () => {
+    const source = [
+      "```terminal",
+      "background: false",
+      "timeout: 30",
+      "workdir: C:/work",
+      "",
+      "printf first",
+      "``````terminal",
+      "background: true",
+      "timeout: 60",
+      "workdir: C:/other",
+      "",
+      "printf second",
+      "```",
+    ].join("\n");
+    const { calls } = parseFencedToolCalls(source, specs);
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[0].function.arguments)).toEqual({
+      background: false,
+      timeout: 30,
+      workdir: "C:/work",
+      command: "printf first",
+    });
+    expect(JSON.parse(calls[1].function.arguments)).toEqual({
+      background: true,
+      timeout: 60,
+      workdir: "C:/other",
+      command: "printf second",
+    });
+  });
+
+  it("separates the adjacent-fence wrapper shape observed in debug-4142", () => {
+    const source = [
+      "```terminal",
+      "background: false",
+      "timeout: 30",
+      "",
+      "printf 'alpha short text\\n' > first.txt",
+      "``````terminal",
+      "background: false",
+      "timeout: 30",
+      "",
+      "printf 'alpha short text\\n' > first.txt",
+      "```",
+    ].join("\n");
+    const { calls } = parseFencedToolCalls(source, specs);
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[0].function.arguments).command).toBe("printf 'alpha short text\\n' > first.txt");
+    expect(JSON.parse(calls[1].function.arguments).command).toBe("printf 'alpha short text\\n' > first.txt");
+  });
+
   it("keeps a multiline POSIX command intact", () => {
     expect(argsOf(
       "```terminal\ntimeout: 60\n\nprintf '%s\n' alpha beta\npwd\n```",
