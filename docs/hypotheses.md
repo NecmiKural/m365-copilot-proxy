@@ -6226,6 +6226,19 @@ submission defect. Full-history recovery behaved as designed, but the earlier
 generic `ls -la`/`cat` forcing probe consumed one real terminal call before an
 exact-call-count task began.
 
+**Phase 2g result and Status: supported, fixed.** The handler-only RED fixture
+failed because an initial give-up still used the same-conversation forcing
+prompt. Commit `1244d69` now routes a detected give-up directly to the
+fresh-conversation full-contract resend whenever that policy is enabled; the
+existing `M365_NO_GIVEUP_FULL_RESEND` kill-switch still selects the legacy
+forcing path. The focused handler test passed afterward. In the isolated live
+matrix on commit `7271d58d`, G passed 2/2 with exactly eight terminal calls per
+run and C passed 1/1 with two calls. Recovery occurred in all three runs, while
+no generic probe call occurred. The external summary records G1 at
+`phase2g-summary.txt:2` (`PASS: LONG_CHAIN_OK:8|8|yes|yes|no|no`), G2 at
+`phase2g-summary.txt:3` with the same result, and C at
+`phase2g-summary.txt:4` (`PASS: HERMES_TOOL_LOOP_OK|2|yes|yes|no|no`).
+
 ---
 
 ## 47. 8 November 2026 — Phase 2b terminal rejection inventory
@@ -6264,3 +6277,17 @@ missing, wrong-type, and extra fields before implementing normalisation; do not
 claim those classes as production defects until a real or synthetic failing
 case exists. Full counts and redacted evidence are in
 `docs/plans/phase2b-terminal-argument-classification.md`.
+
+**Phase 2g result and Status: supported, fixed for adjacent fences.** The two
+parser-only RED fixtures reproduced the logged corruption: a
+``````terminal` seam was treated as nesting, so the second fence marker and its
+`background:`, `timeout:`, and `workdir:` headers entered the first command.
+Commit `7271d58` makes that seam close the first block and open a second
+top-level call. Both fixtures and all 217 fenced plus handler regression tests
+passed. Execution policy is unchanged: the handler still keeps only the first
+parsed call and supplies its existing “only the first” note. The isolated live
+matrix reported no adjacent-fence shell leakage in G1, G2, or C at
+`phase2g-summary.txt:2-4`; the corresponding debug ranges were 7907-9216,
+9217-10520, and 10521-10824. This status is limited to the adjacent-fence
+defect; the already-covered exact outer `<command>` wrapper remains a separate
+normalization.
