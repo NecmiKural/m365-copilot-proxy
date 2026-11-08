@@ -866,6 +866,31 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     scripted.queue = [];
   });
 
+  it("uses full-contract recovery instead of requesting a generic probe on an initial give-up", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: "```bash\nprintf step-one\n```" },
+    ];
+
+    const recovered = await ask(
+      [{ role: "user", content: `run exactly eight numbered commands ${Math.random()}` }],
+      new SessionPool(),
+    );
+
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).not.toContain("ls -la");
+    expect(scripted.texts[1]).not.toContain("cat the relevant");
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf step-one");
+    scripted.queue = [];
+  });
+
   it("keeps the same-conversation forcing retry when full give-up resend is disabled", async () => {
     process.env.M365_NO_GIVEUP_FULL_RESEND = "1";
     scripted.result = null;
