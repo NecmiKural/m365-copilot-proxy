@@ -6291,3 +6291,61 @@ matrix reported no adjacent-fence shell leakage in G1, G2, or C at
 9217-10520, and 10521-10824. This status is limited to the adjacent-fence
 defect; the already-covered exact outer `<command>` wrapper remains a separate
 normalization.
+
+---
+
+## 48. 8 November 2026 — real token usage is unavailable in the captured upstream protocol
+
+### H48 — do the upstream frames expose real input or output token counts?
+
+**Observation.** The documented `type:1`, `target:"update"` shapes expose
+message snapshots, classifier `scores`, `turnCount`, `contentOrigin`, and a
+`throttling` object. The final `type:2` item exposes the conversation
+`messages`, the same authoritative throttling state, result metadata, and
+`telemetry.startTime` / `telemetry.userMessageRequestStartTime`. None of those
+documented fields is an input-token, output-token, or total-token count.
+
+A literal inventory of the captured upstream frames in
+`runtime/proxy/debug-4142.log` found no quoted `token`, `tokens`, `usage`,
+`inputTokenCount`, `outputTokenCount`, `metering`, or `telemetry` field. It did
+find `contentOrigin` 147 times, `throttling` 125 times, `messages` 752 times,
+`turnCount` 250 times, and each of
+`maxNumUserMessagesInConversation`, `numUserMessagesInConversation`, and
+`numLongDocSummaryUserMessagesInConversation` 125 times. Representative
+`type:1` evidence is line 22 (`contentOrigin:"EarlyProgress", turnCount:1`) and
+line 23 (`maxNumUserMessagesInConversation:600`,
+`numUserMessagesInConversation:1`,
+`numLongDocSummaryUserMessagesInConversation:0`). A representative final
+`type:2` item begins at line 33. These are message, turn, routing, classifier,
+quota, or timing diagnostics, not token counts.
+
+| Upstream field | Example | Frame | Token count? |
+|---|---:|---|---|
+| `messages[]` | bot/user message objects | type 1 update and type 2 item | No; conversation content |
+| `turnCount` | `1` | type 1 message update; final messages | No; server-side conversation turns |
+| `contentOrigin` | `"EarlyProgress"`, `"DeepLeo"` | type 1 message update; final message | No; response pipeline/routing label |
+| `scores[]` | `BotOffense`, `dea_violation` floats | type 1/final message | No; classifier scores |
+| `throttling.numUserMessagesInConversation` | `1` | type 1 throttling update; type 2 item | No; user-message quota consumption |
+| `throttling.maxNumUserMessagesInConversation` | `600` | type 1 throttling update; type 2 item | No; message quota ceiling |
+| `throttling.numLongDocSummaryUserMessagesInConversation` | `0` | type 1 throttling update; type 2 item | No; long-document message counter |
+| `throttling.metering.*.remainingAllowance` | documented daily/weekly remaining turns when present | throttling update/final state | No; priority-access turns, one unit per turn |
+| `telemetry.startTime` | timestamp, when present | type 2 item | No; timing metadata |
+| `telemetry.userMessageRequestStartTime` | `null` in documented captures | type 2 item | No; timing metadata |
+| `token`, `tokens`, `usage`, `inputTokenCount`, `outputTokenCount` | absent | inspected type 1/type 2 capture | No value available |
+
+**Hypothesis.** The M365 WebSocket contract available to this proxy does not
+expose real model token usage. Its counters measure messages or turns. Mapping
+them to OpenAI `prompt_tokens`, `completion_tokens`, or `total_tokens` would
+mislabel quota state as tokens.
+
+**Prediction.** Further captures may add routing, classifier, timing, or
+priority-access fields, but standard OpenAI usage cannot be populated unless an
+upstream frame explicitly supplies model token counts.
+
+**Conclusion and decision.** Supported for the inspected documentation and
+capture: **real usage unavailable upstream**. No tokenizer estimate is allowed,
+so the standard counters remain unchanged. The proxy currently sets them to
+zero at `packages/proxy-lib/src/handler.ts:1184-1186`. No TDD mapping or live
+4142 request is warranted because the prerequisite, a real upstream token
+field, is absent. Offline evidence is recorded outside the repository at
+`runtime/reports/phase3-upstream-usage-inventory.txt`.

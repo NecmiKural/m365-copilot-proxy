@@ -257,6 +257,14 @@ Inspect documented and captured upstream frames for real usage fields. Map only
 real upstream values to OpenAI usage, including the final streaming usage
 chunk. Do not estimate standard or extension fields.
 
+**Decision (2026-11-08): real usage unavailable upstream.** The inspected
+documentation and `debug-4142.log` expose messages, turn counts, classifier
+scores, content origin, message-quota counters, optional priority-access turn
+allowances, and telemetry timestamps, but no real input/output/total token
+count. Therefore no code or live 4142 test is added, and the existing OpenAI
+usage values remain unchanged. See `docs/hypotheses.md` H48 and external
+`runtime/reports/phase3-upstream-usage-inventory.txt`.
+
 ### Phase 4: Parallel tool calls
 
 Determine whether the limitation is in Hermes request generation, Hermes
