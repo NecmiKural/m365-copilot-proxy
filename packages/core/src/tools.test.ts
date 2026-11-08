@@ -407,6 +407,20 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("I can’t create or inspect files in the current directory because file tools aren’t enabled in this chat. To create `ozet.md`, copy the contents of `note.txt` here, and I’ll provide a one-line summary ready to paste into the file.")).toBe(true);
   });
 
+  it("flags explicit incomplete-work summaries after a tool result", () => {
+    expect(looksLikeConfabulation("Çalışma tamamlanmadı. Kalan adımlar: H52 dokümantasyonu ve kod değişikliği, RED testler, build ve tam test, 4142 canlı G x3 + C x1, raporlar, issue tracker güncellemesi, commit ve push.", true)).toBe(true);
+    expect(looksLikeConfabulation("LONG_CHAIN_INCOMPLETE:2", true)).toBe(true);
+    expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code, run the tests, and commit the result.", true)).toBe(true);
+  });
+
+  it("does NOT flag incomplete-work lookalikes", () => {
+    expect(looksLikeConfabulation("Would you like me to continue with the remaining steps?", true)).toBe(false);
+    expect(looksLikeConfabulation("All steps complete. The remaining temporary files were removed.", true)).toBe(false);
+    expect(looksLikeConfabulation("The remaining capacity is 20 GB.", true)).toBe(false);
+    expect(looksLikeConfabulation("İlk iki adım tamamlandı; kalan süre yaklaşık beş dakika.", true)).toBe(false);
+    expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code and run tests.")).toBe(false);
+  });
+
   it("does NOT flag an honest partial report or prose about tool settings", () => {
     expect(looksLikeConfabulation("I couldn't complete the integration tests because they need Docker; the 12 unit tests pass.")).toBe(false);
     expect(looksLikeConfabulation("The bash tool is enabled by default; set M365_HOST_SHELL to override the dialect.")).toBe(false);

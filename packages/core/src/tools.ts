@@ -585,19 +585,29 @@ export function looksLikeRemoteArtifactCompletion(text: string | null): boolean 
   return REMOTE_ARTIFACT_COMPLETION_PATTERNS.some((re) => re.test(t));
 }
 
-export function looksLikeConfabulation(text: string | null): boolean {
+export function looksLikeConfabulation(text: string | null, afterToolResult = false): boolean {
   if (!text) return false;
   const t = text.trim();
   if (t.length < 12) return false;
   const normalized = t.toLocaleLowerCase("en-US")
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // H52: after a real tool result, an explicit unfinished-work summary is a
+  // mid-task give-up. The context gate prevents ordinary prose containing
+  // "remaining" from being retried.
+  const incompleteWork = afterToolResult && (
+    /\blong_chain_incomplete:\d+\b/.test(normalized) ||
+    (/\bcalisma tamamlanmadi\b/.test(normalized) &&
+      /\bkalan adimlar\s*:/.test(normalized)) ||
+    (/\bwork is not complete\b/.test(normalized) &&
+      /\bremaining steps\s*:/.test(normalized))
+  );
   // Only first-person/session-scoped claims about the model's own execution
   // capability belong here. General API, user-access, and environment facts
   // remain valid answers even when they use the same nouns.
   const capabilityDenial =
     /(?:\bi (?:do not|don.t|cannot|can.t|am unable to|lack|have no)\b[^.\n]{0,100}\b(?:access|execute|run|use|complete)|\b(?:my|this session.s|this turn.s) (?:tool|terminal|shell|command|bash|access|capabil)|\bno (?:terminal|shell|bash|command) tool\b[^.\n]{0,80}\b(?:available|enabled)\b|\bbu oturumda\b[^.\n]{0,80}\b(?:arac|terminal|shell|komut|eris)|\b(?:edebilmem icin|erisimi yeniden)\b[^.\n]{0,80}\b(?:etkinlestirilmeli|kullanilabilir olmali)\b)/.test(normalized) &&
     /\b(?:tool|terminal|shell|command|bash|execute|run|arac|komut|eris\w*|access|capabil\w*)\b/.test(normalized);
-  return capabilityDenial || CONFABULATION_PATTERNS.some((re) => re.test(t));
+  return incompleteWork || capabilityDenial || CONFABULATION_PATTERNS.some((re) => re.test(t));
 }
 
 // A tool result the MODEL wrote. The proxy is the only thing that sends

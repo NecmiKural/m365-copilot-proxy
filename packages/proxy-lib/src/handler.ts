@@ -888,12 +888,14 @@ export async function handleChatCompletion(
     const everActed = (body.messages ?? []).some(
       (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0,
     );
-    // Preserve an ordinary plain answer after the syntax re-ask. The only
-    // unreadable-call exception is a capability denial, which still needs the
-    // same full-contract recovery as every other give-up.
-    const retryAfterUnreadable = !unreadable || looksLikeConfabulation(judged);
+    // H52 applies only immediately after a client-held tool result. Preserve
+    // ordinary plain answers after a syntax re-ask; explicit give-ups still use
+    // the same full-contract recovery as other confabulations.
+    const afterToolResult = body.messages.at(-1)?.role === "tool";
+    const retryAfterUnreadable =
+      !unreadable || looksLikeConfabulation(judged, afterToolResult);
     for (let attempt = 0; attempt < (retryAfterUnreadable ? maxConfabRetries : 0) && !parsed.hasToolCalls; attempt++) {
-      const confab = looksLikeConfabulation(judged);
+      const confab = looksLikeConfabulation(judged, afterToolResult);
       const remoteArtifact = looksLikeRemoteArtifactCompletion(parsed.textContent);
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);
       if (!confab && !remoteArtifact && !halluc) break;
