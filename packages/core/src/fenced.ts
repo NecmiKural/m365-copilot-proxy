@@ -1093,7 +1093,28 @@ function scanFences(text: string, isTool: (info: string) => boolean, from = 0): 
       }
     } else {
       const top = stack[stack.length - 1];
-      if (f && f.char === top.char && f.bare && f.len >= top.len) {
+      // M365 sometimes concatenates a closing fence and the next opener on one
+      // line (` ``````terminal `). Treat the first run as this block's closer
+      // and the second as a separate top-level tool fence, rather than nesting
+      // it and leaking its headers into the first command.
+      const adjacent = line.match(new RegExp(
+        `^([ \t]*)(${escapeRegExp(top.char)}{${top.len}})(${escapeRegExp(top.char)}{${top.len},})([A-Za-z0-9_.-]+)[ \t]*$`,
+      ));
+      if (stack.length === 1 && adjacent && isTool(adjacent[4])) {
+        const closeEnd = offset + adjacent[1].length + adjacent[2].length;
+        blocks.push({ info: open.info, inner: body(open.bodyStart, offset - 1, open.indent), start: open.start, end: closeEnd });
+        const nextStart = closeEnd;
+        const nextFence: FenceLine = {
+          indent: 0,
+          char: adjacent[3][0],
+          len: adjacent[3].length,
+          info: adjacent[4],
+          bare: false,
+        };
+        open = { info: adjacent[4], start: nextStart, bodyStart: lineEnd + 1, indent: 0 };
+        stack[0] = nextFence;
+        glued = null;
+      } else if (f && f.char === top.char && f.bare && f.len >= top.len) {
         stack.pop();
         if (stack.length === 0) {
           blocks.push({ info: open.info, inner: body(open.bodyStart, offset - 1, open.indent), start: open.start, end: lineEnd });
