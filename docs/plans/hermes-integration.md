@@ -407,7 +407,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
 | S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy | FIXED Phase 7b: `phase7-c-attempt1-debug.txt:48-50` shows exact reply "terminal execution isn’t available" followed by no retry; detector required the word `tool`. Exact RED fixture and minimum detector pattern added. |
 | S22 | Phase 7b live runs were stochastic: the first G run stopped after two calls with `LONG_CHAIN_INCOMPLETE:2`; the first G2 attempt still ended in a capability denial after recovery, while immediate reruns passed with eight calls | proxy / model | FIXED H52 for the explicit incomplete sentinel; H51 continues to mitigate stochastic capability denials. Phase 8 G passed 3/3. |
-| S23 | Production stopped after a tool result with an explicit Turkish unfinished-work summary that listed pending Phase 9 work (`debug.log:74697`) | proxy | OPEN: first live H52 coverage gap; salt-readable analysis in external `runtime/reports/phase9-h52-coverage.txt` |
+| S23 | Production stopped after a tool result with an explicit Turkish unfinished-work summary that listed pending Phase 9 work (`debug.log:74697`) | proxy | FIXED: narrow H52 incomplete-statement plus remaining-work detection after tool results; exact production regression and EN/TR variants pass; external `runtime/reports/phase9-h52-coverage.txt` |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
