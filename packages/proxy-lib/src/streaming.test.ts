@@ -1499,3 +1499,130 @@ describe("stopping a turn that writes its own <tool_response> (early stop)", () 
     expect(JSON.parse(msg.tool_calls[0].function.arguments).command).toBe("ls");
   });
 });
+
+describe("request-scoped parallel tool calls", () => {
+  const tools = [{
+    type: "function",
+    function: {
+      name: "bash",
+      parameters: { type: "object", properties: { command: { type: "string" } } },
+    },
+  }];
+  const two = "```bash\npwd\n```\n\n```bash\nprintf parallel\n```";
+
+  afterEach(() => {
+    delete process.env.M365_PARALLEL_TOOLS;
+    delete process.env.M365_NO_PARALLEL_TOOLS;
+    scripted.queue = [];
+  });
+
+  async function request(stream: boolean, parallel_tool_calls?: boolean) {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: two }];
+    return handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream,
+      parallel_tool_calls,
+      tools,
+      messages: [{ role: "user", content: `parallel ${stream} ${Math.random()}` }],
+    }), new SessionPool());
+  }
+
+  it("keeps the serial contract and only-first behavior by default", async () => {
+    const response = await request(false);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("stays fully serial when only the request flag is enabled", async () => {
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("returns two ordered, uniquely identified calls when env and request flag are enabled", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(2);
+    expect(message.tool_calls.map((c: any) => JSON.parse(c.function.arguments).command)).toEqual(["pwd", "printf parallel"]);
+    expect(new Set(message.tool_calls.map((c: any) => c.id)).size).toBe(2);
+    // Handler behavior proves the request capability reached parsing/rendering.
+    // Prompt wording itself is covered in core because relay variants may omit it
+    // from the upstream text captured by this handler fixture.
+  });
+
+  it("streams two independently indexed calls", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    const response = await request(true, true);
+    const chunks = (await response.text()).split("\n")
+      .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+      .map((line) => JSON.parse(line.slice(6)));
+    const calls = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+    expect(calls.map((c: any) => c.index)).toEqual([0, 1]);
+    expect(new Set(calls.map((c: any) => c.id)).size).toBe(2);
+    expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+  });
+
+  it("maps both tool results by tool_call_id on the next delta turn", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: two }, { fullText: "PARALLEL_OK" }];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `parallel history ${Math.random()}` }];
+    const first = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet", stream: false, parallel_tool_calls: true, tools, messages,
+    }), pool);
+    const calls = (await first.json()).choices[0].message.tool_calls;
+    messages.push({ role: "assistant", content: null, tool_calls: calls });
+    messages.push({ role: "tool", tool_call_id: calls[0].id, content: "cwd-result" });
+    messages.push({ role: "tool", tool_call_id: calls[1].id, content: "printf-result" });
+    await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet", stream: false, parallel_tool_calls: true, tools, messages,
+    }), pool);
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash" command="pwd">');
+    expect(scripted.texts[1]).toContain("cwd-result");
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash" command="printf parallel">');
+    expect(scripted.texts[1]).toContain("printf-result");
+    expect(scripted.texts[1]).not.toContain("only the first");
+  });
+
+  it("keeps full-contract give-up recovery active in parallel mode", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: two },
+    ];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `recover parallel ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).toContain("PARALLEL TOOL CALLS ARE ENABLED");
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    expect(message.tool_calls).toHaveLength(2);
+  });
+
+  it("honors the environment kill switch", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    process.env.M365_NO_PARALLEL_TOOLS = "1";
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+});

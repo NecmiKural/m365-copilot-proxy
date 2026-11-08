@@ -199,12 +199,58 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
   return [replyTool, ...tools];
 }
 
+
+/** Request-scoped removal of serial-only wording from any framing variant. */
+function parallelToolFraming(framing: string): string {
+  const relaxed = framing
+    .replace(/reply with just a single ```([^`]+) block/gi, "reply with one or more independent ```$1 blocks")
+    .replace(/reply with one ```([^`]+) block/gi, "reply with one or more independent ```$1 blocks")
+    .replace(/write a single ```bash block/gi, "write one or more independent ```bash blocks")
+    .replace(/emit ONE ```bash block/gi, "emit one or more independent ```bash blocks")
+    .replace(/output ONLY a single fenced code block/gi, "output one or more fenced code blocks")
+    .replace(/reply with (?:just )?the command in a single ```([^`]+) block/gi, "reply with the commands in one or more ```$1 blocks")
+    .replace(/reply with a single fenced code block/gi, "reply with one or more fenced code blocks")
+    .replace(/the ONLY thing SHGEN can emit is a single ```bash block/gi, "the ONLY thing SHGEN can emit is one or more independent ```bash blocks")
+    .replace(/your ONLY legal output is a single ```bash block/gi, "your ONLY legal output is one or more independent ```bash blocks")
+    .replace(/emit exactly one ```bash block now/gi, "Emit one or more independent ```bash blocks now")
+    .replace(/your VERY NEXT output must be ONE ```bash block/gi, "your VERY NEXT output must be one or more independent ```bash blocks")
+    .replace(/your first output must be a ```bash block/gi, "your first output must contain one or more independent ```bash blocks")
+    .replace(/your first output is always a ```bash block/gi, "your first output always contains one or more independent ```bash blocks")
+    .replace(/your FIRST output is a ```bash block/gi, "your FIRST output contains one or more independent ```bash blocks")
+    .replace(/your first output must be a ```bash block/gi, "your first output must contain one or more independent ```bash blocks")
+    .replace(/emit ONE ```bash block per turn/gi, "emit one or more independent ```bash blocks per turn")
+    .replace(/ONE ```bash block per turn/gi, "one or more independent ```bash blocks per turn")
+    .replace(/One self-contained ```bash block per turn\./gi, "One or more independent, self-contained ```bash blocks may be emitted per turn.")
+    .replace(/One ```bash block per turn;/gi, "One or more independent ```bash blocks per turn;")
+    .replace(/One block per turn;/gi, "One or more independent blocks per turn;")
+    .replace(/ONE block per turn\./gi, "ONE OR MORE INDEPENDENT blocks per turn.")
+    .replace(/Send one block per reply and wait for its result\./gi, "Send independent blocks together and wait for all their results.")
+    .replace(/one command at a time/gi, "independent commands together")
+    .replace(/next, one at a time/gi, "next, batching independent commands")
+    .replace(/No text before or after it:/gi, "No prose before, between, or after the block or blocks:")
+    .replace(/No prose, no second fence, no commentary before or after\./gi, "No prose or commentary before, between, or after the fences.")
+    .replace(/Each turn is exactly one fenced tool call OR the final answer/gi, "Each turn is one or more independent fenced tool calls OR the final answer")
+    .replace(/One tool call per response, then stop and wait for its <tool_response>\. Never emit two fenced blocks in one response\./gi, "You may emit multiple fenced tool calls in one response when they are independent. Emit one complete fence per call, then wait for every matching <tool_response>.")
+    .replace(/Work one step at a time: one tool call per reply, then wait for its <tool_response>\./gi, "Batch independent tool calls in one reply, then wait for every matching <tool_response>.")
+    .replace(/Exactly one Thought line and exactly one or more independent ```bash blocks per turn — never two blocks/gi, "One Thought line followed by one or more independent ```bash blocks per turn")
+    .replace(/Exactly one Thought line and exactly one ```bash block per turn — never two blocks/gi, "One Thought line followed by one or more independent ```bash blocks per turn")
+    .replace(/every assistant turn is either ONE ```bash block or the final one-line answer/gi, "every assistant turn is either one or more independent ```bash blocks or the final one-line answer");
+
+  return `${relaxed}
+
+PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST:
+- You may emit multiple complete fenced tool calls in one assistant response.
+- Calls in the same batch must be independent; no call may depend on another call's result.
+- Every fence becomes a separate tool call with its own identifier and receives its own matching <tool_response>.`;
+}
+
 export function formatMessages(
   messages: Message[],
   tools?: ToolDef[],
   toolChoice?: ToolChoice,
   conversationId?: string,
   framingVariant?: string,
+  parallelToolCalls = false,
 ): string {
   const parts: string[] = [];
 
@@ -220,7 +266,8 @@ export function formatMessages(
   // source.
   const style = transcriptStyleForVariant(framingVariant ?? currentFramingVariant());
   if (effectiveTools && effectiveTools.length > 0 && toolChoice !== "none") {
-    const framing = `${formatToolDefinitions(effectiveTools, framingVariant)}${formatToolChoiceInstruction(toolChoice)}`;
+    const serialFraming = formatToolDefinitions(effectiveTools, framingVariant);
+    const framing = `${parallelToolCalls ? parallelToolFraming(serialFraming) : serialFraming}${formatToolChoiceInstruction(toolChoice)}`;
     parts.push(style.framingTag ? `<${style.framingTag}>\n${framing}\n</${style.framingTag}>` : framing);
   }
 

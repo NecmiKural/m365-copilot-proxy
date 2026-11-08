@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseToolCalls, formatToolDefinitions, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
+import { parseToolCalls, formatToolDefinitions, formatMessages, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
 import type { ToolDef } from "./tools.js";
 
 describe("parseToolCalls", () => {
@@ -792,6 +792,70 @@ describe("transcript style (which tags wrap the framing and harness system promp
     const { formatToolDefinitions } = await import("./tools.js");
     for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       expect(formatToolDefinitions(tools, v)).toMatch(/sandbox/);
+    }
+  });
+});
+
+
+describe("parallel tool-call framing", () => {
+  const tools = [{
+    type: "function" as const,
+    function: {
+      name: "bash",
+      description: "Run a command",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+    },
+  }];
+
+  it("preserves the exact serial only-first contract by default", () => {
+    const out = formatMessages(
+      [{ role: "user", content: "inspect" }],
+      tools,
+      undefined,
+      undefined,
+      "baseline",
+    );
+    expect(out).toContain("One tool call per response, then stop and wait for its <tool_response>. Never emit two fenced blocks in one response.");
+    expect(out).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("removes every serial-only instruction from opted-in framing variants", () => {
+    const serialOnly = [
+      /single fenced code block/i,
+      /single ```(?:bash|<tool_name>)? block/i,
+      /ONE ```bash block/i,
+      /exactly one fenced tool call/i,
+      /one tool call per (?:response|reply)/i,
+      /one self-contained ```bash block per turn/i,
+      /one block per (?:reply|turn)/i,
+      /never (?:emit )?two (?:fenced )?blocks/i,
+      /one command at a time/i,
+      /one at a time/i,
+      /each turn is exactly one/i,
+      /Exactly one Thought line and exactly one ```bash block/i,
+    ];
+    const variants = [
+      "baseline", "minimal", "softened", "recency", "fewshot",
+      "proof_demand", "persona", "react", "negative", "honest",
+      "terse_user", "relay", "relay_batch", "retag",
+    ];
+
+    for (const variant of variants) {
+      const out = formatMessages(
+        [{ role: "user", content: "inspect independently" }],
+        tools,
+        undefined,
+        undefined,
+        variant,
+        true,
+      );
+      expect(out, variant).toContain("PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST");
+      expect(out, variant).toContain("multiple complete fenced tool calls");
+      for (const forbidden of serialOnly) expect(out, `${variant}: ${forbidden}`).not.toMatch(forbidden);
     }
   });
 });

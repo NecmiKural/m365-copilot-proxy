@@ -6291,3 +6291,131 @@ matrix reported no adjacent-fence shell leakage in G1, G2, or C at
 9217-10520, and 10521-10824. This status is limited to the adjacent-fence
 defect; the already-covered exact outer `<command>` wrapper remains a separate
 normalization.
+
+---
+
+## 48. 8 November 2026 — real token usage is unavailable in the captured upstream protocol
+
+### H48 — do the upstream frames expose real input or output token counts?
+
+**Observation.** The documented `type:1`, `target:"update"` shapes expose
+message snapshots, classifier `scores`, `turnCount`, `contentOrigin`, and a
+`throttling` object. The final `type:2` item exposes the conversation
+`messages`, the same authoritative throttling state, result metadata, and
+`telemetry.startTime` / `telemetry.userMessageRequestStartTime`. None of those
+documented fields is an input-token, output-token, or total-token count.
+
+A literal inventory of the captured upstream frames in
+`runtime/proxy/debug-4142.log` found no quoted `token`, `tokens`, `usage`,
+`inputTokenCount`, `outputTokenCount`, `metering`, or `telemetry` field. It did
+find `contentOrigin` 147 times, `throttling` 125 times, `messages` 752 times,
+`turnCount` 250 times, and each of
+`maxNumUserMessagesInConversation`, `numUserMessagesInConversation`, and
+`numLongDocSummaryUserMessagesInConversation` 125 times. Representative
+`type:1` evidence is line 22 (`contentOrigin:"EarlyProgress", turnCount:1`) and
+line 23 (`maxNumUserMessagesInConversation:600`,
+`numUserMessagesInConversation:1`,
+`numLongDocSummaryUserMessagesInConversation:0`). A representative final
+`type:2` item begins at line 33. These are message, turn, routing, classifier,
+quota, or timing diagnostics, not token counts.
+
+| Upstream field | Example | Frame | Token count? |
+|---|---:|---|---|
+| `messages[]` | bot/user message objects | type 1 update and type 2 item | No; conversation content |
+| `turnCount` | `1` | type 1 message update; final messages | No; server-side conversation turns |
+| `contentOrigin` | `"EarlyProgress"`, `"DeepLeo"` | type 1 message update; final message | No; response pipeline/routing label |
+| `scores[]` | `BotOffense`, `dea_violation` floats | type 1/final message | No; classifier scores |
+| `throttling.numUserMessagesInConversation` | `1` | type 1 throttling update; type 2 item | No; user-message quota consumption |
+| `throttling.maxNumUserMessagesInConversation` | `600` | type 1 throttling update; type 2 item | No; message quota ceiling |
+| `throttling.numLongDocSummaryUserMessagesInConversation` | `0` | type 1 throttling update; type 2 item | No; long-document message counter |
+| `throttling.metering.*.remainingAllowance` | documented daily/weekly remaining turns when present | throttling update/final state | No; priority-access turns, one unit per turn |
+| `telemetry.startTime` | timestamp, when present | type 2 item | No; timing metadata |
+| `telemetry.userMessageRequestStartTime` | `null` in documented captures | type 2 item | No; timing metadata |
+| `token`, `tokens`, `usage`, `inputTokenCount`, `outputTokenCount` | absent | inspected type 1/type 2 capture | No value available |
+
+**Hypothesis.** The M365 WebSocket contract available to this proxy does not
+expose real model token usage. Its counters measure messages or turns. Mapping
+them to OpenAI `prompt_tokens`, `completion_tokens`, or `total_tokens` would
+mislabel quota state as tokens.
+
+**Prediction.** Further captures may add routing, classifier, timing, or
+priority-access fields, but standard OpenAI usage cannot be populated unless an
+upstream frame explicitly supplies model token counts.
+
+**Conclusion and decision.** Supported for the inspected documentation and
+capture: **real usage unavailable upstream**. No tokenizer estimate is allowed,
+so the standard counters remain unchanged. The proxy currently sets them to
+zero at `packages/proxy-lib/src/handler.ts:1184-1186`. No TDD mapping or live
+4142 request is warranted because the prerequisite, a real upstream token
+field, is absent. Offline evidence is recorded outside the repository at
+`runtime/reports/phase3-upstream-usage-inventory.txt`.
+
+---
+
+## 49. 8 November 2026 — Phase 4b parallel-call prompt ownership
+
+### H49 — proxy singleton framing contributed to the parallel-call refusal, but Hermes still reports a singleton limit after its removal
+
+**Observation.** The full Phase 4 P3 upstream request set
+`parallel_tool_calls: true`. Hermes's developer prompt also explicitly instructed
+the model to request independent calls together in one response. The proxy's
+request-scoped fenced framing nevertheless retained several contradictory
+singleton instructions across framing variants, including “single fenced code
+block,” “one tool call per reply,” and “never two blocks.” These instructions
+originated in the proxy framing assembled through `tools.ts` and `fenced.ts`,
+not in Hermes's system prompt. Neither `agent.ts`, `handler.ts`, nor
+`executedOnlyFirstNote` introduced the first-turn singleton text.
+
+Commit `1138c58` removes the known serial-only phrases only when
+`parallel_tool_calls` is enabled. A serial-mode regression test preserves the
+existing serial contract exactly, while the parallel test checks every opted-in
+framing variant. The focused GREEN test, generated-prompt scan, build, and
+TypeScript checks passed. Full Vitest reported only the two known Windows path
+failures. External evidence is under `runtime/reports/phase4b-*`.
+
+**Live result.** On the pushed build, isolated P still failed before executing a
+tool. Hermes replied that the runtime permits exactly one tool call per turn.
+The debug range contains zero terminal calls and zero tool results, so the
+required proof of two `tool_calls` in one assistant message and two
+`role:tool` results was not achieved. G also failed before its first call with
+a no-terminal claim. C passed with `HERMES_TOOL_LOOP_OK` and two real terminal
+calls. The proxy on port 4142 was stopped after every run; production port 4141
+remained healthy on PID 26156. The consolidated external record is
+`runtime/reports/phase4b-summary.txt`.
+
+**Conclusion and Status.** Partially supported. Proxy-owned serial instructions
+were a real contradiction and are fixed for parallel requests without changing
+serial mode. They were not the sole cause of the live behavior: after their
+removal, Hermes still asserted a one-call restriction before any tool execution.
+Hermes's own developer prompt favors batching, so the remaining restriction is
+not present in the captured Hermes system text and could not be disabled through
+the isolated provider configuration. It is therefore recorded as a Hermes-side
+runtime or model-policy limit for this tested configuration, not modified in
+Hermes.
+
+---
+
+## 50. 8 November 2026 — parallel false-success detection
+
+### H50 — a success sentinel can conceal incomplete requested tool execution
+
+**Observation.** The earlier Phase 4 P3 run returned `PARALLEL_OK` after only
+one terminal call and one matching tool result. The requested second command
+did not execute. Judging only the final text therefore produced a false success.
+
+**Hypothesis.** For requests that specify an expected tool-call count or set,
+the proxy or harness can detect false success by comparing the observed
+assistant tool calls and matching tool results with the request's declared
+completion condition before accepting a success sentinel. A final value such as
+`PARALLEL_OK` is insufficient evidence when fewer calls or results were
+observed.
+
+**Prediction.** A detector requiring two distinct terminal calls and two
+matching `role:tool` results would reject the earlier P3 result, while accepting
+a genuine batched response only after both results arrive. The same rule should
+not affect ordinary requests that do not declare a measurable call set.
+
+**Proposed test.** Add a future harness-only fixture in which the assistant
+returns `PARALLEL_OK` after one of two requested calls, and assert a
+false-success verdict. Add a passing fixture with two call IDs, two matching
+tool results, and the sentinel. No proxy code is proposed in Phase 4b.
