@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseToolCalls, formatToolDefinitions, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
+import { parseToolCalls, formatToolDefinitions, formatMessages, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
 import type { ToolDef } from "./tools.js";
 
 describe("parseToolCalls", () => {
@@ -793,5 +793,47 @@ describe("transcript style (which tags wrap the framing and harness system promp
     for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       expect(formatToolDefinitions(tools, v)).toMatch(/sandbox/);
     }
+  });
+});
+
+
+describe("parallel tool-call framing", () => {
+  const tools = [{
+    type: "function" as const,
+    function: {
+      name: "bash",
+      description: "Run a command",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+    },
+  }];
+
+  it("preserves the exact serial only-first contract by default", () => {
+    const out = formatMessages(
+      [{ role: "user", content: "inspect" }],
+      tools,
+      undefined,
+      undefined,
+      "baseline",
+    );
+    expect(out).toContain("One tool call per response, then stop and wait for its <tool_response>. Never emit two fenced blocks in one response.");
+    expect(out).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("relaxes the single-fence contract only for an opted-in request", () => {
+    const out = formatMessages(
+      [{ role: "user", content: "inspect independently" }],
+      tools,
+      undefined,
+      undefined,
+      "baseline",
+      true,
+    );
+    expect(out).toContain("PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST");
+    expect(out).toContain("multiple complete fenced tool calls");
+    expect(out).not.toContain("Never emit two fenced blocks in one response.");
   });
 });

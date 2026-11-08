@@ -406,6 +406,9 @@ export async function handleChatCompletion(
   if (conv.chain && !run) conv.pendingNote = null; // its note says the script ran
   conv.chain = null;
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
+  const parallelToolCalls = body.parallel_tool_calls === true &&
+    process.env.M365_NO_PARALLEL_TOOLS !== "1" &&
+    process.env.M365_NO_PARALLEL_TOOL_CALLS !== "1";
   const requestedModel = body.model;
 
   // Priority access (§15, §24 F55, §26, issue #18). Once a budget is used up
@@ -473,7 +476,7 @@ export async function handleChatCompletion(
     text = "";
     log.info(`Running the saved long command: ${trunc(run.function.arguments, 200)} (no M365 turn), cid=${convId}`);
   } else if (isFirstTurn || conv.sentMessageCount === 0) {
-    text = formatMessages(body.messages, body.tools, body.tool_choice, convId, framingVariant);
+    text = formatMessages(body.messages, body.tools, body.tool_choice, convId, framingVariant, parallelToolCalls);
     inputImages = imageUrls(body.messages);
     log.info(`Chat completion: model=${model}, stream=${body.stream}, messages=${body.messages.length}, turn=${session.turnCount}, mode=full, cid=${convId}`);
   } else {
@@ -654,7 +657,7 @@ export async function handleChatCompletion(
         noteAgentRouteDead(tone);
         useToolAgent = false;
         session.newConversation();
-        text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant);
+        text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant, parallelToolCalls);
         inputImages = imageUrls(body.messages);
         originalText = text;
         log.info(`Agent route dead for ${tone} (InternalError) — this account isn't premium; re-sending agent-less with '${framingVariant}' framing in a fresh conversation`);
@@ -685,7 +688,7 @@ export async function handleChatCompletion(
           framingVariant = currentFramingVariant(defaultFramingForModel(model));
           useToolAgent = requestUsesAgent(model, !!hasTools);
           session.newConversation();
-          text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant);
+          text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant, parallelToolCalls);
           inputImages = imageUrls(body.messages);
           originalText = text;
           attempt--;
@@ -724,7 +727,7 @@ export async function handleChatCompletion(
           // `relay`) keeps itself: swapping to `softened` would reintroduce
           // exactly the tag that model reads as a forged system prompt.
           const retryVariant = transcriptStyleForVariant(framingVariant).framingTag === "system" ? "softened" : framingVariant;
-          text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, retryVariant);
+          text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, retryVariant, parallelToolCalls);
           inputImages = imageUrls(body.messages);
           log.info(`Upstream Disengaged — retrying once with '${retryVariant}' framing in a fresh conversation (F22)`);
           attempt--; // free retry; bounded — disengageRetried flips once
@@ -760,7 +763,7 @@ export async function handleChatCompletion(
       ) {
         internalErrorFreshRetried = true;
         session.newConversation();
-        text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant);
+        text = formatMessages(body.messages, body.tools, body.tool_choice, session.conversationId, framingVariant, parallelToolCalls);
         inputImages = imageUrls(body.messages);
         originalText = text;
         log.info(`Upstream InternalError — re-sending the whole request in a fresh conversation (attempt ${attempt + 1}/${MAX_RETRIES})`);
@@ -904,6 +907,7 @@ export async function handleChatCompletion(
           body.tool_choice,
           session.conversationId,
           framingVariant,
+          parallelToolCalls,
         );
         inputImages = imageUrls(body.messages);
         log.info(`Confabulation detected after tool use — re-sending full history and tool contract in a fresh conversation (${attempt + 1}/${maxConfabRetries})`);
@@ -982,7 +986,7 @@ export async function handleChatCompletion(
       // premature success claim ride along at the end. Keeping only the first
       // call forces a real step-by-step loop where each call reacts to the
       // previous tool_response. Set M365_ALLOW_MULTI_TOOL to restore batching.
-      if (!process.env.M365_ALLOW_MULTI_TOOL && parsed.toolCalls.length > 1) {
+      if (!parallelToolCalls && !process.env.M365_ALLOW_MULTI_TOOL && parsed.toolCalls.length > 1) {
         log.info(`One-call-per-turn: keeping ${parsed.toolCalls[0].function.name}, dropping ${parsed.toolCalls.length - 1} batched call(s)`);
         droppedCalls = parsed.toolCalls.length - 1;
         parsed.toolCalls = [parsed.toolCalls[0]];
@@ -994,9 +998,11 @@ export async function handleChatCompletion(
       // short. A lone heredoc file write goes through the harness's write tool;
       // anything else (other commands with it, `py - <<'EOF'`, `py -c`) is saved
       // to a script by the write tool and run whole on the next request.
-      const heredoc = longHeredocAsWrite(parsed.toolCalls[0], body.tools);
+      // Rewrites are inherently serial because the script path chains a second call.
+      const rewriteCandidate = parsed.toolCalls.length === 1 ? parsed.toolCalls[0] : null;
+      const heredoc = rewriteCandidate ? longHeredocAsWrite(rewriteCandidate, body.tools) : null;
       const asWrite = heredoc && !heredoc.skipped ? heredoc : null;
-      const asScript = asWrite ? null : longCommandAsScript(parsed.toolCalls[0], body.tools);
+      const asScript = asWrite || !rewriteCandidate ? null : longCommandAsScript(rewriteCandidate, body.tools);
       let rewriteNote: string | null = null;
       if (asWrite) {
         log.info(`Heredoc write to ${asWrite.path} is over the Windows command-line cap — sent as ${asWrite.call.function.name} instead`);

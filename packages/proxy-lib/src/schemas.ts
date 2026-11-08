@@ -66,4 +66,6 @@ export const ChatCompletionRequest = z.object({
       function: z.object({ name: z.string() }),
     }),
   ]).optional(),
+  // Explicit OpenAI-compatible request capability. Missing/false remains serial.
+  parallel_tool_calls: z.boolean().optional(),
 });

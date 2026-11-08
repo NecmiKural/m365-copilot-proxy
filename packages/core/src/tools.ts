@@ -199,12 +199,33 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
   return [replyTool, ...tools];
 }
 
+
+/** Request-scoped relaxation of the existing single-fence contract. */
+function parallelToolFraming(framing: string): string {
+  return `${framing
+    .replace(/output ONLY a single fenced code block/i, "output one or more fenced code blocks")
+    .replace(/No text before or after it:/i, "No prose before, between, or after the block or blocks:")
+    .replace(/No prose, no second fence, no commentary before or after\./i, "No prose or commentary before, between, or after the fences.")
+    .replace(/Each turn is exactly one fenced tool call OR the final answer/i, "Each turn is one or more independent fenced tool calls OR the final answer")
+    .replace(/One tool call per response, then stop and wait for its <tool_response>\. Never emit two fenced blocks in one response\./i, "You may emit multiple fenced tool calls in one response only when they are independent. Emit one complete fence per call, then stop and wait for every matching <tool_response>.")
+    .replace(/One self-contained ```bash block per turn\./i, "One or more independent, self-contained ```bash blocks may be emitted per turn.")
+    .replace(/One block per turn;/i, "One or more independent blocks per turn;")
+    .replace(/ONE block per turn\./i, "ONE OR MORE INDEPENDENT blocks per turn.")
+  }
+
+PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST:
+- You may emit multiple complete fenced tool calls in one assistant response.
+- Calls in the same batch must be independent; no call may depend on another call's result.
+- Every fence becomes a separate tool call with its own identifier and receives its own matching <tool_response>.`;
+}
+
 export function formatMessages(
   messages: Message[],
   tools?: ToolDef[],
   toolChoice?: ToolChoice,
   conversationId?: string,
   framingVariant?: string,
+  parallelToolCalls = false,
 ): string {
   const parts: string[] = [];
 
@@ -220,7 +241,8 @@ export function formatMessages(
   // source.
   const style = transcriptStyleForVariant(framingVariant ?? currentFramingVariant());
   if (effectiveTools && effectiveTools.length > 0 && toolChoice !== "none") {
-    const framing = `${formatToolDefinitions(effectiveTools, framingVariant)}${formatToolChoiceInstruction(toolChoice)}`;
+    const serialFraming = formatToolDefinitions(effectiveTools, framingVariant);
+    const framing = `${parallelToolCalls ? parallelToolFraming(serialFraming) : serialFraming}${formatToolChoiceInstruction(toolChoice)}`;
     parts.push(style.framingTag ? `<${style.framingTag}>\n${framing}\n</${style.framingTag}>` : framing);
   }
 

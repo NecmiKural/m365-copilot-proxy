@@ -141,6 +141,8 @@ first failing layer without enabling the feature by default.
 
 ## Rollout and kill switch
 
+The proxy only translates protocol messages; it does not execute tools. Read-only eligibility and execution safety remain the client's responsibility.
+
 Keep the feature off by default. Guard it with a request capability and an
 environment kill switch such as `M365_NO_PARALLEL_TOOL_CALLS=1`. A later
 opt-in may be considered only after offline tests and an isolated live PASS.
