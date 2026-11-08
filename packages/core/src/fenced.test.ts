@@ -1046,6 +1046,157 @@ describe("array and object params written as a YAML block (#50)", () => {
   });
 });
 
+
+describe("Hermes terminal argument compatibility", () => {
+  const terminal: ToolDef = {
+    type: "function",
+    function: {
+      name: "terminal",
+      description: "Execute a shell command.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          workdir: { type: "string" },
+          timeout: { type: "integer", minimum: 1 },
+          background: { type: "boolean", default: false },
+          heartbeat: { type: "integer", minimum: 0, default: 0 },
+          notify: {
+            anyOf: [
+              { type: "boolean" },
+              { type: "array", items: { type: "string" } },
+            ],
+          },
+          persist_on_release: { type: "boolean", default: false },
+          pty: { type: "boolean", default: false },
+        },
+        required: ["command"],
+      },
+    },
+  };
+  const specs = buildSpecMap([terminal]);
+
+  const argsOf = (source: string) => {
+    const { calls } = parseFencedToolCalls(source, specs);
+    expect(calls).toHaveLength(1);
+    return JSON.parse(calls[0].function.arguments);
+  };
+
+  it("round-trips the body command and typed Hermes terminal headers", () => {
+    expect(argsOf(
+      "```terminal\nworkdir: C:/Users/NecmiKural/project\ntimeout: 30\nbackground: false\n\necho ok\n```",
+    )).toEqual({
+      workdir: "C:/Users/NecmiKural/project",
+      timeout: 30,
+      background: false,
+      command: "echo ok",
+    });
+  });
+
+  it("keeps a multiline POSIX command intact", () => {
+    expect(argsOf(
+      "```terminal\ntimeout: 60\n\nprintf '%s\n' alpha beta\npwd\n```",
+    )).toEqual({
+      timeout: 60,
+      command: "printf '%s\n' alpha beta\npwd",
+    });
+  });
+
+  it("does not invent optional arguments", () => {
+    expect(argsOf("```terminal\n\npwd\n```")).toEqual({ command: "pwd" });
+  });
+
+  it("strips one exact outer command wrapper from a command body", () => {
+    expect(argsOf("```terminal\n\n<command>\nprintf 'wrapped'\n</command>\n```")).toEqual({
+      command: "printf 'wrapped'",
+    });
+    expect(argsOf("```terminal\n\nprefix <command>pwd</command>\n```")).toEqual({
+      command: "prefix <command>pwd</command>",
+    });
+    expect(argsOf("```terminal\n\n<command>pwd</command> suffix\n```")).toEqual({
+      command: "<command>pwd</command> suffix",
+    });
+    expect(argsOf("```terminal\n\n<command>a</command>\n<command>b</command>\n```")).toEqual({
+      command: "<command>a</command>\n<command>b</command>",
+    });
+  });
+
+  it("preserves every scalar field from the registered Hermes terminal schema", () => {
+    expect(argsOf(
+      "```terminal\nworkdir: C:/Users/NecmiKural/project\ntimeout: 30\nbackground: true\nheartbeat: 60\npersist_on_release: false\npty: true\n\nserver --port 8080\n```",
+    )).toEqual({
+      workdir: "C:/Users/NecmiKural/project",
+      timeout: 30,
+      background: true,
+      heartbeat: 60,
+      persist_on_release: false,
+      pty: true,
+      command: "server --port 8080",
+    });
+  });
+
+  it("parses Hermes notify's anyOf array alternative as an array", () => {
+    expect(argsOf(
+      '```terminal\nbackground: true\nnotify: ["READY", "ERROR"]\n\nserver --port 8080\n```',
+    )).toEqual({
+      background: true,
+      notify: ["READY", "ERROR"],
+      command: "server --port 8080",
+    });
+  });
+
+  it("parses Hermes notify's anyOf boolean alternative as a boolean", () => {
+    expect(argsOf(
+      "```terminal\nbackground: true\nnotify: true\n\nnpm test\n```",
+    )).toEqual({
+      background: true,
+      notify: true,
+      command: "npm test",
+    });
+  });
+
+  it("parses Hermes notify false as a boolean instead of the truthy string false", () => {
+    expect(argsOf(
+      "```terminal\nbackground: false\nnotify: false\n\nprintf ok\n```",
+    )).toEqual({
+      background: false,
+      notify: false,
+      command: "printf ok",
+    });
+  });
+
+  it("preserves text when string is an allowed union alternative", () => {
+    const mixedTerminal: ToolDef = {
+      type: "function",
+      function: {
+        name: "terminal",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string" },
+            mode: {
+              type: "string",
+              anyOf: [{ type: "integer" }],
+            },
+          },
+          required: ["command"],
+        },
+      },
+    };
+    const mixedSpecs = buildSpecMap([mixedTerminal]);
+    const { calls } = parseFencedToolCalls(
+      "```terminal\nmode: 42\n\nprintf ok\n```",
+      mixedSpecs,
+    );
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0].function.arguments)).toEqual({
+      mode: "42",
+      command: "printf ok",
+    });
+  });
+
+});
+
 describe("multi-line string values in a header-only fence (#82)", () => {
   // opencode's `edit`: every param is a header line (no body, no edit pair).
   const ocEdit: ToolDef = {

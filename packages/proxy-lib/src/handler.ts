@@ -876,7 +876,7 @@ export async function handleChatCompletion(
     // thread, cheap). Disable with M365_NO_CONFAB_RETRY; tune count with M365_CONFAB_RETRIES.
     const maxConfabRetries = process.env.M365_NO_CONFAB_RETRY
       ? 0
-      : Number(process.env.M365_CONFAB_RETRIES ?? 1);
+      : Number(process.env.M365_CONFAB_RETRIES ?? 2);
     // The model never actually acted if no assistant turn in the history carried a
     // tool call. Used to gate the hallucinated-completion retry (a model that did
     // real work called at least one tool), keeping false positives near zero.
@@ -891,10 +891,28 @@ export async function handleChatCompletion(
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);
       if (!confab && !remoteArtifact && !halluc) break;
       const retryKind = remoteArtifact ? "Remote artifact completion" : confab ? "Confabulation" : "Hallucinated completion";
-      log.info(`${retryKind} detected (no tool call) — forcing retry ${attempt + 1}/${maxConfabRetries}`);
-      text = remoteArtifact ? REMOTE_ARTIFACT_FORCE_PROMPT
-        : confab ? (everActed ? MIDTASK_FORCE_PROMPT : CONFAB_FORCE_PROMPT)
-        : HALLUCINATION_FORCE_PROMPT;
+      const fullGiveUpRecovery =
+        confab && everActed && !process.env.M365_NO_GIVEUP_FULL_RESEND;
+      if (fullGiveUpRecovery) {
+        // H45: a delta continuation can outlive M365's retained tool contract.
+        // Recover outside that state by replaying the complete client-held
+        // history and tool definitions in a fresh upstream conversation.
+        session.newConversation();
+        text = formatMessages(
+          body.messages,
+          body.tools,
+          body.tool_choice,
+          session.conversationId,
+          framingVariant,
+        );
+        inputImages = imageUrls(body.messages);
+        log.info(`Confabulation detected after tool use — re-sending full history and tool contract in a fresh conversation (${attempt + 1}/${maxConfabRetries})`);
+      } else {
+        log.info(`${retryKind} detected (no tool call) — forcing retry ${attempt + 1}/${maxConfabRetries}`);
+        text = remoteArtifact ? REMOTE_ARTIFACT_FORCE_PROMPT
+          : confab ? (everActed ? MIDTASK_FORCE_PROMPT : CONFAB_FORCE_PROMPT)
+          : HALLUCINATION_FORCE_PROMPT;
+      }
       const retry = await runBuffered();
       if ("error" in retry) return { kind: "error", resp: retry.error };
       conv.sentMessageCount = body.messages.length;

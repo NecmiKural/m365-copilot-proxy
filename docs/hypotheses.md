@@ -5999,3 +5999,170 @@ this repo's own docs, which a project summary resembles, there is one new hit: a
 quoted in §27 ("I can't create or run scripts in this session").
 **Not measured:** how often the forcing retry then turns this give-up. It is the mid-task prompt, sent after
 a real call.
+
+---
+
+## 42. Nov 4 2026 — Hermes union-typed fenced arguments
+
+### F105 — `anyOf` / `oneOf` types must survive fenced-spec derivation 🟢
+**Hypothesis.** Hermes terminal fields declared through JSON Schema unions lose their intended scalar or container type when `deriveFencedSpec()` reads only a property's direct `type`.
+
+**Prediction.** On the old implementation, Hermes's `notify: false` fenced header remains the truthy string `"false"` because `notify` declares `anyOf: [{ type: "boolean" }, { type: "array" }]`. Retaining direct, `anyOf`, and `oneOf` alternatives makes `notify: false`, `notify: true`, and array values preserve their JSON types.
+
+**Probe.** Register the real Hermes terminal argument shape in `packages/core/src/fenced.test.ts`, parse fenced calls containing typed scalar fields, multiline commands, and both `notify` alternatives, then run Hermes end to end against an isolated proxy on port 4142.
+
+**Evidence.** Commit `d27098734f64279d47c0117fdf6f64a921004544` changes `FencedToolSpec.parameterTypes` from one type to an ordered set of direct and union alternatives and applies coercion against those alternatives. The focused parser suite passed 130/130 tests. The isolated Hermes run completed plain chat, a terminal call, a create/read/delete/verify loop, and missing-file recovery through `chat_completions`.
+
+**Conclusion.** Confirmed for the tested Hermes terminal schema. The concrete `"false"` coercion defect is fixed. Broader `oneOf`, block-array, mixed direct/union, numeric-ambiguity, and invalid-container cases remain to be covered before treating union-schema handling as complete.
+
+---
+
+## 42. 4 November 2026 — Hermes tool-mode give-up escaped the detector
+
+### H42 — a repeated give-up exhausts the single forcing retry
+
+**Observation.** During the isolated Hermes parallel probe, M365 made no tool
+call and returned “I can't execute terminal commands in this session because no
+terminal tool is enabled” and “Terminal aracı bu oturumda etkin değil”
+(`runtime/proxy/debug-4142.log`, lines 2837 and 2895). Tools were present in the
+request. The response therefore blocked the probe before parsing, execution,
+history handling, or parallel-call behaviour could be measured.
+
+**Hypothesis.** Pattern coverage and handler routing are not the defect. The
+first English reply was detected and the handler performed its configured
+single forcing retry. The retry then produced the Turkish give-up, after which
+the retry budget was exhausted. A second bounded retry should recover cases
+where the model repeats the same detected failure once.
+
+**Falsification.** The exact English and Turkish replies must already pass the
+detector unit tests. A scripted handler sequence containing both replies and
+then a valid tool call must fail with the one-retry default. Raising only the
+bounded default to two must make that sequence pass while retaining
+`M365_NO_CONFAB_RETRY` and `M365_CONFAB_RETRIES` as explicit controls. The
+isolated live probe determines whether the extra attempt is sufficient for the
+observed route.
+
+**Scope.** This is the same give-up family addressed by PR #78, but these noun
+and word-order variants were not covered. It is not evidence for or against
+parallel tool-call support.
+
+---
+
+## 43. 5 November 2026 — Hermes parallel probes expose prompt and fence-shape conflicts
+
+### F106 — terminal argument wrapper leak
+
+**Observation.** Test P produced one terminal call whose parsed `command` was
+`<command>\npwd\n</command>` (`runtime/proxy/debug-4142.log`, absolute line
+3006). The registered Hermes schema expects the command as the fence body:
+`packages/core/src/fenced.ts:1469-1540` assigns the remaining body directly to
+`bodyParam`, and `packages/core/src/fenced.test.ts:1080-1110` proves that a
+plain `pwd` body becomes `{ command: "pwd" }`. The proxy does not add XML
+`<command>` tags in this path.
+
+**Hypothesis.** The upstream model copied a schema-style wrapper into the fence
+body. Because the parser intentionally preserves body text verbatim, the
+wrapper reached Hermes as shell input and was rejected there.
+
+**Prediction.** An offline parser fixture containing `<command>pwd</command>`
+will preserve those tags, while a plain-body fixture will return `pwd`.
+Capturing the raw upstream response before parsing will show the wrapper was
+already present.
+
+**Proposed test.** Add parser-only fixtures for plain, XML-wrapped, and
+Markdown-fenced Hermes terminal bodies. Then replay the captured response
+offline. Do not normalize arbitrary XML until the raw-response origin is
+confirmed.
+
+**Minimum candidate fix.** If replay confirms this exact model emission,
+strip one exact outer `<command>...</command>` wrapper only for a tool whose
+derived body parameter is `command`, with tests that preserve literal XML in
+ordinary shell scripts.
+
+### F107 — the proxy explicitly teaches one tool call per response
+
+**Observation.** Test P ended with the model claiming that the runtime permits
+only one tool call per assistant message. That statement is consistent with
+the proxy's own instructions, not a fundamental parser limitation:
+`packages/core/src/agent.ts:49-65` says “exactly one fenced tool call per turn”;
+`packages/core/src/fenced.ts:622-633` says “Never emit two fenced blocks”; and
+the softened framing repeats the rule at `packages/core/src/fenced.ts:672-680`.
+Conversely, `packages/core/src/fenced.test.ts:170-173` proves the parser can
+return two fenced calls. `packages/proxy-lib/src/handler.ts:198-212` also tells
+the model that only the first of multiple calls was run.
+
+**Hypothesis.** The parallel target conflicts with the shipped fenced protocol:
+the prompt requires serialization and the handler deliberately reports
+first-call-only execution. The model's claim is therefore prompt-grounded.
+The current confabulation detector in `packages/core/src/tools.ts:280-448`
+does not match “permits only one tool call per assistant message”, so commit
+`67e8f6a` did not retry it.
+
+**Prediction.** Offline prompt snapshots will always contain the single-call
+rule for baseline and softened variants. A parser-only two-fence test will
+still return two calls, demonstrating that prompt and execution policy, rather
+than syntax parsing, block parallel use. The Test G response supports the
+distinction: adjacent fences were emitted, but only one combined malformed
+call ran at absolute debug line 3650 before the give-up at 3699.
+
+**Proposed test.** Add an offline framing variant that explicitly permits two
+independent read-only fences, then feed a fixed two-fence response through
+parse and handler unit tests. Assert two distinct calls, stable IDs, two
+matching tool results in history, and unchanged single-call behaviour for the
+default variant. No live test is required for this hypothesis stage.
+
+**Minimum candidate fix.** Keep the existing serialized default. Add a
+request-scoped parallel framing and execution path only when
+`parallel_tool_calls` is true and every parsed call is read-only; execute all
+accepted calls and return every result with its matching `tool_call_id`.
+Separately expand retry detection only if a one-call limitation claim appears
+despite that parallel framing.
+
+---
+
+## 44. 8 November 2026 — Phase 2c G A/B is nondeterministic
+
+### F108 — the additional pair does not isolate `67e8f6a` as a regression
+
+**Observation.** Four isolated G measurements compared pre-`67e8f6a`
+`b56440cb48d316448c198f908ca09e6b4c49c410` with HEAD
+`d42a591cc4c396ce7caa87ff2d77abddeefff518`. The baseline passed its first
+run with `LONG_CHAIN_OK:8` and eight terminal calls, but its second run gave up
+before making a terminal call. HEAD failed both runs, after two and one terminal
+calls respectively. The complete table is in
+`runtime/reports/phase2c-ab-summary.txt`; per-run evidence records valid
+`--in`, isolated `http://127.0.0.1:4142/v1`, debug-log growth, and absolute
+debug ranges.
+
+**Conclusion.** This is nondeterminism, not a confirmed `67e8f6a` regression:
+baseline is 1/2 PASS and HEAD is 0/2 PASS, so the required baseline 2/2 versus
+HEAD 0/2 split was not observed. The second HEAD run did exercise the bounded
+retry at absolute debug lines 5613 and 5647, but the baseline's independent
+give-up shows that retry behaviour alone cannot explain the live outcome. No
+code change follows from this A/B result.
+
+---
+
+## 45. 8 November 2026 — Give-up replies are model-state failures, not missing tool definitions
+
+### H45 — stateful delta turns make the model misclassify an available terminal after malformed or incomplete-looking execution context
+
+**Observation.** Every inspected first-turn give-up was sent through the handler's full-prompt path. The debug logger truncates formatted prompts at 1,000 characters, so the log cannot directly prove that the later `<tools>...</tools>` region reached upstream intact. However, the full-prompt path calls `formatMessages(body.messages, body.tools, ...)` (`packages/proxy-lib/src/handler.ts:468-476`), and the same path and tool set produced successful terminal calls in the comparison runs. This includes the initial failures at `runtime/proxy/debug-4142.log:2791-2839`, the parallel probe at `runtime/proxy/debug-4142.log:2951-3063`, the malformed long-chain run at `runtime/proxy/debug-4142.log:3462-3701`, and Phase 2c first turns at `runtime/proxy/debug-4142.log:3756-3904`, `5000-5111`, `5320-5370`, and `5425-5572`. The same full-prompt shape succeeds at `runtime/proxy/debug-4142.log:3115-3378` and throughout the eight-call baseline at `runtime/proxy/debug-4142.log:3756-4950`.
+
+Follow-up turns intentionally send only newly appended messages because M365 retains the conversation server-side (`packages/proxy-lib/src/handler.ts:460-497`). Their prompts are correctly paired `<tool_response>` blocks, for example `runtime/proxy/debug-4142.log:3257-3263`, `3380-3386`, `3906-3909`, `5113-5118`, `5204-5210`, and `5574-5580`. No target range records history truncation, summarization, a session-pool continuation collision, or an `executedOnlyFirstNote`; the latter is prepended only when dropped calls set `pendingNote` and a later tool result arrives (`packages/proxy-lib/src/handler.ts:198-212`, `478-488`). The inspected follow-up prompts therefore show no evidence of history truncation, note injection, or cross-paired tool results; direct verification of the first-turn `<tools>` block is limited by the logger's 1,000-character truncation.
+
+The failures split into three observable states. First-turn failures at `runtime/proxy/debug-4142.log:2837` and `5368` deny a terminal even though they were built through the same full-prompt path and tool set as successful runs. The parallel failure at `runtime/proxy/debug-4142.log:3061` follows a real, correctly paired error result for the model-emitted literal `<command> pwd </command>` and repeats the protocol's one-call rule, rather than reporting a missing definition. The long-chain failures at `runtime/proxy/debug-4142.log:3699`, `5264`, and `5610-5647` occur after a real result, but describe the delta-only current message as the entire “current tool interface” or “turn.” By contrast, successful continuations accept the same delta format and use the state retained by M365.
+
+**Hypothesis.** M365 intermittently loses or discounts the stateful first-turn tool contract when judging a delta follow-up. A malformed command result or a task phrased as many required calls increases that tendency, but is not required because clean first turns also fail nondeterministically. No inspected log or handler branch shows the proxy intentionally omitting the terminal schema, but prompt truncation prevents treating its upstream presence as directly observed. The “only one tool call” statement is additionally grounded by the serialized fenced protocol, while the “no terminal” statement is a model-state error. The Phase 2c baseline pass and failure under the same code and prompt format rule out a deterministic parser, `relay_batch`, session-pool, or history-truncation cause.
+
+**Prediction.** In an offline scripted handler test, a continuation formatted as only `<tool_response>` will preserve exact call/result pairing but will not contain `<tools>`, because it relies on upstream state. Replaying the same continuation after forcing a fresh M365 conversation with the full history and tool definitions should restore an explicit `<tools>` block. In a later controlled live A/B, full-history recovery only after a detected mid-task “no terminal” reply should outperform another same-conversation forcing retry if state loss is causal. If both arms fail equally, the hypothesis is false and the failure is model policy rather than lost conversational state.
+
+**Proposed test.** Add an offline handler snapshot with one successful terminal call followed by a matching tool result. Assert that the normal continuation is a delta containing the correct `<tool_response>` and no `<tools>`, while a simulated recovery rebuild contains the balanced `<tools>` block and terminal definition. Separately script a give-up after the result and verify that `executedOnlyFirstNote` is absent unless multiple calls were actually dropped. A future live test, outside this session, should compare same-conversation retry with one fresh-conversation full-history recovery while holding model, task, tools, and account state fixed.
+
+**Phase 2d live result.** The full-history recovery implementation was tested twice on pushed commit `49bc1235` with the isolated Hermes configuration, valid `--in` directories, debug-log growth, and the proxy bound only to `127.0.0.1:4142`. Both G runs failed: the first made two terminal calls before replying that the terminal was no longer available (`debug-4142.log:5702-6053`), and the second made no terminal call before the same class of give-up (`debug-4142.log:6054-6224`). Neither range contains `Confabulation detected after tool use — re-sending full history and tool contract in a fresh conversation`, so the new recovery branch was triggered in 0/2 runs. Evidence is outside the repository at `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`; port 4142 was closed afterward.
+
+**Conclusion.** The strongest supported root cause remains upstream conversational-state misclassification, amplified by malformed or apparently incomplete execution context. Phase 2d does not validate the proposed recovery: G passed 0/2 and the recovery branch ran 0/2. It also does not directly falsify full-history recovery, because neither observed reply satisfied the branch's detector and state gates. The actionable finding is therefore a detection-coverage gap before recovery effectiveness can be measured, not evidence that replaying the full contract is ineffective. There remains no evidence that proxy history trimming, `relay_batch`, the session pool, tool-response mismatch, or `executedOnlyFirstNote` removed the terminal contract in these runs.
+
+**Phase 2e live result.** The detector coverage gap was fixed by exact live fixtures and narrow named-tool availability patterns in pushed commit `c9114be`. The isolated build then ran G twice and C once with valid `--in` directories. G1 passed with `LONG_CHAIN_OK:8` after eight real terminal calls; the detector activated and the fresh-conversation full-contract resend occurred at absolute debug line 10192, after which the model continued at line 10336 and completed at line 11358 (`debug-4142.log:9776-11421`). G2 failed after two real terminal calls: recovery activated at line 11785 and the model continued at line 11915, but it stopped with the incorrect claim that an extra call made the requested sequence impossible at line 12004 (`debug-4142.log:11422-12054`). C passed with `HERMES_TOOL_LOOP_OK`, two terminal calls at lines 12226 and 12373, and no detector or resend activation (`debug-4142.log:12055-12479`). Thus G was 1/2 PASS, detector activation was 2/2, full-contract resend was 2/2, and continuation after resend was 2/2. Evidence is outside the repository at `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2e-summary.txt`; port 4142 was closed afterward.
+
+**Updated conclusion.** Phase 2e validates both detector coverage and the recovery mechanism's ability to restore tool use: each detected G give-up caused a fresh-conversation full-contract resend, and the model resumed terminal calls in both runs. It does not establish reliable end-to-end recovery because only one of the two G runs completed. The remaining failure is no longer a missing-tool-contract claim; it is a task-accounting error after recovery, where the model counted the recovery probe as violating the requested eight-step sequence. H45 is therefore partially supported: conversational-state recovery can restore action, but it is not sufficient by itself to preserve exact multi-call task semantics.
