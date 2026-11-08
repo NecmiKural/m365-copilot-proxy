@@ -398,7 +398,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S18 | Two tests failed on Windows because of POSIX path assumptions | proxy | FIXED `c30252b` |
 | S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
 | S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
-| S14 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | model | NOTED: nondeterministic capability denial; existing recovery mitigates and no Phase 7 proxy defect was observed |
+| S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy? | OPEN: H51 should recover a first-turn denial; check in phase7 debug range why it did not (Phase 7b) |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
