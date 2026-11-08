@@ -56,6 +56,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 9b, H52 production coverage extension | COMPLETE | Production coverage found two unique explicit unfinished-work variants after tool results, including source snapshot `debug.log:74697`. Narrow EN/TR incomplete-statement plus remaining-work detection is covered by RED/GREEN tests. Build, full Vitest (502 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Isolated 4142: G 2/2 and C 1/1 passed, with zero genuine HTTP 429 responses; port closed. External evidence: `runtime/reports/phase9-*.txt`. |
 | Phase 8, incomplete-work recovery | COMPLETE | H52 detects explicit unfinished-work summaries only after a tool result and reuses H51 full-history recovery. Focused tests, build, full Vitest (499 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Isolated 4142: G 3/3 and C 1/1 passed; an initial stochastic C failure is retained. External evidence: `runtime/reports/phase8-*.txt`. |
 | Phase 7, tool argument schema validation | COMPLETE | Validates required properties, scalar types, and `additionalProperties: false`; permits lossless scalar conversion; retries exactly once on genuine violations; `M365_NO_ARG_VALIDATION=1` bypasses validation. RED then GREEN serial/parallel coverage; build, 494-test Vitest suite, and core/proxy-lib TypeScript checks pass. Isolated 4142 live: G 2/2, C 1/1, malformed arguments provoked and corrected once. External evidence: `runtime/reports/phase7-*.txt`. |
 | Phase 6a, Windows path tests and maintenance review | COMPLETE | Two POSIX-only test fixtures made platform-independent; build, 486-test Vitest suite, and core/proxy-lib TypeScript checks pass. Reports: `runtime/reports/phase6a-*.txt`; autostart design: `docs/plans/phase6-autostart.md`. No live M365 test, port 4142 start, production change, or PR mutation. |
@@ -400,7 +401,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
 | S14 | Production wrote no debug log (stale since 2026-11-05), so real pi failures were invisible | ops | FIXED 2026-11-08: `M365_DEBUG=1` in `start-proxy.cmd` |
 | S15 | Proxy stayed down after a crash until the next logon | ops | FIXED 2026-11-08: watchdog task |
-| S16 | Debug log has no size limit or rotation | ops | MITIGATED: watchdog rotates above 100 MB; in-process rotation still open |
+| S16 | Debug log has no size limit or rotation | ops | FIXED: in-process size limiting and rotation implemented and covered by tests (`8208213`..`bc1df74`) |
 | S17 | Hermes sends `parallel_tool_calls=true` on every request, so request-flag opt-in turned parallel mode on for all Hermes traffic | integration | FIXED `db53d35`: env gate `M365_PARALLEL_TOOLS=1` |
 | S18 | Two tests failed on Windows because of POSIX path assumptions | proxy | FIXED `c30252b` |
 | S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
