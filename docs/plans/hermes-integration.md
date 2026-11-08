@@ -56,6 +56,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 8, incomplete-work recovery | COMPLETE | H52 detects explicit unfinished-work summaries only after a tool result and reuses H51 full-history recovery. Focused tests, build, full Vitest (499 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Isolated 4142: G 3/3 and C 1/1 passed; an initial stochastic C failure is retained. External evidence: `runtime/reports/phase8-*.txt`. |
 | Phase 7, tool argument schema validation | COMPLETE | Validates required properties, scalar types, and `additionalProperties: false`; permits lossless scalar conversion; retries exactly once on genuine violations; `M365_NO_ARG_VALIDATION=1` bypasses validation. RED then GREEN serial/parallel coverage; build, 494-test Vitest suite, and core/proxy-lib TypeScript checks pass. Isolated 4142 live: G 2/2, C 1/1, malformed arguments provoked and corrected once. External evidence: `runtime/reports/phase7-*.txt`. |
 | Phase 6a, Windows path tests and maintenance review | COMPLETE | Two POSIX-only test fixtures made platform-independent; build, 486-test Vitest suite, and core/proxy-lib TypeScript checks pass. Reports: `runtime/reports/phase6a-*.txt`; autostart design: `docs/plans/phase6-autostart.md`. No live M365 test, port 4142 start, production change, or PR mutation. |
 | Phase 1, tests A-D | PASS | `runtime/reports/hermes-m365-integration-summary.md` |
@@ -388,9 +389,9 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S4 | `<command>` wrapper leaked into the shell command | proxy | FIXED F1 (`873f1de`) |
 | S5 | First-turn give-up (no tool call yet) was not recovered | proxy | FIXED H51 (`e03b990`) |
 | S6 | Turkish capability denial ("terminal erisimi yeniden etkinlestirilmeli") stopped pi on production | proxy | FIXED H51 (`e03b990`) |
-| S7 | Model reports a success sentinel without running the requested calls | integration | OPEN, H50 documented |
+| S7 | Model reports a success sentinel without running the requested calls | integration | OPEN in harness/integration; H50 Phase 8 review confirms the proxy cannot safely validate task-specific call counts or sentinel semantics |
 | S8 | In parallel mode the model claims "one tool call per turn" | model | OPEN, recovery mitigates; parallel stays env-gated |
-| S9 | pi ends its turn with "work not completed" while steps remain and no capability claim is made | integration | OPEN, investigate with the production debug log: should a "remaining steps" final answer trigger recovery? |
+| S9 | pi ends its turn with "work not completed" while steps remain and no capability claim is made | proxy | FIXED H52: explicit EN/TR incomplete-work summaries after a tool result enter H51 recovery |
 | S10 | pi ran an unbounded whole-disk `find` and blocked for 48 min | worker | MITIGATED by brief rule (timeouts, no disk scans) |
 | S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | OPEN: consider a 127.0.0.1 default bind in the proxy |
 | S12 | pi wrote reports into the repository `runtime/` folder and committed them | worker | MITIGATED by absolute report paths in briefs |
@@ -403,7 +404,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
 | S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
 | S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy | FIXED Phase 7b: `phase7-c-attempt1-debug.txt:48-50` shows exact reply "terminal execution isn’t available" followed by no retry; detector required the word `tool`. Exact RED fixture and minimum detector pattern added. |
-| S22 | Phase 7b live runs were stochastic: the first G run stopped after two calls with `LONG_CHAIN_INCOMPLETE:2`; the first G2 attempt still ended in a capability denial after recovery, while immediate reruns passed with eight calls | model | NOTED: H51 recovery ran; no deterministic proxy fault found. G1 and G2 passed on isolated reruns; evidence in `phase7b-g*-*.txt`. |
+| S22 | Phase 7b live runs were stochastic: the first G run stopped after two calls with `LONG_CHAIN_INCOMPLETE:2`; the first G2 attempt still ended in a capability denial after recovery, while immediate reruns passed with eight calls | proxy / model | FIXED H52 for the explicit incomplete sentinel; H51 continues to mitigate stochastic capability denials. Phase 8 G passed 3/3. |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
