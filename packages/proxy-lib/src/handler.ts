@@ -28,6 +28,7 @@ import {
   formatMessages,
   imageUrls,
   parseToolCalls,
+  validateToolArguments,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
   looksLikeRemoteArtifactCompletion,
@@ -947,6 +948,39 @@ export async function handleChatCompletion(
           },
         }),
       };
+    }
+
+    // Validate parsed arguments before exposing tool_calls. A genuine schema
+    // violation gets one bounded correction turn; lossless scalar coercions do not.
+    if (parsed.hasToolCalls && process.env.M365_NO_ARG_VALIDATION !== "1") {
+      let validation = validateToolArguments(parsed.toolCalls, body.tools);
+      if (validation.errors.length > 0) {
+        // Preserve the original parsed calls after lossless conversions. Argument
+        // repair is best-effort: a failed repair must not break clients that apply
+        // their own looser schema validation.
+        const originalCalls = validation.calls;
+        log.info(`Tool argument validation failed — asking once for correction: ${validation.errors.join("; ")}`);
+        text = `(Note: your tool call arguments failed validation: ${validation.errors.join("; ")}. Nothing ran. Fix only these argument errors and send the corrected tool call once, with no prose.)`;
+        const retry = await runBuffered();
+        if ("error" in retry) return { kind: "error", resp: retry.error };
+        conv.sentMessageCount = body.messages.length;
+        fullText = stopAtFabricatedResult(retry.fullText);
+        ({ parsed, judged } = parseReply(fullText, body.tools));
+        if (parsed.hasToolCalls) {
+          validation = validateToolArguments(parsed.toolCalls, body.tools);
+          if (validation.errors.length === 0) {
+            parsed.toolCalls = validation.calls;
+          } else {
+            log.info(`Corrected tool arguments remain invalid; returning original calls: ${validation.errors.join("; ")}`);
+            parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
+          }
+        } else {
+          log.info("Argument correction returned no tool call; returning original calls");
+          parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
+        }
+      } else {
+        parsed.toolCalls = validation.calls;
+      }
     }
 
     // Fail-closed: if model mixed text with tool calls, strip text and re-prompt once.

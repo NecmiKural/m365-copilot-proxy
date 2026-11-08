@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const CONFIG_DIR = join(homedir(), ".config", "opencode-m365");
 
@@ -27,8 +27,9 @@ describe("debug log and frame dump paths", () => {
   });
 
   it("take an absolute path as is, and an empty one as unset", async () => {
-    const m = await load({ M365_LOG_FILE: "/tmp/x/a.log", M365_FRAME_DIR: "" });
-    expect(m.LOG_PATH).toBe("/tmp/x/a.log");
+    const absoluteLog = resolve("tmp", "x", "a.log");
+    const m = await load({ M365_LOG_FILE: absoluteLog, M365_FRAME_DIR: "" });
+    expect(m.LOG_PATH).toBe(absoluteLog);
     expect(m.FRAME_DIR).toBe(join(CONFIG_DIR, "frames"));
   });
 });

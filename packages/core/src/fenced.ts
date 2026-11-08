@@ -1516,7 +1516,7 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
     for (; i < lines.length; i++) {
       const line = lines[i];
       const m = line.match(/^([A-Za-z0-9_]+):[ \t]?(.*)$/);
-      if (m && spec.headerParams.includes(m[1])) {
+      if (m && (spec.headerParams.includes(m[1]) || headerOnly)) {
         closeOpen();
         const key = m[1];
         const types = spec.parameterTypes[key];

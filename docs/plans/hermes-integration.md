@@ -26,10 +26,22 @@ evidence captured on 4 November 2026.
    verified green (unit tests, typecheck, and the relevant live tests show no
    regression), merge `upstream/main` directly into `daily` if it has new
    commits, then merge `dev/integration` into `daily`, build, test, push, and
-   restart production 4141 at any time. Open upstream PR branches (#70, #71,
-   #78) are left untouched. Create a `daily-backup-<date>` tag first for
+   restart production 4141 at any time. Create a `daily-backup-<date>` tag first for
    rollback. The supervisor performs the restart (the worker agent itself runs
    on 4141).
+8. Scope (user decision, 2026-11-08): only `daily`, `dev/integration` and
+   upstream `main` matter. Open upstream PRs (#70, #71, #78) are neither
+   tracked nor touched.
+9. Issue tracker (user decision, 2026-11-08): every stall or wrong turn of
+   the worker agent, and every unplanned bug or gap met along the way
+   (proxy, integration, tooling, operations), is logged in the Issue tracker
+   below. Model-independent bugs and integration gaps get fixed even when no
+   phase planned them; pure model behaviour is noted only.
+10. Production operations (user decision, 2026-11-08): production writes the
+    truncated debug log (`M365_DEBUG=1`) and a watchdog task restarts the
+    proxy after a crash.
+11. Next feature (user decision, 2026-11-08): schema validation of tool
+    arguments (Phase 5 idea 2), as Phase 7.
 
 ## Goal
 
@@ -44,6 +56,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 7, tool argument schema validation | COMPLETE | Validates required properties, scalar types, and `additionalProperties: false`; permits lossless scalar conversion; retries exactly once on genuine violations; `M365_NO_ARG_VALIDATION=1` bypasses validation. RED then GREEN serial/parallel coverage; build, 494-test Vitest suite, and core/proxy-lib TypeScript checks pass. Isolated 4142 live: G 2/2, C 1/1, malformed arguments provoked and corrected once. External evidence: `runtime/reports/phase7-*.txt`. |
+| Phase 6a, Windows path tests and maintenance review | COMPLETE | Two POSIX-only test fixtures made platform-independent; build, 486-test Vitest suite, and core/proxy-lib TypeScript checks pass. Reports: `runtime/reports/phase6a-*.txt`; autostart design: `docs/plans/phase6-autostart.md`. No live M365 test, port 4142 start, production change, or PR mutation. |
 | Phase 1, tests A-D | PASS | `runtime/reports/hermes-m365-integration-summary.md` |
 | Phase 1, test E typed arguments | PASS | Phase 1 integration evidence |
 | Phase 1, test F strict streaming | PASS | `runtime/reports/test-f-evidence-20261104-202319.txt` |
@@ -69,6 +83,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | FAIL, recovery not exercised | Pushed build `49bc1235` ran G twice with valid `--in`: 0/2 PASS, terminal calls 2 and 0, give-up 2/2, full-contract resend 0/2. External evidence: `C:/Users/NecmiKural/projects/hermes-m365-development/runtime/reports/phase2d-g-summary.txt`. Port 4142 is closed. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-08 (4) | COMPLETE | Phase 4d H51 `e03b990` (first-turn and EN/TR capability-denial give-ups recovered); live G 2/2 (recovery 2x each), C 1/1; `upstream/main` had no new commits; `daily` merged as `ad4213b`, pushed; backup tag `daily-backup-20261108d`; build, tsc green, Vitest 484 passed with the 2 known Windows failures; 4141 PID 59484 -> 44764, `/health` 200, live chat `DEPLOY4_OK`. |
 | Deploy 2026-11-08 (3) | COMPLETE | Phase 4c gate `db53d35` (parallel only with `M365_PARALLEL_TOOLS=1` and request flag); serial G 1/2 (G1 first-turn give-up before any tool use, no recovery path), C 1/1; parallel P PASS on second run (recovery, then 2 calls in one response, `PARALLEL_OK`); `upstream/main` had no new commits; `daily` merged as `f6297d7`, pushed; backup tag `daily-backup-20261108c`; build, tsc green, Vitest 480 passed with the 2 known Windows failures; 4141 PID 26156 -> 59484, `/health` 200, live chat `DEPLOY3_OK`. |
 | Deploy 2026-11-08 (2) | COMPLETE | Phase 2g green (G 2/2, C 1/1, recovery 4x, no probe call, no fence leak); `upstream/main` had no new commits; `daily` merged `dev/integration` at `467b0cc` as `816bccc` and was pushed; backup tag `daily-backup-20261108b`; build and typecheck green, Vitest 470 passed with only the 2 known Windows failures; 4141 restarted (PID 14384 -> 26156), `/health` 200, live chat `DEPLOY2_OK`. Evidence: external `runtime/reports/deploy-20261108b-*`. |
 | Deploy 2026-11-08 | COMPLETE | `upstream/main` had no new commits; `daily` merged `dev/integration` at `866039f` as `a3ed0ba` and was pushed; backup tag `daily-backup-20261108`; build, typecheck green, Vitest 467 passed with only the 2 known Windows failures; 4141 restarted (PID 16996 -> 14384), `/health` 200, live chat returned `DEPLOY_OK`. Evidence: external `runtime/reports/deploy-20261108-*`. |
@@ -83,12 +98,21 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `f6297d7` (third deploy 2026-11-08; rollback tags `daily-backup-20261108c` =
-  `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
+  `ad4213b` (fourth deploy 2026-11-08; rollback tags `daily-backup-20261108d` =
+  `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `59484` (since the third 2026-11-08 deploy; it
+- Production port 4141 runs PID `55104` (since the 2026-11-08 watchdog test; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
+- Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
+  sets `M365_DEBUG=1`, so the proxy writes `debug.log` in that folder. The
+  scheduled task `M365 Copilot Proxy Watchdog` runs `proxy-watchdog.ps1`
+  every 2 minutes: if nothing listens on 4141 and the `M365 Copilot Proxy`
+  task is not running, it starts that task; it rotates `debug.log` to
+  `debug.log.1` above 100 MB; actions go to `watchdog.log`. Verified
+  2026-11-08: killed PID 44764, watchdog restarted the proxy in 60 s (PID
+  55104), `/health` 200, live chat OK. Backups of the original task XML and
+  start script are in the external `runtime/reports/`.
 - Development checkout: `dev/integration`. Preserve
   `feat/hermes-agent-integration` unchanged as the branch from which it was
   created.
@@ -287,8 +311,7 @@ behaviour.
 
 Watch-list:
 
-- https://github.com/AlenPelin/m365-copilot-proxy — fork that builds on Necmi's
-  upstream PRs (#70/#71/#78); watch-list, review later.
+- https://github.com/AlenPelin/m365-copilot-proxy
 - https://github.com/cramt/m365-copilot-proxy/pull/46
 - https://github.com/cramt/m365-copilot-proxy/pull/90
 - https://github.com/kuchris/m365-copilot-openai-proxy
@@ -309,13 +332,78 @@ before starting:
   assumptions: `log.test.ts` and `scripts/bench/turn-budget.test.mjs`.
 - Windows phase-sweep adaptations (`owns_port`, a port check instead of
   `kill -0`, stopping via `Get-NetTCPConnection`).
-- Restart-on-crash for the autostart scheduled task (today the proxy does not
-  come back after a crash).
-- Watch the open upstream PRs #70 (gpt56-relay), #71 (fence-parsing) and #78
-  (giveup-patterns): fix and draft replies for new reviews (shown to the user
-  first), and apply the upstream merge routine when upstream/main moves
+- Restart-on-crash for the autostart scheduled task: DONE 2026-11-08 by a
+  watchdog task (see Invariants). A task-level `RestartOnFailure` policy was
+  not used because it does not cover a process that exits after a
+  successful start.
+- Apply the upstream merge routine when upstream/main moves
   (`git merge --no-ff --no-commit upstream/main`, no rebase or force push;
   upstream sections first in `hypotheses.md`, ours renumbered after). If an upstream pull
 request is later warranted, create its focused topic branch by cherry-picking
 the relevant commits from `dev/integration`; do not develop it separately in
 advance.
+
+### Phase 7: Tool argument schema validation
+
+Source: Phase 5 review, idea 2 (`docs/plans/phase5-inspiration-review.md`).
+After fenced argument parsing and before `tool_calls` are returned, check the
+arguments against the request's tool JSON schema (required fields, scalar
+types, `additionalProperties: false`). Coerce only lossless cases (for
+example `"30"` to `30` for an integer field); on a real violation, ask the
+model once to correct the call with the validation error, behind a kill
+switch. Use what the codebase already has before adding a dependency. RED
+tests first; live G x2 + C x1 for regression; one malformed-argument live
+case if it can be provoked.
+
+Status: COMPLETE. Validation now runs after fenced parsing and before tool
+calls are returned. Required fields, scalar types, and
+`additionalProperties: false` are enforced; only lossless scalar conversions
+are accepted. A genuine violation receives one correction request; if the
+corrected response is still invalid or omits the tool call, validation fails
+open by returning the original parsed calls after lossless conversions.
+Set `M365_NO_ARG_VALIDATION=1` to bypass validation. Serial, parallel, JSON,
+and SSE RED tests cover missing, wrong-type, extra-field, conversion,
+unchanged-valid, kill-switch, whole-batch retry, and the one-retry bound.
+Build, full Vitest
+(494 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. On
+loopback-only 4142, C passed with two calls, G passed twice with eight calls
+each, and a malformed timeout was provoked and corrected. Evidence is under
+the external absolute `runtime/reports/phase7-*.txt` path.
+
+## Issue tracker
+
+Stalls and wrong turns of the worker agent (pi, which itself runs through
+production 4141) and of Hermes, plus unplanned bugs and gaps found along the
+way. Class: `proxy` = model-independent proxy bug, `integration` = missing
+integration behaviour, `ops` = production operations or tooling, `worker` =
+worker harness or briefing issue, `model` = model behaviour only.
+
+| ID | Observed | Class | Status |
+|---|---|---|---|
+| S1 | Follow-up (delta) turns lost the tool contract; model said it has no tools | proxy | FIXED H45 (`35722f1`) |
+| S2 | Forcing probe after a give-up executed an extra real tool call | proxy | FIXED H46 (`1244d69`) |
+| S3 | Adjacent fences leaked header lines into the first command | proxy | FIXED H47 (`7271d58`) |
+| S4 | `<command>` wrapper leaked into the shell command | proxy | FIXED F1 (`873f1de`) |
+| S5 | First-turn give-up (no tool call yet) was not recovered | proxy | FIXED H51 (`e03b990`) |
+| S6 | Turkish capability denial ("terminal erisimi yeniden etkinlestirilmeli") stopped pi on production | proxy | FIXED H51 (`e03b990`) |
+| S7 | Model reports a success sentinel without running the requested calls | integration | OPEN, H50 documented |
+| S8 | In parallel mode the model claims "one tool call per turn" | model | OPEN, recovery mitigates; parallel stays env-gated |
+| S9 | pi ends its turn with "work not completed" while steps remain and no capability claim is made | integration | OPEN, investigate with the production debug log: should a "remaining steps" final answer trigger recovery? |
+| S10 | pi ran an unbounded whole-disk `find` and blocked for 48 min | worker | MITIGATED by brief rule (timeouts, no disk scans) |
+| S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | OPEN: consider a 127.0.0.1 default bind in the proxy |
+| S12 | pi wrote reports into the repository `runtime/` folder and committed them | worker | MITIGATED by absolute report paths in briefs |
+| S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
+| S14 | Production wrote no debug log (stale since 2026-11-05), so real pi failures were invisible | ops | FIXED 2026-11-08: `M365_DEBUG=1` in `start-proxy.cmd` |
+| S15 | Proxy stayed down after a crash until the next logon | ops | FIXED 2026-11-08: watchdog task |
+| S16 | Debug log has no size limit or rotation | ops | MITIGATED: watchdog rotates above 100 MB; in-process rotation still open |
+| S17 | Hermes sends `parallel_tool_calls=true` on every request, so request-flag opt-in turned parallel mode on for all Hermes traffic | integration | FIXED `db53d35`: env gate `M365_PARALLEL_TOOLS=1` |
+| S18 | Two tests failed on Windows because of POSIX path assumptions | proxy | FIXED `c30252b` |
+| S19 | Upstream gives no token counts; usage is always 0 | integration | NOTED H48: no estimates by decision |
+| S20 | Isolated harness passed an empty `--in`, producing false give-ups | worker | FIXED in harness; brief rule: always a valid `--in` |
+| S21 | First Phase 7 C attempt claimed no terminal access and made zero calls; a fresh isolated run succeeded with two calls | proxy | FIXED Phase 7b: `phase7-c-attempt1-debug.txt:48-50` shows exact reply "terminal execution isn’t available" followed by no retry; detector required the word `tool`. Exact RED fixture and minimum detector pattern added. |
+| S22 | Phase 7b live runs were stochastic: the first G run stopped after two calls with `LONG_CHAIN_INCOMPLETE:2`; the first G2 attempt still ended in a capability denial after recovery, while immediate reruns passed with eight calls | model | NOTED: H51 recovery ran; no deterministic proxy fault found. G1 and G2 passed on isolated reruns; evidence in `phase7b-g*-*.txt`. |
+
+Add new rows as they are observed, whether or not a phase planned them; fix
+`proxy`, `integration` and `ops` rows in their own small phase with RED tests
+first where code is involved.
+
