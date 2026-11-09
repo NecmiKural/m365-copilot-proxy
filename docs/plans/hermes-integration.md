@@ -399,7 +399,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S8 | In parallel mode the model claims "one tool call per turn" | model | OPEN, recovery mitigates; parallel stays env-gated |
 | S9 | pi ends its turn with "work not completed" while steps remain and no capability claim is made | proxy | FIXED H52: explicit EN/TR incomplete-work summaries after a tool result enter H51 recovery |
 | S10 | pi ran an unbounded whole-disk `find` and blocked for 48 min | worker | MITIGATED by brief rule (timeouts, no disk scans) |
-| S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | OPEN: consider a 127.0.0.1 default bind in the proxy |
+| S11 | pi started the isolated proxy without the script; it bound 0.0.0.0:4142 | worker / proxy | WONTFIX (user decision 2026-11-09): production bind stays as is; isolated 4142 stays on 127.0.0.1 via the start script |
 | S12 | pi wrote reports into the repository `runtime/` folder and committed them | worker | MITIGATED by absolute report paths in briefs |
 | S13 | Debug log truncates prompts at 1000 chars, hiding the source of model claims | integration | NOTED: use `M365_TRACE` for full-prompt captures |
 | S14 | Production wrote no debug log (stale since 2026-11-05), so real pi failures were invisible | ops | FIXED 2026-11-08: `M365_DEBUG=1` in `start-proxy.cmd` |
