@@ -50,7 +50,9 @@ evidence captured on 4 November 2026.
     document tools (pandas, matplotlib, a pure-Python PDF library) may be
     installed into a dedicated virtual environment outside the repositories
     (`runtime/venv-acceptance`). System Python and other projects stay
-    untouched.
+    untouched. EXECUTED in Phase 11c: the isolated venv uses its own
+    `Scripts/python.exe` and contains pandas, matplotlib, and fpdf2; the
+    isolated Hermes `AGENTS.md` names that interpreter.
 
 ## Goal
 
