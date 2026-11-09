@@ -206,6 +206,8 @@ export interface FencedToolSpec {
   description?: string;
   /** Declared JSON-Schema types per param, including anyOf/oneOf alternatives. */
   parameterTypes: Record<string, string[]>;
+  /** Per-property descriptions rendered into the model-visible tool contract. */
+  parameterDescriptions: Record<string, string>;
   /** Scalar params rendered as `key: value` header lines. */
   headerParams: string[];
   /** The free-form param carried as the fence body (mutually exclusive with editPair). */
@@ -231,6 +233,12 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
     }),
   );
 
+  const parameterDescriptions = Object.fromEntries(
+    Object.entries(propsSchema)
+      .filter(([, value]: any) => typeof value?.description === "string")
+      .map(([key, value]: any) => [key, value.description]),
+  );
+
   const search = props.find((p) => SEARCH_KEYS.includes(p));
   const replace = props.find((p) => REPLACE_KEYS.includes(p));
   if (search && replace) {
@@ -238,6 +246,7 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
       name,
       description,
       parameterTypes,
+      parameterDescriptions,
       editPair: { search, replace },
       headerParams: props.filter((p) => p !== search && p !== replace),
     };
@@ -250,6 +259,7 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
     name,
     description,
     parameterTypes,
+    parameterDescriptions,
     bodyParam,
     headerParams: props.filter((p) => p !== bodyParam),
   };
@@ -303,6 +313,10 @@ export function renderFencedCall(spec: FencedToolSpec, args: Record<string, unkn
 /** A self-documenting template shown in the per-request <tools> block. */
 function renderFencedTemplate(spec: FencedToolSpec): string {
   const lines: string[] = [];
+  for (const [key, description] of Object.entries(spec.parameterDescriptions)) {
+    lines.push(`${key}: ${description}`);
+  }
+  if (lines.length) lines.push("");
   for (const h of spec.headerParams) lines.push(`${h}: <${h}>`);
   if (spec.editPair) {
     lines.push("<<<<<<< SEARCH");

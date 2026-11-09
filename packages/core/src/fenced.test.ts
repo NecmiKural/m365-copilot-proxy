@@ -1047,6 +1047,35 @@ describe("array and object params written as a YAML block (#50)", () => {
 });
 
 
+describe("fenced parameter descriptions", () => {
+  it("shows the terminal timeout unit and foreground maximum to the model", async () => {
+    const terminal: ToolDef = {
+      type: "function",
+      function: {
+        name: "terminal",
+        description: "Execute a shell command.",
+        parameters: {
+          type: "object",
+          properties: {
+            command: { type: "string", description: "The shell command to execute" },
+            timeout: {
+              type: "integer",
+              description: "Max seconds (default 180, foreground max 600).",
+              minimum: 1,
+              maximum: 600,
+            },
+          },
+          required: ["command"],
+        },
+      },
+    };
+    const { formatFencedToolDefinitions } = await import("./fenced.js");
+    const output = formatFencedToolDefinitions([terminal]);
+    expect(output).toContain("timeout: Max seconds (default 180, foreground max 600).");
+  });
+});
+
+
 describe("Hermes terminal argument compatibility", () => {
   const terminal: ToolDef = {
     type: "function",

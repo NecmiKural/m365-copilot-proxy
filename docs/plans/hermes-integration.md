@@ -50,7 +50,9 @@ evidence captured on 4 November 2026.
     document tools (pandas, matplotlib, a pure-Python PDF library) may be
     installed into a dedicated virtual environment outside the repositories
     (`runtime/venv-acceptance`). System Python and other projects stay
-    untouched.
+    untouched. EXECUTED in Phase 11c: the isolated venv uses its own
+    `Scripts/python.exe` and contains pandas, matplotlib, and fpdf2; the
+    isolated Hermes `AGENTS.md` names that interpreter.
 
 ## Goal
 
@@ -65,6 +67,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 11c, timeout-contract correction and acceptance rerun | COMPLETE, T1, T2, T4, G and C PASS | Root cause was an integration contract mismatch, not model state: Hermes interprets terminal `timeout` as seconds and promotes values above its 600-second foreground maximum, so `120000` became a real background process. Phase 7 validation now enforces numeric `minimum` and `maximum`; fenced contracts expose parameter descriptions, including timeout units and limits; isolated `AGENTS.md` documents the rule; Decision 13 uses `runtime/venv-acceptance`. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Serial loopback-only 4142 acceptance passed T1, T2, T4, G and C with zero malformed calls and zero genuine HTTP 429; 4142 was closed and production 4141 remained PID 23988. External evidence: `runtime/reports/phase11c-rootcause.txt`, `runtime/reports/phase11c-live-results.txt`, and `runtime/reports/phase11c-summary.txt`. |
 | Phase 11b, structural capability-refusal recovery | COMPLETE, mixed live result: T5, G and C PASS; T1 and T2 FAIL | H53 structurally detects first-person capability refusals only in tool-capable first-turn or post-tool contexts and reuses H51 recovery. Build, full Vitest (507 passed, 6 skipped), core/proxy-lib TypeScript checks, focused H53 tests (189 passed), and SigMap verification pass. Isolated serial 4142: T5 produced DOCX and PDF; G completed eight calls; C completed two calls; T1 and T2 remained model failures involving incorrect background-process claims. Zero malformed calls and zero genuine HTTP 429. External evidence: `runtime/reports/phase11b-summary.txt`. |
 | Phase 10b, isolated Phase 1 matrix rerun | COMPLETE, A-G PASS and P FAIL | Serial A-G passed; parallel P, on a separate start with `M365_PARALLEL_TOOLS=1`, made zero calls and claimed one call per turn. Terminal executions: 14; malformed: 0; rejected: 0, compared with the Phase 2b baseline 3/46. No genuine HTTP 429; port 4142 closed. External evidence: `runtime/reports/phase10-matrix-evidence.txt` and `runtime/reports/phase10-summary.txt`. |
 | Phase 10a, isolated Hermes terminal guidance | COMPLETE | Hermes-supported `AGENTS.md` rule injection in the isolated valid `--in` directory adds Windows-host/POSIX-Git-Bash guidance without changing Hermes source or `config.yaml`. External evidence: `runtime/reports/phase10-hermes-config-evidence.txt`; pre-change backups: `runtime/reports/phase10-hermes-config-before-*`. |
@@ -97,6 +100,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-09 (8) | COMPLETE | Phase 11/11b: parallel runtime-limit refusal recovery (`51ee88e`) and H53 structural capability-refusal recovery (`3549d2a`, `dfc4b20`); `upstream/main` had no new commits; `daily` merged as `b3355f9`, pushed; backup tag `daily-backup-20261109c`; build, tsc green, Vitest 507 passed, 0 failed; 4141 PID 7736 -> 23988, `/health` 200, live chat `DEPLOY8_OK`. |
 | Deploy 2026-11-09 (7) | COMPLETE | S16 in-process log rotation (`961304f`, `bc1df74`, enabled in production at 100 MB) and wider H52 unfinished-work detection (`b9216e5`, S23); `upstream/main` had no new commits; `daily` merged as `e279384`, pushed; backup tag `daily-backup-20261109b`; build, tsc green, Vitest 502 passed, 0 failed; 4141 PID 60320 -> 7736, `/health` 200, live chat `DEPLOY7_OK`. |
 | Deploy 2026-11-09 (6) | COMPLETE | Phase 8 H52 incomplete-work recovery (`68be4b9`, `7cf50c8`); S9 and S22 closed for the explicit forms; `upstream/main` had no new commits; `daily` merged as `8acee58`, pushed; backup tag `daily-backup-20261109`; build, tsc green, Vitest 499 passed, 0 failed; 4141 PID 27900 -> 60320, `/health` 200, live chat `DEPLOY6_OK`. |
 | Deploy 2026-11-08 (5) | COMPLETE | Phase 7/7b tool argument validation (`1e57455`, fail-open `b8f812a`), S21 detector fix, Windows test fixes (`c30252b`); `upstream/main` had no new commits; `daily` merged as `8906531`, pushed; backup tag `daily-backup-20261108e`; build, tsc green, Vitest 497 passed, 0 failed; 4141 PID 55104 -> 27900, `/health` 200, live chat `DEPLOY5_OK`. |
@@ -115,13 +119,14 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `e279384` (seventh deploy 2026-11-09; rollback tags `daily-backup-20261109b` =
+  `b3355f9` (eighth deploy 2026-11-09; rollback tags `daily-backup-20261109c` =
+  `e279384`, `daily-backup-20261109b` =
   `8acee58`, `daily-backup-20261109` =
   `8906531`, `daily-backup-20261108e` =
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `7736` (since the seventh deploy, 2026-11-09; it
+- Production port 4141 runs PID `23988` (since the eighth deploy, 2026-11-09; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
@@ -463,11 +468,12 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S23 | Production stopped after a tool result with an explicit Turkish unfinished-work summary that listed pending Phase 9 work (`debug.log:74697`) | proxy | FIXED: narrow H52 incomplete-statement plus remaining-work detection after tool results; exact production regression and EN/TR variants pass; external `runtime/reports/phase9-h52-coverage.txt` |
 | S24 | Phase 10 P repeated the one-tool-call-per-turn claim with `M365_PARALLEL_TOOLS=1` and made zero calls | model | OPEN; confirms S8 remains reproducible. Evidence: `runtime/reports/phase10-P-output.txt` and `runtime/reports/phase10-P-debug.txt` |
 | S25 | The Phase 10 runner used Git-Bash-translated `taskkill.exe //PID`, failed to stop 4142, and lost the PID file during cleanup | worker | FIXED in the external runner with `MSYS_NO_PATHCONV=1 taskkill.exe /PID`; listener/PID equality was rechecked and 4142 was closed before reporting |
-| S26 | Phase 11 T1 made one read call, then claimed terminal output could not be retrieved reliably and skipped the required repository assessment | model | OPEN after Phase 11b; exact historical refusal is covered by H53, but the isolated rerun still failed after one call by incorrectly claiming the foreground command was still running. No malformed call or HTTP 429. Evidence: `runtime/reports/phase11b-T1-*`. |
-| S27 | Phase 11 T2 treated a foreground `npm test` result as an inaccessible background process, stopped after one call, and left the known bug unfixed | model | OPEN after Phase 11b; H53 recovery activated and exhausted its bounded attempts, but the model again claimed automatic background execution and left `node --test` red. No malformed call or HTTP 429. Evidence: `runtime/reports/phase11b-T2-*`. |
+| S26 | Phase 11 T1 made one read call, then claimed terminal output could not be retrieved reliably and skipped the required repository assessment | integration | FIXED in Phase 11c: the prior prompt supplied `timeout: 120000`, which Hermes interprets as seconds and promotes beyond its 600-second foreground limit. With seconds-based guidance and the corrected contract, T1 passed in one foreground call and produced a source-grounded assessment. Zero malformed calls and zero genuine HTTP 429. Evidence: `runtime/reports/phase11c-T1-*` and `runtime/reports/phase11c-rootcause.txt`. |
+| S27 | Phase 11 T2 treated a foreground `npm test` result as an inaccessible background process, stopped after one call, and left the known bug unfixed | integration | FIXED in Phase 11c: the apparent background behavior came from the same millisecond-versus-seconds timeout mismatch. With `timeout: 30` guidance, T2 used two foreground calls, fixed `calc.js`, and left `node --test` green. Zero malformed calls and zero genuine HTTP 429. Evidence: `runtime/reports/phase11c-T2-*` and `runtime/reports/phase11c-rootcause.txt`. |
 | S28 | Phase 11 T3 completed the required skill task, then claimed file writing was unavailable for an extra evidence-file request | proxy / model | FIXED H53 for the exact refusal shape; structural positive and false-positive fixtures pass, and eligible replies enter the existing bounded H51 recovery flow. The original T3 task already passed. |
 | S29 | Phase 11 T5 found installed pandoc but first refused file generation; an explicit retry created DOCX without the required PDF | model | FIXED in Phase 11b acceptance: isolated rerun made one terminal call and produced validated non-empty DOCX (10,501 bytes) and PDF (52,586 bytes) using existing pandoc/PDF tooling, with no installation, malformed call, recovery, or HTTP 429. |
 | S30 | Phase 11's first local depth-1 clone used `file:///C:/...`; Git Bash translated it to `/C:/...` and setup failed before any live request | worker | FIXED in the run by cloning from the quoted `C:/...` repository path; classified INVALID RUN |
+| S31 | Phase 11b prompts used `timeout: 120000` as milliseconds, while Hermes defines timeout in seconds and changes values above its 600-second foreground maximum into real background processes | integration | FIXED in Phase 11c: JSON Schema numeric bounds are enforced, fenced tool contracts retain parameter descriptions, and isolated `runtime/work/AGENTS.md` states that timeout is seconds, foreground maximum is 600, and omission is preferred unless needed. Hermes source was read only. Root-cause evidence: `runtime/reports/phase11c-rootcause.txt`. |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests

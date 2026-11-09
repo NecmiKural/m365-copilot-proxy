@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseToolCalls, formatToolDefinitions, formatMessages, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
+import { parseToolCalls, formatToolDefinitions, formatMessages, validateToolArguments, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
 import type { ToolDef } from "./tools.js";
 
 describe("parseToolCalls", () => {
@@ -913,5 +913,47 @@ describe("parallel tool-call framing", () => {
       expect(out, variant).toContain("multiple complete fenced tool calls");
       for (const forbidden of serialOnly) expect(out, `${variant}: ${forbidden}`).not.toMatch(forbidden);
     }
+  });
+});
+
+describe("tool argument numeric bounds", () => {
+  const terminal: ToolDef = {
+    type: "function",
+    function: {
+      name: "terminal",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          timeout: { type: "integer", minimum: 1, maximum: 600 },
+        },
+        required: ["command"],
+      },
+    },
+  };
+
+  const call = (timeout: number) => [{
+    id: "call-1",
+    type: "function" as const,
+    function: { name: "terminal", arguments: JSON.stringify({ command: "npm test", timeout }) },
+  }];
+
+  it("rejects an integer above maximum", () => {
+    const result = validateToolArguments(call(120000), [terminal]);
+    expect(result.errors).toEqual([
+      'call 1 (terminal): property "timeout" must be at most 600',
+    ]);
+  });
+
+  it("rejects an integer below minimum", () => {
+    const result = validateToolArguments(call(0), [terminal]);
+    expect(result.errors).toEqual([
+      'call 1 (terminal): property "timeout" must be at least 1',
+    ]);
+  });
+
+  it("accepts values at both bounds", () => {
+    expect(validateToolArguments(call(1), [terminal]).errors).toEqual([]);
+    expect(validateToolArguments(call(600), [terminal]).errors).toEqual([]);
   });
 });
