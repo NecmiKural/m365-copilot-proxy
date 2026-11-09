@@ -53,6 +53,11 @@ evidence captured on 4 November 2026.
     untouched. EXECUTED in Phase 11c: the isolated venv uses its own
     `Scripts/python.exe` and contains pandas, matplotlib, and fpdf2; the
     isolated Hermes `AGENTS.md` names that interpreter.
+14. Next roadmap (user decision, 2026-11-10): pi must be usable for browser
+    automation (browser-use/browser-harness) and Android (mobile-mcp, with
+    MobileUse as the screenshot/VLM path) through the proxy; a second
+    contribution review round looks for missing features worth adopting; the
+    production give-up/recovery rates are analysed from the observations.
 
 ## Goal
 
@@ -473,6 +478,43 @@ observation enablement remains deferred to deployment. External evidence:
 `runtime/reports/phase13-live-results.txt`,
 `runtime/reports/phase13-observations-summary.txt`, and
 `runtime/reports/phase13-observations-safety.txt`.
+
+### Phase 16: Image input and browser automation
+
+pi uses browser-use/browser-harness (CDP) and screenshot-driven tools. First
+establish how the proxy handles image content today: OpenAI `image_url` parts
+in user messages and images inside tool results (data URLs, sizes), whether
+they reach M365, and whether pixel dimensions survive (MobileUse showed
+coordinates at about half scale). Fix model-independent gaps with RED tests.
+Then run browser acceptance through isolated 4142 without touching production
+pi configuration: open a local test page, read text, fill and submit a form,
+take a screenshot and describe it, follow a link. Every failure becomes an
+Issue tracker row.
+
+### Phase 17: Android automation
+
+pi already has mobile-mcp configured against emulator `emulator-5554` and
+MobileUse installed at `C:/Users/NecmiKural/tools/mobile-use` with
+`VLM_BASE_URL` pointing at 4141. Run Android acceptance through the proxy
+using mobile-mcp's accessibility tools (not shell intents): list elements,
+open Settings, navigate one level, type into a search field, take and
+describe a screenshot. Then re-test the MobileUse VLM path for coordinate
+scaling after Phase 16. Never install apps or change device settings beyond
+the test; the emulator only.
+
+### Phase 15: Contribution review, second round
+
+Evaluate the remaining Phase 5 ideas (4-10) against the current code, and
+re-scan upstream `main` and the watch-list for changes since the first review
+(new features, fixes, tool/vision/streaming handling). Output a prioritised
+backlog with effort, benefit and licence notes for the user to choose from.
+
+### Phase 14: Production observation analysis
+
+After at least a day of production traffic, summarise `observations.jsonl`
+(and the debug log where needed): request volume, recovery rate by rule,
+recoveries that still ended without a tool call, argument repairs, 429s and
+fallbacks. Every uncaught give-up wording becomes an Issue tracker row.
 
 ## Issue tracker
 
