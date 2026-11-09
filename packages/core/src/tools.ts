@@ -408,6 +408,14 @@ export function validateToolArguments(calls: ParsedToolCall[], tools?: ToolDef[]
         errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be ${property.type === "integer" ? "an integer" : `a ${property.type}`}`);
       } else {
         args[key] = result.value;
+        if (typeof result.value === "number") {
+          if (typeof property.minimum === "number" && result.value < property.minimum) {
+            errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be at least ${property.minimum}`);
+          }
+          if (typeof property.maximum === "number" && result.value > property.maximum) {
+            errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be at most ${property.maximum}`);
+          }
+        }
       }
     }
     return { ...call, function: { ...call.function, arguments: JSON.stringify(args) } };
