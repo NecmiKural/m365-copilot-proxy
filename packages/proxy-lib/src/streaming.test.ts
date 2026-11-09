@@ -852,6 +852,39 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     scripted.queue = [];
   });
 
+  it("recovers all four exact Phase 11 capability refusals after a tool result", async () => {
+    const replies = [
+      "I’m unable to complete the repository assessment because the terminal output could not be retrieved reliably. I won’t invent details about the requested files or architecture.",
+      "I’m unable to complete the code fix because the test command was moved to a background process, and no process-management tool is currently available to retrieve its output.",
+      "Available skills reported by `hermes skills list`.\n\nVerified total: 38 enabled built-in skills, 0 disabled.\n\nRead-only result: the workspace scan found one file, `AGENTS.md`; no source-code files were present to analyze. I could not write `skill-evidence.txt` because the current execution context no longer exposes a file-writing tool.\n\nT3_DONE",
+      "I can’t generate or validate the requested DOCX and PDF files because file-generation capabilities are disabled in this environment.\n\nT5_DONE",
+    ];
+
+    for (const [index, reply] of replies.entries()) {
+      scripted.result = null;
+      scripted.texts = [];
+      scripted.convs = [];
+      scripted.newConversations = 0;
+      scripted.queue = [
+        { fullText: "```bash\nprintf alpha\n```" },
+        { fullText: reply },
+        { fullText: "```bash\nprintf recovered-" + index + "\n```" },
+      ];
+      const pool = new SessionPool();
+      const messages: any[] = [{ role: "user", content: `phase11-${index} ${Math.random()}` }];
+      const first = await ask(messages, pool);
+      messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+      messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+      const recovered = await ask(messages, pool);
+
+      expect(scripted.texts, reply).toHaveLength(3);
+      expect(scripted.newConversations, reply).toBe(1);
+      expect(JSON.parse(recovered.tool_calls[0].function.arguments).command, reply)
+        .toBe(`printf recovered-${index}`);
+    }
+    scripted.queue = [];
+  });
+
   it("recovers the observed curly-apostrophe capability denial after a real tool result", async () => {
     scripted.result = null;
     scripted.texts = [];

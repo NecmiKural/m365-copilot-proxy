@@ -892,10 +892,11 @@ export async function handleChatCompletion(
     // ordinary plain answers after a syntax re-ask; explicit give-ups still use
     // the same full-contract recovery as other confabulations.
     const afterToolResult = body.messages.at(-1)?.role === "tool";
+    const capabilityContext = !!hasTools && (isFirstTurn || afterToolResult);
     const retryAfterUnreadable =
-      !unreadable || looksLikeConfabulation(judged, afterToolResult);
+      !unreadable || looksLikeConfabulation(judged, afterToolResult, capabilityContext);
     for (let attempt = 0; attempt < (retryAfterUnreadable ? maxConfabRetries : 0) && !parsed.hasToolCalls; attempt++) {
-      const confab = looksLikeConfabulation(judged, afterToolResult);
+      const confab = looksLikeConfabulation(judged, afterToolResult, capabilityContext);
       const remoteArtifact = looksLikeRemoteArtifactCompletion(parsed.textContent);
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);
       if (!confab && !remoteArtifact && !halluc) break;

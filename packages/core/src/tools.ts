@@ -425,7 +425,7 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // old `to?` made the *t* mandatory, so "can't inspect"/"can't access" slipped
   // through). `execute`/`retrieve`/`fetch` added: the give-up reflex phrases them
   // ("unable to execute or retrieve any output") and they were absent from the list.
-  /(?:unable|not able|can.?t|cannot)\s+(?:to\s+)?(?:access|inspect|list|read|run|execute|retrieve|fetch|locate|see|open)/i,
+  /\bI(?:\s+(?:am|.?m)\s+)?(?:unable|not able|can.?t|cannot)\s+(?:to\s+)?(?:access|inspect|list|read|run|execute|retrieve|fetch|locate|see|open)/i,
   /don.?t\s+have\s+access/i,
   /no\s+(?:longer\s+have|access\s+to)/i,   // "no access to" + "no longer have access/the tools"
   /lost\s+(?:access|my\s+access|the\s+ability)/i,
@@ -585,7 +585,11 @@ export function looksLikeRemoteArtifactCompletion(text: string | null): boolean 
   return REMOTE_ARTIFACT_COMPLETION_PATTERNS.some((re) => re.test(t));
 }
 
-export function looksLikeConfabulation(text: string | null, afterToolResult = false): boolean {
+export function looksLikeConfabulation(
+  text: string | null,
+  afterToolResult = false,
+  capabilityContext = afterToolResult,
+): boolean {
   if (!text) return false;
   const t = text.trim();
   if (t.length < 12) return false;
@@ -610,7 +614,20 @@ export function looksLikeConfabulation(text: string | null, afterToolResult = fa
   const capabilityDenial =
     /(?:\bi (?:do not|don.t|cannot|can.t|am unable to|lack|have no)\b[^.\n]{0,100}\b(?:access|execute|run|use|complete)|\b(?:my|this session.s|this turn.s) (?:tool|terminal|shell|command|bash|access|capabil)|\bno (?:terminal|shell|bash|command) tool\b[^.\n]{0,80}\b(?:available|enabled)\b|\bbu oturumda\b[^.\n]{0,80}\b(?:arac|terminal|shell|komut|eris)|\b(?:edebilmem icin|erisimi yeniden)\b[^.\n]{0,80}\b(?:etkinlestirilmeli|kullanilabilir olmali)\b)/.test(normalized) &&
     /\b(?:tool|terminal|shell|command|bash|execute|run|arac|komut|eris\w*|access|capabil\w*)\b/.test(normalized);
-  return incompleteWork || capabilityDenial || CONFABULATION_PATTERNS.some((re) => re.test(t));
+  // H53: when tools are actually defined and this is either the first turn or
+  // immediately after a tool result, a first-person claim that the execution
+  // resource is unavailable is a capability refusal. Match the relationship
+  // between actor, action/resource, and unavailable state rather than an
+  // ever-growing list of complete replies.
+  const firstPersonDenial =
+    /\bi(?:.?m|\s+am)?\s+(?:unable|not\s+able)\s+to\b|\bi\s+(?:can.?t|cannot|could\s+not|couldn.?t)\b/.test(normalized) &&
+    /\b(?:complete|generate|validate|write|retrieve|access|use|run|execute)\w*\b/.test(normalized) &&
+    /\b(?:tool|terminal|shell|command|output|process|file(?:[ -]?(?:writing|generation))?|capabilit\w*|environment|execution context)\b/.test(normalized) &&
+    /(?:\b(?:unavailable|inaccessible|disabled|not available|no longer (?:available|exposes?)|could not be retrieved|cannot be retrieved|can.?t be retrieved|did not provide)\b|\bno\b[^.\n]{0,80}\b(?:tool|output|process|capabilit\w*)\b[^.\n]{0,40}\bavailable\b)/.test(normalized);
+  return incompleteWork ||
+    capabilityDenial ||
+    (capabilityContext && firstPersonDenial) ||
+    CONFABULATION_PATTERNS.some((re) => re.test(t));
 }
 
 // A tool result the MODEL wrote. The proxy is the only thing that sends

@@ -435,7 +435,7 @@ describe("looksLikeConfabulation", () => {
       "I can’t generate or validate the requested DOCX and PDF files because file-generation capabilities are disabled in this environment.\\n\\nT5_DONE",
     ];
     for (const reply of replies) {
-      expect(looksLikeConfabulation(reply, true), reply).toBe(true);
+      expect(looksLikeConfabulation(reply, false, true), reply).toBe(true);
     }
   });
 
@@ -451,7 +451,7 @@ describe("looksLikeConfabulation", () => {
       "File writing is unavailable when the filesystem is mounted read-only.",
     ];
     for (const reply of replies) {
-      expect(looksLikeConfabulation(reply, true), reply).toBe(false);
+      expect(looksLikeConfabulation(reply, false, true), reply).toBe(false);
     }
   });
 
