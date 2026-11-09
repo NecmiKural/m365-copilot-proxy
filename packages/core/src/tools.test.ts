@@ -411,6 +411,9 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Çalışma tamamlanmadı. Kalan adımlar: H52 dokümantasyonu ve kod değişikliği, RED testler, build ve tam test, 4142 canlı G x3 + C x1, raporlar, issue tracker güncellemesi, commit ve push.", true)).toBe(true);
     expect(looksLikeConfabulation("İş tamamlanmadı. S16 kodu ve testleri pushlandı, ancak H52 kapsam raporu, tam doğrulamalar, plan güncellemeleri ve final commit henüz tamamlanmadı.", true)).toBe(true);
     expect(looksLikeConfabulation("Görev tamamlanmadı; kalan doğrulamalar henüz çalıştırılmadı.", true)).toBe(true);
+    expect(looksLikeConfabulation("Bu turda çalışma tamamlanmadı. Tamamlanan ve pushlanan kısım: Phase 13 tasarımı ve RED testleri. Uygulama, özet komutu ve tam doğrulama henüz yapılmadı.", true)).toBe(true);
+    expect(looksLikeConfabulation("So far the work is not complete. Remaining steps: build and tests.", true)).toBe(true);
+    expect(looksLikeConfabulation("Bu turda çalışma tamamlandı; tüm adımlar bitti.", true)).toBe(false);
     expect(looksLikeConfabulation("LONG_CHAIN_INCOMPLETE:2", true)).toBe(true);
     expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code, run the tests, and commit the result.", true)).toBe(true);
     expect(looksLikeConfabulation("Work is not finished; I still need to run the tests.", true)).toBe(true);
