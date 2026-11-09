@@ -72,6 +72,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 16, image input and browser automation | COMPLETE, image coordinates and B1-B4 PASS | HTTP(S) and data-URL images preserve bytes through M365 `ImageFile` transport; PNG dimensions and original-coordinate guidance added in `c507a69`. Synthetic 2048x2732 and 1024x768 images returned exact expected coordinates with x/y ratios 1.0000. One bounded `browser_exec` call passed page reading, form submission, screenshot verification, and link navigation. Isolated ports 4142, 4169, and 9444 were closed; production 4141 remained healthy. External evidence: `runtime/reports/phase16-image-audit.txt`, `runtime/reports/phase16-browser-acceptance.txt`, and `runtime/reports/phase16-summary.txt`. |
 | Phase 13, reliability and quota observations | COMPLETE, G and C PASS | Added opt-in content-free JSONL observations with strict per-event allowlists, hashed conversation identifiers, shared one-backup rotation, request/recovery/validation/upstream/fallback/quota instrumentation, and the bounded `scripts/observations-summary.mjs` command. Build and core/proxy-lib TypeScript checks pass; full Vitest passed 517 tests with 6 skipped. Isolated loopback-only 4142 acceptance passed G once (`LONG_CHAIN_OK:8`) and C once (`HERMES_TOOL_LOOP_OK`). Seventeen live request events passed JSONL and content-safety checks with no prompt, response, command, path, key, sentinel, tool argument, or tool-result content. Debug logging grew, 4142 was closed, and production 4141 remained healthy and unchanged at PID 24328 on daily commit `a1cce74`. External evidence: `runtime/reports/phase13-verification.txt`, `runtime/reports/phase13-live-results.txt`, `runtime/reports/phase13-observations-summary.txt`, and `runtime/reports/phase13-observations-safety.txt`. |
 | Phase 12, Windows acceptance kit and phase-sweep | COMPLETE | Added safe, parameterized Windows lifecycle and acceptance scripts with mandatory non-production ports and loopback defaults (`63ab454`), plus native Windows listener ownership and shutdown support in the committed phase sweep (`7b039f9`). Isolated 4142 acceptance passed start, listener and health verification, models, chat sentinel, strict stop, closed-port proof, and Scheduled Task WhatIf. The Windows mock sweep passed 1/1. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Production 4141 remained healthy at PID 56788; 4142 is closed. External evidence: `runtime/reports/phase12-windows-acceptance.txt`, `runtime/reports/phase12-phase-sweep.txt`, and `runtime/reports/phase12-validation.txt`. |
 | Phase 11c, timeout-contract correction and acceptance rerun | COMPLETE, T1, T2, T4, G and C PASS | Root cause was an integration contract mismatch, not model state: Hermes interprets terminal `timeout` as seconds and promotes values above its 600-second foreground maximum, so `120000` became a real background process. Phase 7 validation now enforces numeric `minimum` and `maximum`; fenced contracts expose parameter descriptions, including timeout units and limits; isolated `AGENTS.md` documents the rule; Decision 13 uses `runtime/venv-acceptance`. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Serial loopback-only 4142 acceptance passed T1, T2, T4, G and C with zero malformed calls and zero genuine HTTP 429; 4142 was closed and production 4141 remained PID 23988. External evidence: `runtime/reports/phase11c-rootcause.txt`, `runtime/reports/phase11c-live-results.txt`, and `runtime/reports/phase11c-summary.txt`. |
@@ -481,15 +482,30 @@ observation enablement remains deferred to deployment. External evidence:
 
 ### Phase 16: Image input and browser automation
 
-pi uses browser-use/browser-harness (CDP) and screenshot-driven tools. First
-establish how the proxy handles image content today: OpenAI `image_url` parts
-in user messages and images inside tool results (data URLs, sizes), whether
-they reach M365, and whether pixel dimensions survive (MobileUse showed
-coordinates at about half scale). Fix model-independent gaps with RED tests.
-Then run browser acceptance through isolated 4142 without touching production
-pi configuration: open a local test page, read text, fill and submit a form,
-take a screenshot and describe it, follow a link. Every failure becomes an
-Issue tracker row.
+Status: COMPLETE. OpenAI `image_url` parts in user and tool-result content
+arrays are forwarded. Data URLs retain their original bytes; HTTP(S) image
+URLs are now fetched once, validated as images, converted byte-for-byte to
+data URLs, and uploaded to M365 as `ImageFile` annotations. PNG IHDR
+dimensions are supplied as explicit model context, with coordinates requested
+in the original pixel coordinate system. No proxy resize path exists.
+
+RED/GREEN coverage includes tool-result arrays, HTTP image fetching, dimension
+extraction, and preservation of synthetic 2048x2732 and 1024x768 PNGs.
+Isolated live requests through 127.0.0.1:4142 returned the expected marker
+centres, 1536,2049 and 768,576, for x/y scale ratios of 1.0000. If a future
+MobileUse run still shows upstream scaling, send a known-size image and map
+coordinates back using original_width/sent_width and
+original_height/sent_height.
+
+Browser acceptance used a fresh headless Chrome profile, local static server,
+dedicated CDP port 9444, and isolated proxy 4142. B1 page reading, B2 form
+submission, B3 screenshot capture and amber-panel description, and B4 link
+navigation all passed in one bounded `browser_exec` call. The isolated
+services were stopped and production 4141 remained healthy and unchanged.
+Evidence: `runtime/reports/phase16-image-audit.txt`,
+`runtime/reports/phase16-red-test.txt`,
+`runtime/reports/phase16-browser-acceptance.txt`, and
+`runtime/reports/phase16-summary.txt`.
 
 ### Phase 17: Android automation
 
@@ -563,6 +579,9 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S35 | H52 required the unfinished-work statement to open the sentence; production pi stopped on "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" without recovery | proxy | FIXED `a89a853` (hotfix deploy 10) |
 | S36 | The legacy external 4142 launcher hard-coded an obsolete production PID and daily commit, so its safety gate rejected the first Phase 13 start before opening 4142 | ops | MITIGATED for Phase 13 by deriving the current healthy production PID and clean daily commit, patching only a temporary launcher copy, and retaining the original script unchanged. The successful run proved 127.0.0.1-only binding, debug growth, strict shutdown, and unchanged production. A future launcher cleanup should replace hard-coded identity with an explicit captured baseline. |
 | S36 | Summary script shebang plus `core.autocrlf=true` broke the Vitest suite only in the production checkout; and one production restart ran before the final Nitro bundle, so observations were silently missing | ops | FIXED `0b38be5`; deploy procedure: rebuild, confirm the bundle contains the change, then restart and check the live effect |
+| S37 | HTTP(S) OpenAI `image_url` inputs reached the data-URL-only M365 upload path and failed instead of being forwarded | proxy | FIXED Phase 16 (`c507a69`): fetch once, validate image content type, preserve bytes, convert to a data URL, and cover with RED/GREEN tests |
+| S38 | M365/browser continuation turns omitted `browser_exec` after the first successful call, preventing a multi-call browser workflow | integration | OPEN; Phase 16 acceptance used one bounded `browser_exec` call as a harness workaround and recorded the behavior in the external browser report |
+| S39 | Two early browser acceptance attempts rejected valid page state because generated assertions mishandled `rgb(255, 204, 51)` and surrounding text whitespace | model / worker | MITIGATED in the final run with exact computed-color comparison and trimmed text; final B1-B4 acceptance passed |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
