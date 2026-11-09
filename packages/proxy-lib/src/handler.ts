@@ -2,6 +2,7 @@ import {
   ModelSession,
   type ModelSessionOptions,
   createLogger,
+  recordObservation,
   trunc,
   getToneForModel,
   requestUsesAgent,
@@ -471,6 +472,21 @@ export async function handleChatCompletion(
   // so we only need to send new messages after the first turn.
   const isFirstTurn = session.turnCount === 0;
   const convId = session.conversationId;
+  const observationMode = isFirstTurn || conv.sentMessageCount === 0 ? "full" : "delta";
+  const observe = (
+    kind: Parameters<typeof recordObservation>[0]["kind"],
+    fields: Partial<Parameters<typeof recordObservation>[0]> = {},
+  ) => recordObservation({
+    kind,
+    conversationId: convId,
+    model,
+    stream: !!body.stream,
+    mode: observationMode,
+    tools: body.tools?.length ?? 0,
+    ...fields,
+  });
+  observe("request");
+  if (fallbackModel) observe("fallback_model");
   let text: string;
   // Images ride on the message that carries their text (core image-input.ts).
   let inputImages: string[] = [];
@@ -574,6 +590,7 @@ export async function handleChatCompletion(
         copilotStream = await session.run(text, model, signal, useToolAgent, inputImages, waitForBudget);
       } catch (err: any) {
         if (err instanceof TurnBudgetHold) return { error: turnBudgetHoldResponse(err) };
+        observe("upstream_http_error", { status: 502 });
         return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
       }
 
@@ -600,6 +617,7 @@ export async function handleChatCompletion(
           fullText = copilotStream.fullText;
         }
       } catch (err: any) {
+        observe("upstream_http_error", { status: 502 });
         return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
       }
 
@@ -623,6 +641,15 @@ export async function handleChatCompletion(
       lastScores = copilotStream.scores;
       lastTurnCount = copilotStream.turnCount;
       lastMetering = copilotStream.metering;
+      const meteredBudget = meteredBudgetOf(model);
+      if (meteredBudget) {
+        const allowance = meteredAllowance(lastMetering, meteredBudget);
+        const remaining = [allowance?.daily, allowance?.weekly]
+          .filter((value): value is number => value !== undefined);
+        if (remaining.length > 0) {
+          observe("priority_quota", { remaining: Math.min(...remaining) });
+        }
+      }
 
       // M365 SAYS when it throttles: the final item's result is `Throttled` /
       // `PerUserThrottled` (#35). Checked BEFORE the content check so
@@ -633,6 +660,8 @@ export async function handleChatCompletion(
       if (copilotStream.result?.value === "Throttled") {
         noteRequestOutcome(true, convId);
         log.info(`Upstream Throttled (${copilotStream.result.errorCode ?? "no errorCode"}) — 429, no retry`);
+        observe("upstream_http_error", { status: 429 });
+        observe("throttle");
         return { error: throttledResponse(copilotStream.result) };
       }
 
@@ -684,6 +713,7 @@ export async function handleChatCompletion(
         const fallback = budget && !priorityFallbackDone ? priorityAccessFallbackModel(budget) : null;
         if (fallback) {
           priorityFallbackDone = true;
+          observe("fallback_model");
           log.info(`Priority access exhausted (${exhausted.window}) — re-sending to ${fallback} (${PRIORITY_ACCESS_FALLBACK_ENV[budget!]}) in a fresh conversation`);
           model = fallback;
           tone = getToneForModel(model);
@@ -895,11 +925,28 @@ export async function handleChatCompletion(
     const capabilityContext = !!hasTools && (isFirstTurn || afterToolResult);
     const retryAfterUnreadable =
       !unreadable || looksLikeConfabulation(judged, afterToolResult, capabilityContext);
+    let recoveryAttempted = false;
     for (let attempt = 0; attempt < (retryAfterUnreadable ? maxConfabRetries : 0) && !parsed.hasToolCalls; attempt++) {
       const confab = looksLikeConfabulation(judged, afterToolResult, capabilityContext);
       const remoteArtifact = looksLikeRemoteArtifactCompletion(parsed.textContent);
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);
       if (!confab && !remoteArtifact && !halluc) break;
+      recoveryAttempted = true;
+      const normalizedJudged = (judged ?? "").toLocaleLowerCase("en-US")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i");
+      const recoveryRule = parallelToolCalls &&
+          /\b(?:runtime|policy)\b[^.\n]{0,80}\b(?:one|exactly one)\b[^.\n]{0,40}\btool call\b/.test(normalizedJudged)
+        ? "parallel-limit"
+        : afterToolResult &&
+            (/\blong_chain_incomplete:\d+\b/.test(normalizedJudged) ||
+             /\b(?:work|calisma|gorev)\b[^.\n]{0,40}\b(?:not complete|not completed|tamamlanmadi)\b/.test(normalizedJudged))
+          ? "H52"
+          : capabilityContext &&
+              (/\bi(?:.?m|\s+am)?\s+(?:unable|not able)\s+to\b/.test(normalizedJudged) ||
+               /\bi\s+(?:can.?t|cannot|could not|couldn.?t)\b/.test(normalizedJudged))
+            ? "H53"
+            : "H51";
+      observe("recovery", { rule: recoveryRule, attempt: attempt + 1 });
       const retryKind = remoteArtifact ? "Remote artifact completion" : confab ? "Confabulation" : "Hallucinated completion";
       const fullGiveUpRecovery =
         confab && !process.env.M365_NO_GIVEUP_FULL_RESEND;
@@ -929,7 +976,11 @@ export async function handleChatCompletion(
       conv.sentMessageCount = body.messages.length;
       fullText = stopAtFabricatedResult(retry.fullText);
       ({ parsed, judged } = parseReply(fullText, body.tools));
+      observe("recovery_result", { hasToolCalls: parsed.hasToolCalls });
       log.info(`After forcing retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
+    }
+    if (recoveryAttempted && !parsed.hasToolCalls) {
+      observe("final_without_tool_after_recovery");
     }
 
     // Never pass a remote M365 artifact off as a successful local edit. A retry
@@ -973,15 +1024,23 @@ export async function handleChatCompletion(
           validation = validateToolArguments(parsed.toolCalls, body.tools);
           if (validation.errors.length === 0) {
             parsed.toolCalls = validation.calls;
+            observe("arg_validation", { result: "corrected" });
           } else {
             log.info(`Corrected tool arguments remain invalid; returning original calls: ${validation.errors.join("; ")}`);
+            observe("arg_validation", { result: "fail_open" });
             parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
           }
         } else {
           log.info("Argument correction returned no tool call; returning original calls");
+          observe("arg_validation", { result: "fail_open" });
           parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
         }
       } else {
+        if (validation.calls.some((call, index) =>
+          call.function.arguments !== parsed.toolCalls[index]?.function.arguments
+        )) {
+          observe("arg_validation", { result: "coerced" });
+        }
         parsed.toolCalls = validation.calls;
       }
     }

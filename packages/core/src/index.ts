@@ -140,7 +140,16 @@ export {
   type ToolArgumentValidation,
 } from "./tools.js";
 
-export { createLogger, trunc, LOG_PATH, FRAME_DIR, fileLoggingEnabled } from "./log.js";
+export {
+  createLogger,
+  recordObservation,
+  trunc,
+  LOG_PATH,
+  FRAME_DIR,
+  OBSERVATIONS_PATH,
+  fileLoggingEnabled,
+  type Observation,
+} from "./log.js";
 export {
   budgetConfig,
   parseEvents,

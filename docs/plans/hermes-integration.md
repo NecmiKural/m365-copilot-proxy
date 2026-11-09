@@ -67,6 +67,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 13, reliability and quota observations | COMPLETE, G and C PASS | Added opt-in content-free JSONL observations with strict per-event allowlists, hashed conversation identifiers, shared one-backup rotation, request/recovery/validation/upstream/fallback/quota instrumentation, and the bounded `scripts/observations-summary.mjs` command. Build and core/proxy-lib TypeScript checks pass; full Vitest passed 517 tests with 6 skipped. Isolated loopback-only 4142 acceptance passed G once (`LONG_CHAIN_OK:8`) and C once (`HERMES_TOOL_LOOP_OK`). Seventeen live request events passed JSONL and content-safety checks with no prompt, response, command, path, key, sentinel, tool argument, or tool-result content. Debug logging grew, 4142 was closed, and production 4141 remained healthy and unchanged at PID 24328 on daily commit `a1cce74`. External evidence: `runtime/reports/phase13-verification.txt`, `runtime/reports/phase13-live-results.txt`, `runtime/reports/phase13-observations-summary.txt`, and `runtime/reports/phase13-observations-safety.txt`. |
+| Phase 12, Windows acceptance kit and phase-sweep | COMPLETE | Added safe, parameterized Windows lifecycle and acceptance scripts with mandatory non-production ports and loopback defaults (`63ab454`), plus native Windows listener ownership and shutdown support in the committed phase sweep (`7b039f9`). Isolated 4142 acceptance passed start, listener and health verification, models, chat sentinel, strict stop, closed-port proof, and Scheduled Task WhatIf. The Windows mock sweep passed 1/1. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Production 4141 remained healthy at PID 56788; 4142 is closed. External evidence: `runtime/reports/phase12-windows-acceptance.txt`, `runtime/reports/phase12-phase-sweep.txt`, and `runtime/reports/phase12-validation.txt`. |
 | Phase 11c, timeout-contract correction and acceptance rerun | COMPLETE, T1, T2, T4, G and C PASS | Root cause was an integration contract mismatch, not model state: Hermes interprets terminal `timeout` as seconds and promotes values above its 600-second foreground maximum, so `120000` became a real background process. Phase 7 validation now enforces numeric `minimum` and `maximum`; fenced contracts expose parameter descriptions, including timeout units and limits; isolated `AGENTS.md` documents the rule; Decision 13 uses `runtime/venv-acceptance`. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Serial loopback-only 4142 acceptance passed T1, T2, T4, G and C with zero malformed calls and zero genuine HTTP 429; 4142 was closed and production 4141 remained PID 23988. External evidence: `runtime/reports/phase11c-rootcause.txt`, `runtime/reports/phase11c-live-results.txt`, and `runtime/reports/phase11c-summary.txt`. |
 | Phase 11b, structural capability-refusal recovery | COMPLETE, mixed live result: T5, G and C PASS; T1 and T2 FAIL | H53 structurally detects first-person capability refusals only in tool-capable first-turn or post-tool contexts and reuses H51 recovery. Build, full Vitest (507 passed, 6 skipped), core/proxy-lib TypeScript checks, focused H53 tests (189 passed), and SigMap verification pass. Isolated serial 4142: T5 produced DOCX and PDF; G completed eight calls; C completed two calls; T1 and T2 remained model failures involving incorrect background-process claims. Zero malformed calls and zero genuine HTTP 429. External evidence: `runtime/reports/phase11b-summary.txt`. |
 | Phase 10b, isolated Phase 1 matrix rerun | COMPLETE, A-G PASS and P FAIL | Serial A-G passed; parallel P, on a separate start with `M365_PARALLEL_TOOLS=1`, made zero calls and claimed one call per turn. Terminal executions: 14; malformed: 0; rejected: 0, compared with the Phase 2b baseline 3/46. No genuine HTTP 429; port 4142 closed. External evidence: `runtime/reports/phase10-matrix-evidence.txt` and `runtime/reports/phase10-summary.txt`. |
@@ -100,6 +102,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-09 (10) | COMPLETE | Hotfix: H52 accepted only sentence-initial unfinished-work statements; pi stopped on production with "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" (`debug.log` line 240978, no recovery). Fix `a89a853` (up to three leading words), cherry-picked to `daily` as `a1cce74` because `dev/integration` HEAD carried Phase 13 RED tests; backup tag `daily-backup-20261109e`; build, tsc green, Vitest 511 passed; 4141 PID 56788 -> 24328, `/health` 200, live chat `DEPLOY10_OK`. |
+| Deploy 2026-11-09 (9) | COMPLETE | Phase 11c: schema minimum/maximum validation and parameter descriptions in fenced contracts (`316d315`, `44a2828`, `531fbe3`), S31 timeout-unit fix; acceptance T1, T2, T4 PASS; `upstream/main` had no new commits; `daily` merged as `16c48e7`, pushed; backup tag `daily-backup-20261109d`; build, tsc green, Vitest 511 passed, 0 failed; 4141 PID 23988 -> 56788, `/health` 200, live chat `DEPLOY9_OK`. |
 | Deploy 2026-11-09 (8) | COMPLETE | Phase 11/11b: parallel runtime-limit refusal recovery (`51ee88e`) and H53 structural capability-refusal recovery (`3549d2a`, `dfc4b20`); `upstream/main` had no new commits; `daily` merged as `b3355f9`, pushed; backup tag `daily-backup-20261109c`; build, tsc green, Vitest 507 passed, 0 failed; 4141 PID 7736 -> 23988, `/health` 200, live chat `DEPLOY8_OK`. |
 | Deploy 2026-11-09 (7) | COMPLETE | S16 in-process log rotation (`961304f`, `bc1df74`, enabled in production at 100 MB) and wider H52 unfinished-work detection (`b9216e5`, S23); `upstream/main` had no new commits; `daily` merged as `e279384`, pushed; backup tag `daily-backup-20261109b`; build, tsc green, Vitest 502 passed, 0 failed; 4141 PID 60320 -> 7736, `/health` 200, live chat `DEPLOY7_OK`. |
 | Deploy 2026-11-09 (6) | COMPLETE | Phase 8 H52 incomplete-work recovery (`68be4b9`, `7cf50c8`); S9 and S22 closed for the explicit forms; `upstream/main` had no new commits; `daily` merged as `8acee58`, pushed; backup tag `daily-backup-20261109`; build, tsc green, Vitest 499 passed, 0 failed; 4141 PID 27900 -> 60320, `/health` 200, live chat `DEPLOY6_OK`. |
@@ -119,14 +123,16 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `b3355f9` (eighth deploy 2026-11-09; rollback tags `daily-backup-20261109c` =
+  `a1cce74` (tenth deploy 2026-11-09, hotfix cherry-pick; rollback tags
+  `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
+  `b3355f9`, `daily-backup-20261109c` =
   `e279384`, `daily-backup-20261109b` =
   `8acee58`, `daily-backup-20261109` =
   `8906531`, `daily-backup-20261108e` =
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `23988` (since the eighth deploy, 2026-11-09; it
+- Production port 4141 runs PID `24328` (since the tenth deploy, 2026-11-09; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
@@ -419,19 +425,50 @@ model-independent ones are fixed in follow-up phases.
 
 ### Phase 12: Windows acceptance kit and phase-sweep
 
-Phase 5 idea 1 plus the Phase 6 phase-sweep item: independently usable steps
-for setup, start, loopback/listener verification, real API smoke test, stop,
-and Scheduled Task (re)installation, reusing the watchdog and start script;
-Windows adaptations in the bench sweep (`owns_port`, port check instead of
-`kill -0`, stop via `Get-NetTCPConnection`). `scripts/bench/phase-sweep-win.sh`
-stays uncommitted per the invariants; adapt the committed scripts instead.
+Status: COMPLETE. `scripts/windows/` now provides independently usable,
+parameterized start, listener verification, real API smoke test, stop, and
+Scheduled Task planning or installation steps. Every public script requires a
+safe non-production port, rejects 4141, and defaults to loopback-safe behavior.
+Task installation is WhatIf-only unless `-Apply` is supplied, and its default
+task names are separate from production.
+
+The committed `scripts/bench/phase-sweep.sh` now detects Windows listeners with
+`Get-NetTCPConnection`, checks ownership by port instead of `kill -0`, converts
+Git Bash paths before invoking PowerShell, and uses the guarded Windows stop
+script for the real proxy. Existing POSIX `kill`, `wait`, `ss`, `lsof`, and
+`netstat` behavior remains intact. `scripts/bench/phase-sweep-win.sh` was not
+changed.
+
+Isolated 127.0.0.1:4142 acceptance passed start, listener and health
+verification, `/v1/models`, chat sentinel, strict stop, closed-port proof, and
+Scheduled Task WhatIf. A Windows mock phase sweep passed 1/1 and closed its
+listener. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib
+TypeScript checks pass. Production 4141 remained healthy and unchanged; final
+4142 listener count is zero. Evidence:
+`runtime/reports/phase12-windows-acceptance.txt`,
+`runtime/reports/phase12-phase-sweep.txt`, and
+`runtime/reports/phase12-validation.txt`.
 
 ### Phase 13: Reliability and quota observations
 
-Phase 5 idea 3: persist privacy-safe reliability, throttling, fallback,
-recovery and quota observations (no prompt or response content) with a
-bounded summary command, so production give-ups and recoveries can be counted
-without reading the debug log by hand.
+COMPLETE. Opt-in `M365_OBSERVATIONS_FILE` JSONL recording uses strict
+per-event allowlists, hashed conversation identifiers, and the existing
+one-backup size-rotation policy. Request, recovery, recovery result,
+final-without-tool, argument validation, upstream HTTP error and genuine 429,
+fallback-model, and priority-quota decision points are instrumented.
+`scripts/observations-summary.mjs` supports `--file` and `--since`.
+
+Build, full Vitest (517 passed, 6 skipped), core/proxy-lib TypeScript checks,
+and summary fixture tests pass. Isolated `127.0.0.1:4142` acceptance passed G
+once and C once. The 17 live events contained only allowlisted metadata and
+passed explicit checks for prompt, response, command, path, key, known-secret
+sentinel, tool-argument, and tool-result absence. Debug logging grew during
+the run; 4142 was stopped; production 4141 remained unchanged. Production
+observation enablement remains deferred to deployment. External evidence:
+`runtime/reports/phase13-verification.txt`,
+`runtime/reports/phase13-live-results.txt`,
+`runtime/reports/phase13-observations-summary.txt`, and
+`runtime/reports/phase13-observations-safety.txt`.
 
 ## Issue tracker
 
@@ -474,8 +511,12 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S29 | Phase 11 T5 found installed pandoc but first refused file generation; an explicit retry created DOCX without the required PDF | model | FIXED in Phase 11b acceptance: isolated rerun made one terminal call and produced validated non-empty DOCX (10,501 bytes) and PDF (52,586 bytes) using existing pandoc/PDF tooling, with no installation, malformed call, recovery, or HTTP 429. |
 | S30 | Phase 11's first local depth-1 clone used `file:///C:/...`; Git Bash translated it to `/C:/...` and setup failed before any live request | worker | FIXED in the run by cloning from the quoted `C:/...` repository path; classified INVALID RUN |
 | S31 | Phase 11b prompts used `timeout: 120000` as milliseconds, while Hermes defines timeout in seconds and changes values above its 600-second foreground maximum into real background processes | integration | FIXED in Phase 11c: JSON Schema numeric bounds are enforced, fenced tool contracts retain parameter descriptions, and isolated `runtime/work/AGENTS.md` states that timeout is seconds, foreground maximum is 600, and omission is preferred unless needed. Hermes source was read only. Root-cause evidence: `runtime/reports/phase11c-rootcause.txt`. |
+| S32 | PowerShell unwrapped a single listener object returned by a helper, so `.Count` failed during the first Windows acceptance start | ops | FIXED in Phase 12: listener helper results are wrapped at call sites for reliable zero, one, or many handling; parser and self-tests pass. |
+| S33 | The first smoke assertion required an exact model reply even though the service may wrap the requested unique sentinel in brief prose | integration | FIXED in Phase 12: the smoke test requires the unique sentinel to be present without logging response content or credentials. |
+| S34 | Git Bash paths passed directly to PowerShell broke Windows phase-sweep shutdown, and drive-letter archive paths were incorrectly prefixed with the repository path | worker / ops | FIXED in Phase 12: Windows paths use `cygpath`, drive-letter paths are recognized as absolute, and listener ownership is proven before shutdown. Mock sweep evidence: `runtime/reports/phase12-phase-sweep.txt`. |
+| S35 | H52 required the unfinished-work statement to open the sentence; production pi stopped on "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" without recovery | proxy | FIXED `a89a853` (hotfix deploy 10) |
+| S36 | The legacy external 4142 launcher hard-coded an obsolete production PID and daily commit, so its safety gate rejected the first Phase 13 start before opening 4142 | ops | MITIGATED for Phase 13 by deriving the current healthy production PID and clean daily commit, patching only a temporary launcher copy, and retaining the original script unchanged. The successful run proved 127.0.0.1-only binding, debug growth, strict shutdown, and unchanged production. A future launcher cleanup should replace hard-coded identity with an explicit captured baseline. |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
 first where code is involved.
-

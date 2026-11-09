@@ -78,6 +78,116 @@ describe("debug log and frame dump paths", () => {
     expect(readFileSync(log, "utf8")).toMatch(/^seed.*\[test\] next/s);
   });
 
+  it("does not create an observations file when M365_OBSERVATIONS_FILE is unset", async () => {
+    const observations = tempLog("observations.ndjson");
+    const m = await load({
+      M365_OBSERVATIONS_FILE: undefined,
+      M365_LOG_MAX_BYTES: undefined,
+    });
+
+    m.recordObservation({
+      kind: "request",
+      conversationId: "conversation-secret",
+      model: "test-model",
+      stream: false,
+      mode: "full",
+      tools: 2,
+    });
+
+    expect(existsSync(observations)).toBe(false);
+    expect(m.OBSERVATIONS_PATH).toBeNull();
+  });
+
+  it("writes content-free JSONL observations when enabled", async () => {
+    const observations = tempLog("observations.ndjson");
+    const sentinel = "PHASE13_SECRET_PROMPT_SENTINEL";
+    const m = await load({
+      M365_OBSERVATIONS_FILE: observations,
+      M365_LOG_MAX_BYTES: undefined,
+    });
+
+    m.recordObservation({
+      kind: "recovery",
+      conversationId: "conversation-secret",
+      model: "test-model",
+      stream: true,
+      mode: "delta",
+      tools: 3,
+      rule: "H51",
+      attempt: 1,
+      prompt: sentinel,
+      response: sentinel,
+      command: sentinel,
+      path: sentinel,
+      token: sentinel,
+    } as any);
+
+    const text = readFileSync(observations, "utf8");
+    const event = JSON.parse(text.trim());
+    expect(event).toMatchObject({
+      kind: "recovery",
+      model: "test-model",
+      stream: true,
+      mode: "delta",
+      tools: 3,
+      rule: "H51",
+      attempt: 1,
+    });
+    expect(event.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(event.conversation).toMatch(/^[a-f0-9]{12}$/);
+    expect(event.conversation).not.toBe("conversation-secret");
+    expect(text).not.toContain(sentinel);
+    expect(Object.keys(event).sort()).toEqual([
+      "attempt", "conversation", "kind", "mode", "model", "rule", "stream", "tools", "ts",
+    ]);
+  });
+
+  it("allows only fields belonging to each observation kind", async () => {
+    const observations = tempLog("observations.ndjson");
+    const sentinel = "PHASE13_RESPONSE_SENTINEL";
+    const m = await load({ M365_OBSERVATIONS_FILE: observations });
+
+    m.recordObservation({
+      kind: "upstream_http_error",
+      conversationId: "conv",
+      model: "model",
+      stream: false,
+      mode: "full",
+      tools: 0,
+      status: 503,
+      remaining: 99,
+      hasToolCalls: true,
+      response: sentinel,
+    } as any);
+
+    const event = JSON.parse(readFileSync(observations, "utf8").trim());
+    expect(event.status).toBe(503);
+    expect(event.remaining).toBeUndefined();
+    expect(event.hasToolCalls).toBeUndefined();
+    expect(JSON.stringify(event)).not.toContain(sentinel);
+  });
+
+  it("rotates observations to one backup using M365_LOG_MAX_BYTES", async () => {
+    const observations = tempLog("observations.ndjson");
+    writeFileSync(observations, "old-observations\n");
+    const m = await load({
+      M365_OBSERVATIONS_FILE: observations,
+      M365_LOG_MAX_BYTES: "20",
+    });
+
+    m.recordObservation({
+      kind: "request",
+      conversationId: "conv",
+      model: "model",
+      stream: false,
+      mode: "full",
+      tools: 0,
+    });
+
+    expect(readFileSync(`${observations}.1`, "utf8")).toBe("old-observations\n");
+    expect(JSON.parse(readFileSync(observations, "utf8").trim()).kind).toBe("request");
+  });
+
   it("rotates a Windows absolute log path without changing FRAME_DIR", async () => {
     const log = tempLog("windows-path.log");
     writeFileSync(log, "seed");
