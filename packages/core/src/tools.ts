@@ -608,8 +608,10 @@ export function looksLikeConfabulation(
   // "remaining" from being retried.
   const incompleteText = normalized.replace(/ı/g, "i");
   const incompleteStatement =
-    /(?:^|[.!;]\s*)(?:is|calisma|gorev) tamamlanmadi\b/.test(incompleteText) ||
-    /(?:^|[.!;]\s*)work (?:is )?not (?:complete|completed|finished|done)\b/.test(incompleteText);
+    // Up to three leading words in the same sentence ("Bu turda çalışma
+    // tamamlanmadı", "So far the work is not complete") still state the outcome.
+    /(?:^|[.!;]\s*)(?:[^\s.!?;]+\s+){0,3}(?:is|calisma|gorev) tamamlanmadi\b/.test(incompleteText) ||
+    /(?:^|[.!;]\s*)(?:[^\s.!?;]+\s+){0,3}work (?:is )?not (?:complete|completed|finished|done)\b/.test(incompleteText);
   const remainingWork =
     /\b(?:henuz|kalan|remaining|pending|not yet)\b|\bstill (?:need|needs|needed|remain|remains)\b/.test(incompleteText);
   const incompleteWork = afterToolResult && (
