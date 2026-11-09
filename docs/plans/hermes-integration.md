@@ -67,6 +67,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 12, Windows acceptance kit and phase-sweep | COMPLETE | Added safe, parameterized Windows lifecycle and acceptance scripts with mandatory non-production ports and loopback defaults (`63ab454`), plus native Windows listener ownership and shutdown support in the committed phase sweep (`7b039f9`). Isolated 4142 acceptance passed start, listener and health verification, models, chat sentinel, strict stop, closed-port proof, and Scheduled Task WhatIf. The Windows mock sweep passed 1/1. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Production 4141 remained healthy at PID 56788; 4142 is closed. External evidence: `runtime/reports/phase12-windows-acceptance.txt`, `runtime/reports/phase12-phase-sweep.txt`, and `runtime/reports/phase12-validation.txt`. |
 | Phase 11c, timeout-contract correction and acceptance rerun | COMPLETE, T1, T2, T4, G and C PASS | Root cause was an integration contract mismatch, not model state: Hermes interprets terminal `timeout` as seconds and promotes values above its 600-second foreground maximum, so `120000` became a real background process. Phase 7 validation now enforces numeric `minimum` and `maximum`; fenced contracts expose parameter descriptions, including timeout units and limits; isolated `AGENTS.md` documents the rule; Decision 13 uses `runtime/venv-acceptance`. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Serial loopback-only 4142 acceptance passed T1, T2, T4, G and C with zero malformed calls and zero genuine HTTP 429; 4142 was closed and production 4141 remained PID 23988. External evidence: `runtime/reports/phase11c-rootcause.txt`, `runtime/reports/phase11c-live-results.txt`, and `runtime/reports/phase11c-summary.txt`. |
 | Phase 11b, structural capability-refusal recovery | COMPLETE, mixed live result: T5, G and C PASS; T1 and T2 FAIL | H53 structurally detects first-person capability refusals only in tool-capable first-turn or post-tool contexts and reuses H51 recovery. Build, full Vitest (507 passed, 6 skipped), core/proxy-lib TypeScript checks, focused H53 tests (189 passed), and SigMap verification pass. Isolated serial 4142: T5 produced DOCX and PDF; G completed eight calls; C completed two calls; T1 and T2 remained model failures involving incorrect background-process claims. Zero malformed calls and zero genuine HTTP 429. External evidence: `runtime/reports/phase11b-summary.txt`. |
 | Phase 10b, isolated Phase 1 matrix rerun | COMPLETE, A-G PASS and P FAIL | Serial A-G passed; parallel P, on a separate start with `M365_PARALLEL_TOOLS=1`, made zero calls and claimed one call per turn. Terminal executions: 14; malformed: 0; rejected: 0, compared with the Phase 2b baseline 3/46. No genuine HTTP 429; port 4142 closed. External evidence: `runtime/reports/phase10-matrix-evidence.txt` and `runtime/reports/phase10-summary.txt`. |
@@ -421,12 +422,29 @@ model-independent ones are fixed in follow-up phases.
 
 ### Phase 12: Windows acceptance kit and phase-sweep
 
-Phase 5 idea 1 plus the Phase 6 phase-sweep item: independently usable steps
-for setup, start, loopback/listener verification, real API smoke test, stop,
-and Scheduled Task (re)installation, reusing the watchdog and start script;
-Windows adaptations in the bench sweep (`owns_port`, port check instead of
-`kill -0`, stop via `Get-NetTCPConnection`). `scripts/bench/phase-sweep-win.sh`
-stays uncommitted per the invariants; adapt the committed scripts instead.
+Status: COMPLETE. `scripts/windows/` now provides independently usable,
+parameterized start, listener verification, real API smoke test, stop, and
+Scheduled Task planning or installation steps. Every public script requires a
+safe non-production port, rejects 4141, and defaults to loopback-safe behavior.
+Task installation is WhatIf-only unless `-Apply` is supplied, and its default
+task names are separate from production.
+
+The committed `scripts/bench/phase-sweep.sh` now detects Windows listeners with
+`Get-NetTCPConnection`, checks ownership by port instead of `kill -0`, converts
+Git Bash paths before invoking PowerShell, and uses the guarded Windows stop
+script for the real proxy. Existing POSIX `kill`, `wait`, `ss`, `lsof`, and
+`netstat` behavior remains intact. `scripts/bench/phase-sweep-win.sh` was not
+changed.
+
+Isolated 127.0.0.1:4142 acceptance passed start, listener and health
+verification, `/v1/models`, chat sentinel, strict stop, closed-port proof, and
+Scheduled Task WhatIf. A Windows mock phase sweep passed 1/1 and closed its
+listener. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib
+TypeScript checks pass. Production 4141 remained healthy and unchanged; final
+4142 listener count is zero. Evidence:
+`runtime/reports/phase12-windows-acceptance.txt`,
+`runtime/reports/phase12-phase-sweep.txt`, and
+`runtime/reports/phase12-validation.txt`.
 
 ### Phase 13: Reliability and quota observations
 
@@ -476,6 +494,9 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S29 | Phase 11 T5 found installed pandoc but first refused file generation; an explicit retry created DOCX without the required PDF | model | FIXED in Phase 11b acceptance: isolated rerun made one terminal call and produced validated non-empty DOCX (10,501 bytes) and PDF (52,586 bytes) using existing pandoc/PDF tooling, with no installation, malformed call, recovery, or HTTP 429. |
 | S30 | Phase 11's first local depth-1 clone used `file:///C:/...`; Git Bash translated it to `/C:/...` and setup failed before any live request | worker | FIXED in the run by cloning from the quoted `C:/...` repository path; classified INVALID RUN |
 | S31 | Phase 11b prompts used `timeout: 120000` as milliseconds, while Hermes defines timeout in seconds and changes values above its 600-second foreground maximum into real background processes | integration | FIXED in Phase 11c: JSON Schema numeric bounds are enforced, fenced tool contracts retain parameter descriptions, and isolated `runtime/work/AGENTS.md` states that timeout is seconds, foreground maximum is 600, and omission is preferred unless needed. Hermes source was read only. Root-cause evidence: `runtime/reports/phase11c-rootcause.txt`. |
+| S32 | PowerShell unwrapped a single listener object returned by a helper, so `.Count` failed during the first Windows acceptance start | ops | FIXED in Phase 12: listener helper results are wrapped at call sites for reliable zero, one, or many handling; parser and self-tests pass. |
+| S33 | The first smoke assertion required an exact model reply even though the service may wrap the requested unique sentinel in brief prose | integration | FIXED in Phase 12: the smoke test requires the unique sentinel to be present without logging response content or credentials. |
+| S34 | Git Bash paths passed directly to PowerShell broke Windows phase-sweep shutdown, and drive-letter archive paths were incorrectly prefixed with the repository path | worker / ops | FIXED in Phase 12: Windows paths use `cygpath`, drive-letter paths are recognized as absolute, and listener ownership is proven before shutdown. Mock sweep evidence: `runtime/reports/phase12-phase-sweep.txt`. |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
