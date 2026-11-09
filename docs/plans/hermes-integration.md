@@ -102,6 +102,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-09 (11) | COMPLETE | Phases 12-13: Windows acceptance kit, Windows phase-sweep, content-free reliability observations (`0f85d3f`, `0042195`, `97d073e`) plus `0b38be5` (summary-script shebang broke the CRLF production checkout); `upstream/main` had no new commits; `daily` merged as `2b94f49` and `bb8d827`, pushed; backup tag `daily-backup-20261109f`; build, tsc green, Vitest 517 passed, 0 failed; observations enabled in production; 4141 PID 24328 -> 57840 (an intermediate restart ran on a stale Nitro bundle, see S36), `/health` 200, live chat `DEPLOY11_OK`, `observations.jsonl` written with metadata only (no content). |
 | Deploy 2026-11-09 (10) | COMPLETE | Hotfix: H52 accepted only sentence-initial unfinished-work statements; pi stopped on production with "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" (`debug.log` line 240978, no recovery). Fix `a89a853` (up to three leading words), cherry-picked to `daily` as `a1cce74` because `dev/integration` HEAD carried Phase 13 RED tests; backup tag `daily-backup-20261109e`; build, tsc green, Vitest 511 passed; 4141 PID 56788 -> 24328, `/health` 200, live chat `DEPLOY10_OK`. |
 | Deploy 2026-11-09 (9) | COMPLETE | Phase 11c: schema minimum/maximum validation and parameter descriptions in fenced contracts (`316d315`, `44a2828`, `531fbe3`), S31 timeout-unit fix; acceptance T1, T2, T4 PASS; `upstream/main` had no new commits; `daily` merged as `16c48e7`, pushed; backup tag `daily-backup-20261109d`; build, tsc green, Vitest 511 passed, 0 failed; 4141 PID 23988 -> 56788, `/health` 200, live chat `DEPLOY9_OK`. |
 | Deploy 2026-11-09 (8) | COMPLETE | Phase 11/11b: parallel runtime-limit refusal recovery (`51ee88e`) and H53 structural capability-refusal recovery (`3549d2a`, `dfc4b20`); `upstream/main` had no new commits; `daily` merged as `b3355f9`, pushed; backup tag `daily-backup-20261109c`; build, tsc green, Vitest 507 passed, 0 failed; 4141 PID 7736 -> 23988, `/health` 200, live chat `DEPLOY8_OK`. |
@@ -123,8 +124,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `a1cce74` (tenth deploy 2026-11-09, hotfix cherry-pick; rollback tags
-  `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
+  `bb8d827` (eleventh deploy 2026-11-09; rollback tags `daily-backup-20261109f`
+  = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
   `b3355f9`, `daily-backup-20261109c` =
   `e279384`, `daily-backup-20261109b` =
   `8acee58`, `daily-backup-20261109` =
@@ -132,12 +133,15 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `24328` (since the tenth deploy, 2026-11-09; it
+- Production port 4141 runs PID `57840` (since the eleventh deploy, 2026-11-09; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
   sets `M365_DEBUG=1` and `M365_LOG_MAX_BYTES=104857600` (in-process rotation
-  to `debug.log.1`, S16), so the proxy writes `debug.log` in that folder. The
+  to `debug.log.1`, S16) and `M365_OBSERVATIONS_FILE=observations.jsonl`
+  (content-free reliability events, Phase 13; summary:
+  `node scripts/observations-summary.mjs --file <path>`), so the proxy writes
+  `debug.log` in that folder. The
   scheduled task `M365 Copilot Proxy Watchdog` runs `proxy-watchdog.ps1`
   every 2 minutes: if nothing listens on 4141 and the `M365 Copilot Proxy`
   task is not running, it starts that task; it rotates `debug.log` to
@@ -516,6 +520,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S34 | Git Bash paths passed directly to PowerShell broke Windows phase-sweep shutdown, and drive-letter archive paths were incorrectly prefixed with the repository path | worker / ops | FIXED in Phase 12: Windows paths use `cygpath`, drive-letter paths are recognized as absolute, and listener ownership is proven before shutdown. Mock sweep evidence: `runtime/reports/phase12-phase-sweep.txt`. |
 | S35 | H52 required the unfinished-work statement to open the sentence; production pi stopped on "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" without recovery | proxy | FIXED `a89a853` (hotfix deploy 10) |
 | S36 | The legacy external 4142 launcher hard-coded an obsolete production PID and daily commit, so its safety gate rejected the first Phase 13 start before opening 4142 | ops | MITIGATED for Phase 13 by deriving the current healthy production PID and clean daily commit, patching only a temporary launcher copy, and retaining the original script unchanged. The successful run proved 127.0.0.1-only binding, debug growth, strict shutdown, and unchanged production. A future launcher cleanup should replace hard-coded identity with an explicit captured baseline. |
+| S36 | Summary script shebang plus `core.autocrlf=true` broke the Vitest suite only in the production checkout; and one production restart ran before the final Nitro bundle, so observations were silently missing | ops | FIXED `0b38be5`; deploy procedure: rebuild, confirm the bundle contains the change, then restart and check the live effect |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
