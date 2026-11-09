@@ -1692,6 +1692,52 @@ describe("request-scoped parallel tool calls", () => {
     expect(scripted.texts[1]).not.toContain("only the first");
   });
 
+  it("recovers the Phase 10 parallel zero-call capability refusal", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "The runtime permits exactly one tool call per turn." },
+      { fullText: two },
+    ];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `recover Phase 10 parallel refusal ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).toContain("PARALLEL TOOL CALLS ARE ENABLED");
+    expect(message.tool_calls).toHaveLength(2);
+  });
+
+  it("does not recover a normal answer that explains a user's one-call rule", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    const explanation = "Your policy permits exactly one tool call per turn, so document that rule in the user guide.";
+    scripted.queue = [{ fullText: explanation }];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `explain the policy ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(0);
+    expect(scripted.texts).toHaveLength(1);
+    expect(message.tool_calls).toBeUndefined();
+    expect(message.content).toBe(explanation);
+  });
+
   it("keeps full-contract give-up recovery active in parallel mode", async () => {
     process.env.M365_PARALLEL_TOOLS = "1";
     scripted.result = null;
