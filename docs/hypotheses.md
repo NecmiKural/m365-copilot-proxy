@@ -6488,3 +6488,47 @@ signal.
 will send the response through the existing H51 full-history recovery path,
 including its existing `M365_CONFAB_RETRIES` maximum of 2. No new retry loop or
 configuration is needed.
+
+
+### H53 — structural capability refusals require execution context
+
+**Observation.** Phase 11 produced four differently worded refusals: T1 said
+terminal output could not be retrieved reliably, T2 treated a foreground test
+as an inaccessible background process, T3 said file writing was unavailable,
+and T5 initially refused file generation. The existing H51/H52 detector did
+not consistently match these replies because it primarily recognized named
+tool availability and explicit unfinished-work language.
+
+**Signal and fix.** A third detector context now recognizes a structural
+relationship between a first-person actor, a requested execution action, an
+execution resource, and an unavailable state. The handler enables this H53
+context only when tools are defined and the reply is either on the first turn
+or immediately after a tool result. Replies containing real tool calls remain
+outside this recovery branch. Eligible matches reuse H51's fresh-conversation,
+full-history, full-tool-contract recovery and its existing retry bound.
+
+**False-positive controls.** Informational descriptions of user or API access,
+environment limitations, filesystem facts, and concrete real tool-error
+summaries such as exit code 1 plus stderr remain final answers. The access
+matcher is restricted to first-person forms rather than treating every use of
+the word “access” as a refusal.
+
+**Verification.** Exact fixtures for all four Phase 11 replies and structural
+negative controls pass in core tests. End-to-end proxy-lib fixtures verify that
+each exact refusal enters recovery. Build, full Vitest (507 passed, 6 skipped),
+core and proxy-lib TypeScript checks, focused H53 tests (189 passed), and
+SigMap verification pass.
+
+**Live result.** On isolated serial localhost 4142, T5 produced validated
+non-empty DOCX and PDF output, G completed exactly eight terminal calls, and C
+completed its two-call write/read loop. T1 and T2 still failed because the
+model incorrectly classified foreground commands as running or inaccessible
+background work; T2 exercised the bounded recovery before stopping. These
+remaining failures are model task-state errors rather than evidence that H53
+failed to route an eligible structural capability refusal. No live run
+contained a malformed call or genuine HTTP 429, and port 4142 was closed.
+
+**Conclusion and Status.** Supported and fixed for structural capability
+refusal detection. H53 broadens detection without broadening ordinary-access
+false positives, but bounded recovery cannot guarantee that an upstream model
+will correctly interpret foreground-process state.
