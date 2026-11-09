@@ -67,6 +67,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 13, reliability and quota observations | COMPLETE, G and C PASS | Added opt-in content-free JSONL observations with strict per-event allowlists, hashed conversation identifiers, shared one-backup rotation, request/recovery/validation/upstream/fallback/quota instrumentation, and the bounded `scripts/observations-summary.mjs` command. Build and core/proxy-lib TypeScript checks pass; full Vitest passed 517 tests with 6 skipped. Isolated loopback-only 4142 acceptance passed G once (`LONG_CHAIN_OK:8`) and C once (`HERMES_TOOL_LOOP_OK`). Seventeen live request events passed JSONL and content-safety checks with no prompt, response, command, path, key, sentinel, tool argument, or tool-result content. Debug logging grew, 4142 was closed, and production 4141 remained healthy and unchanged at PID 24328 on daily commit `a1cce74`. External evidence: `runtime/reports/phase13-verification.txt`, `runtime/reports/phase13-live-results.txt`, `runtime/reports/phase13-observations-summary.txt`, and `runtime/reports/phase13-observations-safety.txt`. |
 | Phase 12, Windows acceptance kit and phase-sweep | COMPLETE | Added safe, parameterized Windows lifecycle and acceptance scripts with mandatory non-production ports and loopback defaults (`63ab454`), plus native Windows listener ownership and shutdown support in the committed phase sweep (`7b039f9`). Isolated 4142 acceptance passed start, listener and health verification, models, chat sentinel, strict stop, closed-port proof, and Scheduled Task WhatIf. The Windows mock sweep passed 1/1. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Production 4141 remained healthy at PID 56788; 4142 is closed. External evidence: `runtime/reports/phase12-windows-acceptance.txt`, `runtime/reports/phase12-phase-sweep.txt`, and `runtime/reports/phase12-validation.txt`. |
 | Phase 11c, timeout-contract correction and acceptance rerun | COMPLETE, T1, T2, T4, G and C PASS | Root cause was an integration contract mismatch, not model state: Hermes interprets terminal `timeout` as seconds and promotes values above its 600-second foreground maximum, so `120000` became a real background process. Phase 7 validation now enforces numeric `minimum` and `maximum`; fenced contracts expose parameter descriptions, including timeout units and limits; isolated `AGENTS.md` documents the rule; Decision 13 uses `runtime/venv-acceptance`. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Serial loopback-only 4142 acceptance passed T1, T2, T4, G and C with zero malformed calls and zero genuine HTTP 429; 4142 was closed and production 4141 remained PID 23988. External evidence: `runtime/reports/phase11c-rootcause.txt`, `runtime/reports/phase11c-live-results.txt`, and `runtime/reports/phase11c-summary.txt`. |
 | Phase 11b, structural capability-refusal recovery | COMPLETE, mixed live result: T5, G and C PASS; T1 and T2 FAIL | H53 structurally detects first-person capability refusals only in tool-capable first-turn or post-tool contexts and reuses H51 recovery. Build, full Vitest (507 passed, 6 skipped), core/proxy-lib TypeScript checks, focused H53 tests (189 passed), and SigMap verification pass. Isolated serial 4142: T5 produced DOCX and PDF; G completed eight calls; C completed two calls; T1 and T2 remained model failures involving incorrect background-process claims. Zero malformed calls and zero genuine HTTP 429. External evidence: `runtime/reports/phase11b-summary.txt`. |
@@ -450,10 +451,24 @@ TypeScript checks pass. Production 4141 remained healthy and unchanged; final
 
 ### Phase 13: Reliability and quota observations
 
-Phase 5 idea 3: persist privacy-safe reliability, throttling, fallback,
-recovery and quota observations (no prompt or response content) with a
-bounded summary command, so production give-ups and recoveries can be counted
-without reading the debug log by hand.
+COMPLETE. Opt-in `M365_OBSERVATIONS_FILE` JSONL recording uses strict
+per-event allowlists, hashed conversation identifiers, and the existing
+one-backup size-rotation policy. Request, recovery, recovery result,
+final-without-tool, argument validation, upstream HTTP error and genuine 429,
+fallback-model, and priority-quota decision points are instrumented.
+`scripts/observations-summary.mjs` supports `--file` and `--since`.
+
+Build, full Vitest (517 passed, 6 skipped), core/proxy-lib TypeScript checks,
+and summary fixture tests pass. Isolated `127.0.0.1:4142` acceptance passed G
+once and C once. The 17 live events contained only allowlisted metadata and
+passed explicit checks for prompt, response, command, path, key, known-secret
+sentinel, tool-argument, and tool-result absence. Debug logging grew during
+the run; 4142 was stopped; production 4141 remained unchanged. Production
+observation enablement remains deferred to deployment. External evidence:
+`runtime/reports/phase13-verification.txt`,
+`runtime/reports/phase13-live-results.txt`,
+`runtime/reports/phase13-observations-summary.txt`, and
+`runtime/reports/phase13-observations-safety.txt`.
 
 ## Issue tracker
 
@@ -500,6 +515,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S33 | The first smoke assertion required an exact model reply even though the service may wrap the requested unique sentinel in brief prose | integration | FIXED in Phase 12: the smoke test requires the unique sentinel to be present without logging response content or credentials. |
 | S34 | Git Bash paths passed directly to PowerShell broke Windows phase-sweep shutdown, and drive-letter archive paths were incorrectly prefixed with the repository path | worker / ops | FIXED in Phase 12: Windows paths use `cygpath`, drive-letter paths are recognized as absolute, and listener ownership is proven before shutdown. Mock sweep evidence: `runtime/reports/phase12-phase-sweep.txt`. |
 | S35 | H52 required the unfinished-work statement to open the sentence; production pi stopped on "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" without recovery | proxy | FIXED `a89a853` (hotfix deploy 10) |
+| S36 | The legacy external 4142 launcher hard-coded an obsolete production PID and daily commit, so its safety gate rejected the first Phase 13 start before opening 4142 | ops | MITIGATED for Phase 13 by deriving the current healthy production PID and clean daily commit, patching only a temporary launcher copy, and retaining the original script unchanged. The successful run proved 127.0.0.1-only binding, debug growth, strict shutdown, and unchanged production. A future launcher cleanup should replace hard-coded identity with an explicit captured baseline. |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
