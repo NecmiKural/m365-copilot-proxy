@@ -21,7 +21,7 @@ export {
   type ImageGenFailureReason,
 } from "./image.js";
 
-export { uploadImage, imageUrls, type ImageAnnotation } from "./image-input.js";
+export { uploadImage, imageUrls, resolveImageInput, type ImageAnnotation, type ResolvedImageInput } from "./image-input.js";
 
 export {
   noteRequestOutcome,

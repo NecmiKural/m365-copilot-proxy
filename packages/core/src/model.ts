@@ -1,7 +1,7 @@
 import { getToken } from "./auth.js";
 import { getOrCreateAgent } from "./agent.js";
 import { CopilotSession } from "./session.js";
-import { uploadImage, type ImageAnnotation } from "./image-input.js";
+import { resolveImageInput, uploadImage, type ImageAnnotation } from "./image-input.js";
 import { createLogger, trunc } from "./log.js";
 import { awaitTurnBudget } from "./turn-budget.js";
 import type { CopilotStream } from "./copilot.js";
@@ -107,15 +107,25 @@ export class ModelSession {
     // Image input (#39): upload each image for this conversation; the message points at them.
     // A failed upload is said in the text, so the model doesn't answer about an image it never got.
     const annotations: ImageAnnotation[] = [];
-    for (const url of images) {
+    const imageDimensions: string[] = [];
+    for (const [index, url] of images.entries()) {
       try {
-        annotations.push(await uploadImage(token, this.conversationId, url));
+        const resolved = await resolveImageInput(url);
+        annotations.push(await uploadImage(token, this.conversationId, resolved.dataUrl));
+        if (resolved.width && resolved.height) {
+          imageDimensions.push(`image ${index + 1}: ${resolved.width}x${resolved.height} pixels`);
+        }
       } catch (err: any) {
         log.info(`Image upload failed: ${err.message}`);
         text += `
 
 (Note: an attached image could not be passed on — ${err.message.slice(0, 120)}. Don't describe it; say it didn't arrive.)`;
       }
+    }
+    if (imageDimensions.length > 0) {
+      text += `
+
+(Original image dimensions before upstream processing: ${imageDimensions.join("; ")}. Report coordinates in this original pixel coordinate system.)`;
     }
     const wantAgent = this.useAgent && useAgent;
 

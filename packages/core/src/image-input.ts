@@ -18,6 +18,41 @@ export interface ImageAnnotation {
   messageAnnotationType: "ImageFile";
 }
 
+export interface ResolvedImageInput {
+  dataUrl: string;
+  width?: number;
+  height?: number;
+}
+
+function pngDimensions(data: Buffer): Pick<ResolvedImageInput, "width" | "height"> {
+  const signature = Buffer.from("89504e470d0a1a0a", "hex");
+  if (data.length >= 24 && data.subarray(0, 8).equals(signature) && data.toString("ascii", 12, 16) === "IHDR") {
+    return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
+  }
+  return {};
+}
+
+/** Normalize an OpenAI image URL for M365's data-URL-only upload endpoint.
+ * HTTP bytes are copied without resizing; PNG dimensions are retained as
+ * explicit model context because the upstream vision service may rescale them. */
+export async function resolveImageInput(url: string): Promise<ResolvedImageInput> {
+  let dataUrl = url;
+  let data: Buffer;
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(url)) {
+    data = Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
+  } else if (/^https?:\/\//i.test(url)) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`image fetch ${res.status}`);
+    const contentType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
+    if (!contentType?.startsWith("image/")) throw new Error("image URL did not return an image");
+    data = Buffer.from(await res.arrayBuffer());
+    dataUrl = `data:${contentType};base64,${data.toString("base64")}`;
+  } else {
+    throw new Error("image URL must be an image data URL or http(s) URL");
+  }
+  return { dataUrl, ...pngDimensions(data) };
+}
+
 /** Upload one image (a `data:image/...;base64,` URL) and return the annotation
  *  that attaches it to a chat message. */
 export async function uploadImage(token: string, conversationId: string, dataUrl: string): Promise<ImageAnnotation> {
