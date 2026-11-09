@@ -427,6 +427,34 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code and run tests.")).toBe(false);
   });
 
+  it("flags Phase 11 capability refusals when the request context is eligible", () => {
+    const replies = [
+      "I’m unable to complete the repository assessment because the terminal output could not be retrieved reliably. I won’t invent details about the requested files or architecture.",
+      "I’m unable to complete the code fix because the test command was moved to a background process, and no process-management tool is currently available to retrieve its output.",
+      "Available skills reported by `hermes skills list`:\\n\\nVerified total: 38 enabled built-in skills, 0 disabled.\\n\\nRead-only result: the workspace scan found one file, `AGENTS.md`; no source-code files were present to analyze. I could not write `skill-evidence.txt` because the current execution context no longer exposes a file-writing tool.\\n\\nT3_DONE",
+      "I can’t generate or validate the requested DOCX and PDF files because file-generation capabilities are disabled in this environment.\\n\\nT5_DONE",
+    ];
+    for (const reply of replies) {
+      expect(looksLikeConfabulation(reply, true), reply).toBe(true);
+    }
+  });
+
+  it("does NOT flag structural capability-refusal false positives", () => {
+    const replies = [
+      "The terminal tool lets an agent run commands and inspect output.",
+      "I checked the documentation: API access is unavailable for guest users.",
+      "The user cannot access the API until an administrator grants the required scope.",
+      "Kontrol ettim: kullanıcının dosya erişimi bu ortamda etkin değil.",
+      "The command failed with exit code 1: Error: expected 4 but received 5.",
+      "I could not complete the integration tests because Docker is not installed; the 12 unit tests pass.",
+      "The background process is inaccessible after the operating system removes its completed job record.",
+      "File writing is unavailable when the filesystem is mounted read-only.",
+    ];
+    for (const reply of replies) {
+      expect(looksLikeConfabulation(reply, true), reply).toBe(false);
+    }
+  });
+
   it("does NOT flag an honest partial report or prose about tool settings", () => {
     expect(looksLikeConfabulation("I couldn't complete the integration tests because they need Docker; the 12 unit tests pass.")).toBe(false);
     expect(looksLikeConfabulation("The bash tool is enabled by default; set M365_HOST_SHELL to override the dialect.")).toBe(false);
