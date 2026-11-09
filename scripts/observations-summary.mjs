@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { createReadStream } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
