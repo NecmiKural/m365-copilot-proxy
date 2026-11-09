@@ -46,6 +46,11 @@ evidence captured on 4 November 2026.
     continue with the next unfinished phase of this plan in order. The
     supervisor derives detailed tasks from the plan and hands them to the
     worker agent; new findings go to the Issue tracker.
+13. Acceptance tooling (user decision, 2026-11-09): data-analysis and
+    document tools (pandas, matplotlib, a pure-Python PDF library) may be
+    installed into a dedicated virtual environment outside the repositories
+    (`runtime/venv-acceptance`). System Python and other projects stay
+    untouched.
 
 ## Goal
 
