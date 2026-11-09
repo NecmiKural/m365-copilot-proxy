@@ -42,6 +42,10 @@ evidence captured on 4 November 2026.
     proxy after a crash.
 11. Next feature (user decision, 2026-11-08): schema validation of tool
     arguments (Phase 5 idea 2), as Phase 7.
+12. Roadmap (user decision, 2026-11-09): when the current work is done,
+    continue with the next unfinished phase of this plan in order. The
+    supervisor derives detailed tasks from the plan and hands them to the
+    worker agent; new findings go to the Issue tracker.
 
 ## Goal
 
@@ -378,6 +382,43 @@ Build, full Vitest
 loopback-only 4142, C passed with two calls, G passed twice with eight calls
 each, and a malformed timeout was provoked and corrected. Evidence is under
 the external absolute `runtime/reports/phase7-*.txt` path.
+
+### Phase 10: Close Phase 2b and refresh Status
+
+Phase 2b steps 1-2 are covered by the classification report and Phase 7.
+Remaining: (a) isolated Hermes configuration only (no source change): add
+terminal tool guidance that the host is Windows with a POSIX Git Bash shell
+and PowerShell syntax must not be used; (b) re-run the Phase 1 matrix (A-G,
+P with `M365_PARALLEL_TOOLS=1`) on isolated 4142 and compare malformed or
+rejected terminal calls before (classification report: 3 of 46) and after;
+(c) refresh stale Status rows (Phase 1 P, give-up finding, early INVALID or
+FAIL rows) so each row states its current outcome and pointer.
+
+### Phase 11: General-agent acceptance
+
+The Goal names real work, not only probes. Run a realistic task set through
+Hermes on isolated 4142 (one live measurement at a time, throttled):
+repository discovery and summary, a small code fix with a test in a scratch
+copy, a skill-driven task, a CSV data analysis with a chart, and a Word and a
+PDF document. Record per task: PASS/FAIL, tool calls, recoveries, give-ups,
+malformed calls and wall time. Every failure becomes an Issue tracker row;
+model-independent ones are fixed in follow-up phases.
+
+### Phase 12: Windows acceptance kit and phase-sweep
+
+Phase 5 idea 1 plus the Phase 6 phase-sweep item: independently usable steps
+for setup, start, loopback/listener verification, real API smoke test, stop,
+and Scheduled Task (re)installation, reusing the watchdog and start script;
+Windows adaptations in the bench sweep (`owns_port`, port check instead of
+`kill -0`, stop via `Get-NetTCPConnection`). `scripts/bench/phase-sweep-win.sh`
+stays uncommitted per the invariants; adapt the committed scripts instead.
+
+### Phase 13: Reliability and quota observations
+
+Phase 5 idea 3: persist privacy-safe reliability, throttling, fallback,
+recovery and quota observations (no prompt or response content) with a
+bounded summary command, so production give-ups and recoveries can be counted
+without reading the debug log by hand.
 
 ## Issue tracker
 
