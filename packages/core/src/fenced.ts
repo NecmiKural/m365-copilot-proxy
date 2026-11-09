@@ -206,6 +206,8 @@ export interface FencedToolSpec {
   description?: string;
   /** Declared JSON-Schema types per param, including anyOf/oneOf alternatives. */
   parameterTypes: Record<string, string[]>;
+  /** Per-property descriptions rendered into the model-visible tool contract. */
+  parameterDescriptions: Record<string, string>;
   /** Scalar params rendered as `key: value` header lines. */
   headerParams: string[];
   /** The free-form param carried as the fence body (mutually exclusive with editPair). */
