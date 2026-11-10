@@ -108,6 +108,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-10 (12) | COMPLETE | Phase 16: image input keeps original pixel coordinates (`c507a69`; 2048x2732 and 1024x768 markers returned at scale 1.0000), browser acceptance B1-B4 PASS; supervisor added a 15 s timeout and 20 MB cap to the new HTTP image fetch (`4aa05c9`); `upstream/main` had no new commits; `daily` merged as `f40715c`, pushed; backup tag `daily-backup-20261110`; build, tsc green, Vitest 520 passed, 0 failed; bundle checked; 4141 PID 57840 -> 29996, `/health` 200, live chat `DEPLOY12_OK`. |
 | Deploy 2026-11-09 (11) | COMPLETE | Phases 12-13: Windows acceptance kit, Windows phase-sweep, content-free reliability observations (`0f85d3f`, `0042195`, `97d073e`) plus `0b38be5` (summary-script shebang broke the CRLF production checkout); `upstream/main` had no new commits; `daily` merged as `2b94f49` and `bb8d827`, pushed; backup tag `daily-backup-20261109f`; build, tsc green, Vitest 517 passed, 0 failed; observations enabled in production; 4141 PID 24328 -> 57840 (an intermediate restart ran on a stale Nitro bundle, see S36), `/health` 200, live chat `DEPLOY11_OK`, `observations.jsonl` written with metadata only (no content). |
 | Deploy 2026-11-09 (10) | COMPLETE | Hotfix: H52 accepted only sentence-initial unfinished-work statements; pi stopped on production with "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" (`debug.log` line 240978, no recovery). Fix `a89a853` (up to three leading words), cherry-picked to `daily` as `a1cce74` because `dev/integration` HEAD carried Phase 13 RED tests; backup tag `daily-backup-20261109e`; build, tsc green, Vitest 511 passed; 4141 PID 56788 -> 24328, `/health` 200, live chat `DEPLOY10_OK`. |
 | Deploy 2026-11-09 (9) | COMPLETE | Phase 11c: schema minimum/maximum validation and parameter descriptions in fenced contracts (`316d315`, `44a2828`, `531fbe3`), S31 timeout-unit fix; acceptance T1, T2, T4 PASS; `upstream/main` had no new commits; `daily` merged as `16c48e7`, pushed; backup tag `daily-backup-20261109d`; build, tsc green, Vitest 511 passed, 0 failed; 4141 PID 23988 -> 56788, `/health` 200, live chat `DEPLOY9_OK`. |
@@ -130,8 +131,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `bb8d827` (eleventh deploy 2026-11-09; rollback tags `daily-backup-20261109f`
-  = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
+  `f40715c` (twelfth deploy 2026-11-10; rollback tags `daily-backup-20261110`
+  = `bb8d827`, `daily-backup-20261109f` = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
   `b3355f9`, `daily-backup-20261109c` =
   `e279384`, `daily-backup-20261109b` =
   `8acee58`, `daily-backup-20261109` =
@@ -139,7 +140,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `57840` (since the eleventh deploy, 2026-11-09; it
+- Production port 4141 runs PID `29996` (since the twelfth deploy, 2026-11-10; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
@@ -582,6 +583,7 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S37 | HTTP(S) OpenAI `image_url` inputs reached the data-URL-only M365 upload path and failed instead of being forwarded | proxy | FIXED Phase 16 (`c507a69`): fetch once, validate image content type, preserve bytes, convert to a data URL, and cover with RED/GREEN tests |
 | S38 | M365/browser continuation turns omitted `browser_exec` after the first successful call, preventing a multi-call browser workflow | integration | OPEN; Phase 16 acceptance used one bounded `browser_exec` call as a harness workaround and recorded the behavior in the external browser report |
 | S39 | Two early browser acceptance attempts rejected valid page state because generated assertions mishandled `rgb(255, 204, 51)` and surrounding text whitespace | model / worker | MITIGATED in the final run with exact computed-color comparison and trimmed text; final B1-B4 acceptance passed |
+| S40 | Phase 16 added proxy-side HTTP image fetching without a timeout or size limit; on the 0.0.0.0 production listener a slow or huge URL could stall or bloat the proxy | proxy | FIXED `4aa05c9` (15 s timeout, 20 MB cap) |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
