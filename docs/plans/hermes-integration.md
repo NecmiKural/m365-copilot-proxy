@@ -59,6 +59,60 @@ evidence captured on 4 November 2026.
     contribution review round looks for missing features worth adopting; the
     production give-up/recovery rates are analysed from the observations.
 
+
+## Resume here (handoff, 2026-11-10)
+
+Work paused by the user on 2026-11-10 to save supervisor quota. Everything
+needed to continue is in this file and the external `runtime/` folder.
+
+**State at pause**
+- Production: `m365-proxy-daily`, branch `daily`, 4141 (see Invariants for
+  commit and PID). All code from `dev/integration` is deployed; only plan
+  documentation landed after deploy 12.
+- `dev/integration` is clean and pushed. pi (worker) is idle; its
+  `gpt-5.6-think-deeper` daily priority quota was exhausted on 2026-11-10
+  and resets at 00:00 UTC.
+- No isolated 4142 process is running; no workspace timers are pending.
+
+**Next steps, in order**
+1. Phase 17 finish (see its Status row): A1-A5 already PASS through mobile-mcp;
+   read MobileUse's screenshot resize/rescale code
+   (`C:/Users/NecmiKural/tools/mobile-use`, read-only), confirm why taps land
+   at about half scale, propose or apply a client-side coordinate mapping
+   without editing its `.env`; write `phase17-summary.txt`, update Status.
+2. Issue S42: record the early-return `priority_access_exhausted` 429 in
+   `observations.jsonl` (RED test, minimal fix, deploy).
+3. Phase 15: contribution review, second round (remaining Phase 5 ideas 4-10
+   plus a re-scan of upstream `main` and the watch-list); the user picks.
+4. Phase 14: summarise production `observations.jsonl` (`node
+   scripts/observations-summary.mjs --file
+   %USERPROFILE%/.config/opencode-m365/observations.jsonl`) and add every
+   uncaught give-up wording to the Issue tracker.
+
+**How the work is run**
+- Roles: a supervisor plans, writes self-contained briefs, verifies evidence
+  independently, deploys and reports to the user in Turkish; the worker (pi)
+  implements. The supervisor steps in only to unblock (small fixes, closing a
+  leftover 4142, hotfixes).
+- Dispatch to pi in the OpenAgents workspace: post to a NEW channel per task
+  (`claude-pi-<phase>`) with `metadata.target_agents=["pi"]`; do not message pi
+  while it works (a new message preempts its turn), and do not dispatch while
+  the user is using pi in another channel. Check pi state from its session
+  files under `~/.openagents/pi-sessions/` and `~/.openagents/daemon.log`.
+- Every brief: repo path and `git pull --ff-only`, isolated 4142 only via
+  `runtime/work/scripts/start-4142-with-logging.sh` (127.0.0.1, prove debug
+  log growth), absolute report paths under external `runtime/reports/`, RED
+  test first, build + full Vitest (0 failures) + tsc core and proxy-lib,
+  commit and push after each step (English, user identity, no AI trace), log
+  every stall or unplanned bug in the Issue tracker, timeouts on long
+  commands, stop only on a real HTTP 429, do not end the turn while steps
+  remain, close 4142.
+- Deploy (Decision 7): backup tag `daily-backup-<date>`, merge `upstream/main`
+  if it moved, merge `dev/integration` with `--no-ff`, install, build, confirm
+  the change is in `packages/proxy/.output`, full Vitest + tsc, push, restart
+  4141 (`Stop-Process` on the listener, `Start-ScheduledTask "M365 Copilot
+  Proxy"`), verify new PID, `/health` 200 and a live chat, then record the
+  deploy row and Invariants here.
 ## Goal
 
 Use pi and OpenClaw (and Hermes) through this proxy as full general-purpose
