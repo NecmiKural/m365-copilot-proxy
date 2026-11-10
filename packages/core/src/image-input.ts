@@ -32,6 +32,9 @@ function pngDimensions(data: Buffer): Pick<ResolvedImageInput, "width" | "height
   return {};
 }
 
+const IMAGE_FETCH_TIMEOUT_MS = 15_000;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+
 /** Normalize an OpenAI image URL for M365's data-URL-only upload endpoint.
  * HTTP bytes are copied without resizing; PNG dimensions are retained as
  * explicit model context because the upstream vision service may rescale them. */
@@ -41,11 +44,14 @@ export async function resolveImageInput(url: string): Promise<ResolvedImageInput
   if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(url)) {
     data = Buffer.from(url.slice(url.indexOf(",") + 1), "base64");
   } else if (/^https?:\/\//i.test(url)) {
-    const res = await fetch(url);
+    // Bounded so a slow or oversized URL cannot stall or bloat the proxy.
+    const res = await fetch(url, { signal: AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`image fetch ${res.status}`);
     const contentType = res.headers.get("content-type")?.split(";")[0].trim().toLowerCase();
     if (!contentType?.startsWith("image/")) throw new Error("image URL did not return an image");
+    if (Number(res.headers.get("content-length") ?? 0) > MAX_IMAGE_BYTES) throw new Error("image too large");
     data = Buffer.from(await res.arrayBuffer());
+    if (data.length > MAX_IMAGE_BYTES) throw new Error("image too large");
     dataUrl = `data:${contentType};base64,${data.toString("base64")}`;
   } else {
     throw new Error("image URL must be an image data URL or http(s) URL");

@@ -44,9 +44,15 @@ describe("imageUrls", () => {
     const fetch = vi.fn(async () => new Response(png, { status: 200, headers: { "content-type": "image/png" } }));
     vi.stubGlobal("fetch", fetch);
     const { dataUrl, width, height } = await resolveImageInput("https://example.test/screen.png");
-    expect(fetch).toHaveBeenCalledWith("https://example.test/screen.png");
+    expect(fetch).toHaveBeenCalledWith("https://example.test/screen.png", expect.objectContaining({ signal: expect.anything() }));
     expect(dataUrl).toBe(`data:image/png;base64,${png.toString("base64")}`);
     expect({ width, height }).toEqual({ width: 2048, height: 2732 });
+  });
+
+  it("rejects an oversized HTTP image", async () => {
+    const big = Buffer.alloc(20 * 1024 * 1024 + 1);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(big, { status: 200, headers: { "content-type": "image/png" } })));
+    await expect(resolveImageInput("https://example.test/big.png")).rejects.toThrow("image too large");
   });
 
   it("reads dimensions from a PNG data URL", async () => {
