@@ -53,6 +53,11 @@ evidence captured on 4 November 2026.
     untouched. EXECUTED in Phase 11c: the isolated venv uses its own
     `Scripts/python.exe` and contains pandas, matplotlib, and fpdf2; the
     isolated Hermes `AGENTS.md` names that interpreter.
+14. Next roadmap (user decision, 2026-11-10): pi must be usable for browser
+    automation (browser-use/browser-harness) and Android (mobile-mcp, with
+    MobileUse as the screenshot/VLM path) through the proxy; a second
+    contribution review round looks for missing features worth adopting; the
+    production give-up/recovery rates are analysed from the observations.
 
 ## Goal
 
@@ -67,6 +72,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 
 | Phase or step | Status | Evidence or commit |
 |---|---|---|
+| Phase 16, image input and browser automation | COMPLETE, image coordinates and B1-B4 PASS | HTTP(S) and data-URL images preserve bytes through M365 `ImageFile` transport; PNG dimensions and original-coordinate guidance added in `c507a69`. Synthetic 2048x2732 and 1024x768 images returned exact expected coordinates with x/y ratios 1.0000. One bounded `browser_exec` call passed page reading, form submission, screenshot verification, and link navigation. Isolated ports 4142, 4169, and 9444 were closed; production 4141 remained healthy. External evidence: `runtime/reports/phase16-image-audit.txt`, `runtime/reports/phase16-browser-acceptance.txt`, and `runtime/reports/phase16-summary.txt`. |
 | Phase 13, reliability and quota observations | COMPLETE, G and C PASS | Added opt-in content-free JSONL observations with strict per-event allowlists, hashed conversation identifiers, shared one-backup rotation, request/recovery/validation/upstream/fallback/quota instrumentation, and the bounded `scripts/observations-summary.mjs` command. Build and core/proxy-lib TypeScript checks pass; full Vitest passed 517 tests with 6 skipped. Isolated loopback-only 4142 acceptance passed G once (`LONG_CHAIN_OK:8`) and C once (`HERMES_TOOL_LOOP_OK`). Seventeen live request events passed JSONL and content-safety checks with no prompt, response, command, path, key, sentinel, tool argument, or tool-result content. Debug logging grew, 4142 was closed, and production 4141 remained healthy and unchanged at PID 24328 on daily commit `a1cce74`. External evidence: `runtime/reports/phase13-verification.txt`, `runtime/reports/phase13-live-results.txt`, `runtime/reports/phase13-observations-summary.txt`, and `runtime/reports/phase13-observations-safety.txt`. |
 | Phase 12, Windows acceptance kit and phase-sweep | COMPLETE | Added safe, parameterized Windows lifecycle and acceptance scripts with mandatory non-production ports and loopback defaults (`63ab454`), plus native Windows listener ownership and shutdown support in the committed phase sweep (`7b039f9`). Isolated 4142 acceptance passed start, listener and health verification, models, chat sentinel, strict stop, closed-port proof, and Scheduled Task WhatIf. The Windows mock sweep passed 1/1. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Production 4141 remained healthy at PID 56788; 4142 is closed. External evidence: `runtime/reports/phase12-windows-acceptance.txt`, `runtime/reports/phase12-phase-sweep.txt`, and `runtime/reports/phase12-validation.txt`. |
 | Phase 11c, timeout-contract correction and acceptance rerun | COMPLETE, T1, T2, T4, G and C PASS | Root cause was an integration contract mismatch, not model state: Hermes interprets terminal `timeout` as seconds and promotes values above its 600-second foreground maximum, so `120000` became a real background process. Phase 7 validation now enforces numeric `minimum` and `maximum`; fenced contracts expose parameter descriptions, including timeout units and limits; isolated `AGENTS.md` documents the rule; Decision 13 uses `runtime/venv-acceptance`. Build, full Vitest (511 passed, 6 skipped), and core/proxy-lib TypeScript checks pass. Serial loopback-only 4142 acceptance passed T1, T2, T4, G and C with zero malformed calls and zero genuine HTTP 429; 4142 was closed and production 4141 remained PID 23988. External evidence: `runtime/reports/phase11c-rootcause.txt`, `runtime/reports/phase11c-live-results.txt`, and `runtime/reports/phase11c-summary.txt`. |
@@ -102,6 +108,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Deploy 2026-11-09 (11) | COMPLETE | Phases 12-13: Windows acceptance kit, Windows phase-sweep, content-free reliability observations (`0f85d3f`, `0042195`, `97d073e`) plus `0b38be5` (summary-script shebang broke the CRLF production checkout); `upstream/main` had no new commits; `daily` merged as `2b94f49` and `bb8d827`, pushed; backup tag `daily-backup-20261109f`; build, tsc green, Vitest 517 passed, 0 failed; observations enabled in production; 4141 PID 24328 -> 57840 (an intermediate restart ran on a stale Nitro bundle, see S36), `/health` 200, live chat `DEPLOY11_OK`, `observations.jsonl` written with metadata only (no content). |
 | Deploy 2026-11-09 (10) | COMPLETE | Hotfix: H52 accepted only sentence-initial unfinished-work statements; pi stopped on production with "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" (`debug.log` line 240978, no recovery). Fix `a89a853` (up to three leading words), cherry-picked to `daily` as `a1cce74` because `dev/integration` HEAD carried Phase 13 RED tests; backup tag `daily-backup-20261109e`; build, tsc green, Vitest 511 passed; 4141 PID 56788 -> 24328, `/health` 200, live chat `DEPLOY10_OK`. |
 | Deploy 2026-11-09 (9) | COMPLETE | Phase 11c: schema minimum/maximum validation and parameter descriptions in fenced contracts (`316d315`, `44a2828`, `531fbe3`), S31 timeout-unit fix; acceptance T1, T2, T4 PASS; `upstream/main` had no new commits; `daily` merged as `16c48e7`, pushed; backup tag `daily-backup-20261109d`; build, tsc green, Vitest 511 passed, 0 failed; 4141 PID 23988 -> 56788, `/health` 200, live chat `DEPLOY9_OK`. |
 | Deploy 2026-11-09 (8) | COMPLETE | Phase 11/11b: parallel runtime-limit refusal recovery (`51ee88e`) and H53 structural capability-refusal recovery (`3549d2a`, `dfc4b20`); `upstream/main` had no new commits; `daily` merged as `b3355f9`, pushed; backup tag `daily-backup-20261109c`; build, tsc green, Vitest 507 passed, 0 failed; 4141 PID 7736 -> 23988, `/health` 200, live chat `DEPLOY8_OK`. |
@@ -123,8 +130,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `a1cce74` (tenth deploy 2026-11-09, hotfix cherry-pick; rollback tags
-  `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
+  `bb8d827` (eleventh deploy 2026-11-09; rollback tags `daily-backup-20261109f`
+  = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
   `b3355f9`, `daily-backup-20261109c` =
   `e279384`, `daily-backup-20261109b` =
   `8acee58`, `daily-backup-20261109` =
@@ -132,12 +139,15 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `24328` (since the tenth deploy, 2026-11-09; it
+- Production port 4141 runs PID `57840` (since the eleventh deploy, 2026-11-09; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
   sets `M365_DEBUG=1` and `M365_LOG_MAX_BYTES=104857600` (in-process rotation
-  to `debug.log.1`, S16), so the proxy writes `debug.log` in that folder. The
+  to `debug.log.1`, S16) and `M365_OBSERVATIONS_FILE=observations.jsonl`
+  (content-free reliability events, Phase 13; summary:
+  `node scripts/observations-summary.mjs --file <path>`), so the proxy writes
+  `debug.log` in that folder. The
   scheduled task `M365 Copilot Proxy Watchdog` runs `proxy-watchdog.ps1`
   every 2 minutes: if nothing listens on 4141 and the `M365 Copilot Proxy`
   task is not running, it starts that task; it rotates `debug.log` to
@@ -470,6 +480,58 @@ observation enablement remains deferred to deployment. External evidence:
 `runtime/reports/phase13-observations-summary.txt`, and
 `runtime/reports/phase13-observations-safety.txt`.
 
+### Phase 16: Image input and browser automation
+
+Status: COMPLETE. OpenAI `image_url` parts in user and tool-result content
+arrays are forwarded. Data URLs retain their original bytes; HTTP(S) image
+URLs are now fetched once, validated as images, converted byte-for-byte to
+data URLs, and uploaded to M365 as `ImageFile` annotations. PNG IHDR
+dimensions are supplied as explicit model context, with coordinates requested
+in the original pixel coordinate system. No proxy resize path exists.
+
+RED/GREEN coverage includes tool-result arrays, HTTP image fetching, dimension
+extraction, and preservation of synthetic 2048x2732 and 1024x768 PNGs.
+Isolated live requests through 127.0.0.1:4142 returned the expected marker
+centres, 1536,2049 and 768,576, for x/y scale ratios of 1.0000. If a future
+MobileUse run still shows upstream scaling, send a known-size image and map
+coordinates back using original_width/sent_width and
+original_height/sent_height.
+
+Browser acceptance used a fresh headless Chrome profile, local static server,
+dedicated CDP port 9444, and isolated proxy 4142. B1 page reading, B2 form
+submission, B3 screenshot capture and amber-panel description, and B4 link
+navigation all passed in one bounded `browser_exec` call. The isolated
+services were stopped and production 4141 remained healthy and unchanged.
+Evidence: `runtime/reports/phase16-image-audit.txt`,
+`runtime/reports/phase16-red-test.txt`,
+`runtime/reports/phase16-browser-acceptance.txt`, and
+`runtime/reports/phase16-summary.txt`.
+
+### Phase 17: Android automation
+
+pi already has mobile-mcp configured against emulator `emulator-5554` and
+MobileUse installed at `C:/Users/NecmiKural/tools/mobile-use` with
+`VLM_BASE_URL` pointing at 4141. Run Android acceptance through the proxy
+using mobile-mcp's accessibility tools (not shell intents): list elements,
+open Settings, navigate one level, type into a search field, take and
+describe a screenshot. Then re-test the MobileUse VLM path for coordinate
+scaling after Phase 16. Never install apps or change device settings beyond
+the test; the emulator only.
+
+### Phase 15: Contribution review, second round
+
+Evaluate the remaining Phase 5 ideas (4-10) against the current code, and
+re-scan upstream `main` and the watch-list for changes since the first review
+(new features, fixes, tool/vision/streaming handling). Output a prioritised
+backlog with effort, benefit and licence notes for the user to choose from.
+
+### Phase 14: Production observation analysis
+
+After at least a day of production traffic, summarise `observations.jsonl`
+(and the debug log where needed): request volume, recovery rate by rule,
+recoveries that still ended without a tool call, argument repairs, 429s and
+fallbacks. Every uncaught give-up wording becomes an Issue tracker row.
+
 ## Issue tracker
 
 Stalls and wrong turns of the worker agent (pi, which itself runs through
@@ -516,6 +578,10 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S34 | Git Bash paths passed directly to PowerShell broke Windows phase-sweep shutdown, and drive-letter archive paths were incorrectly prefixed with the repository path | worker / ops | FIXED in Phase 12: Windows paths use `cygpath`, drive-letter paths are recognized as absolute, and listener ownership is proven before shutdown. Mock sweep evidence: `runtime/reports/phase12-phase-sweep.txt`. |
 | S35 | H52 required the unfinished-work statement to open the sentence; production pi stopped on "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" without recovery | proxy | FIXED `a89a853` (hotfix deploy 10) |
 | S36 | The legacy external 4142 launcher hard-coded an obsolete production PID and daily commit, so its safety gate rejected the first Phase 13 start before opening 4142 | ops | MITIGATED for Phase 13 by deriving the current healthy production PID and clean daily commit, patching only a temporary launcher copy, and retaining the original script unchanged. The successful run proved 127.0.0.1-only binding, debug growth, strict shutdown, and unchanged production. A future launcher cleanup should replace hard-coded identity with an explicit captured baseline. |
+| S36 | Summary script shebang plus `core.autocrlf=true` broke the Vitest suite only in the production checkout; and one production restart ran before the final Nitro bundle, so observations were silently missing | ops | FIXED `0b38be5`; deploy procedure: rebuild, confirm the bundle contains the change, then restart and check the live effect |
+| S37 | HTTP(S) OpenAI `image_url` inputs reached the data-URL-only M365 upload path and failed instead of being forwarded | proxy | FIXED Phase 16 (`c507a69`): fetch once, validate image content type, preserve bytes, convert to a data URL, and cover with RED/GREEN tests |
+| S38 | M365/browser continuation turns omitted `browser_exec` after the first successful call, preventing a multi-call browser workflow | integration | OPEN; Phase 16 acceptance used one bounded `browser_exec` call as a harness workaround and recorded the behavior in the external browser report |
+| S39 | Two early browser acceptance attempts rejected valid page state because generated assertions mishandled `rgb(255, 204, 51)` and surrounding text whitespace | model / worker | MITIGATED in the final run with exact computed-color comparison and trimmed text; final B1-B4 acceptance passed |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
