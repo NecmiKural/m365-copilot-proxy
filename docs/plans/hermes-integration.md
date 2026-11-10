@@ -59,6 +59,60 @@ evidence captured on 4 November 2026.
     contribution review round looks for missing features worth adopting; the
     production give-up/recovery rates are analysed from the observations.
 
+
+## Resume here (handoff, 2026-11-10)
+
+Work paused by the user on 2026-11-10 to save supervisor quota. Everything
+needed to continue is in this file and the external `runtime/` folder.
+
+**State at pause**
+- Production: `m365-proxy-daily`, branch `daily`, 4141 (see Invariants for
+  commit and PID). All code from `dev/integration` is deployed; only plan
+  documentation landed after deploy 12.
+- `dev/integration` is clean and pushed. pi (worker) is idle; its
+  `gpt-5.6-think-deeper` daily priority quota was exhausted on 2026-11-10
+  and resets at 00:00 UTC.
+- No isolated 4142 process is running; no workspace timers are pending.
+
+**Next steps, in order**
+1. Phase 17 finish (see its Status row): A1-A5 already PASS through mobile-mcp;
+   read MobileUse's screenshot resize/rescale code
+   (`C:/Users/NecmiKural/tools/mobile-use`, read-only), confirm why taps land
+   at about half scale, propose or apply a client-side coordinate mapping
+   without editing its `.env`; write `phase17-summary.txt`, update Status.
+2. Issue S42: record the early-return `priority_access_exhausted` 429 in
+   `observations.jsonl` (RED test, minimal fix, deploy).
+3. Phase 15: contribution review, second round (remaining Phase 5 ideas 4-10
+   plus a re-scan of upstream `main` and the watch-list); the user picks.
+4. Phase 14: summarise production `observations.jsonl` (`node
+   scripts/observations-summary.mjs --file
+   %USERPROFILE%/.config/opencode-m365/observations.jsonl`) and add every
+   uncaught give-up wording to the Issue tracker.
+
+**How the work is run**
+- Roles: a supervisor plans, writes self-contained briefs, verifies evidence
+  independently, deploys and reports to the user in Turkish; the worker (pi)
+  implements. The supervisor steps in only to unblock (small fixes, closing a
+  leftover 4142, hotfixes).
+- Dispatch to pi in the OpenAgents workspace: post to a NEW channel per task
+  (`claude-pi-<phase>`) with `metadata.target_agents=["pi"]`; do not message pi
+  while it works (a new message preempts its turn), and do not dispatch while
+  the user is using pi in another channel. Check pi state from its session
+  files under `~/.openagents/pi-sessions/` and `~/.openagents/daemon.log`.
+- Every brief: repo path and `git pull --ff-only`, isolated 4142 only via
+  `runtime/work/scripts/start-4142-with-logging.sh` (127.0.0.1, prove debug
+  log growth), absolute report paths under external `runtime/reports/`, RED
+  test first, build + full Vitest (0 failures) + tsc core and proxy-lib,
+  commit and push after each step (English, user identity, no AI trace), log
+  every stall or unplanned bug in the Issue tracker, timeouts on long
+  commands, stop only on a real HTTP 429, do not end the turn while steps
+  remain, close 4142.
+- Deploy (Decision 7): backup tag `daily-backup-<date>`, merge `upstream/main`
+  if it moved, merge `dev/integration` with `--no-ff`, install, build, confirm
+  the change is in `packages/proxy/.output`, full Vitest + tsc, push, restart
+  4141 (`Stop-Process` on the listener, `Start-ScheduledTask "M365 Copilot
+  Proxy"`), verify new PID, `/health` 200 and a live chat, then record the
+  deploy row and Invariants here.
 ## Goal
 
 Use pi and OpenClaw (and Hermes) through this proxy as full general-purpose
@@ -108,6 +162,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
+| Phase 17, Android automation | PAUSED 2026-11-10 02:10 (real HTTP 429: gpt-5.6-think-deeper daily priority quota used up until 2026-11-11T00:00Z) | Run 17c, no commits yet; evidence in external `runtime/reports/phase17-*`. mobile-mcp tools were loaded; A1 element list PASS, A2 Settings launched via `mobile_launch_app` (foreground `com.android.settings`) PASS, A3 Network & internet PASS, A4 search `battery` with result PASS, A5 screenshot PASS (screenshot 768x1024 vs device 2048x2732, mapping about x2.667). MobileUse run: `.env` unchanged (hash proof), but taps at about (453,1116) on a 2048x2732 screen opened Clock instead of Settings again, so the half-scale problem persists on the MobileUse path (likely MobileUse resizes before sending and does not scale back; to be confirmed from its code). Resume after the quota reset: confirm A1-A5 table, read MobileUse resize/rescale code, propose or apply a client-side mapping, write `phase17-summary.txt`, Issue tracker, commit. |
+| Deploy 2026-11-10 (12) | COMPLETE | Phase 16: image input keeps original pixel coordinates (`c507a69`; 2048x2732 and 1024x768 markers returned at scale 1.0000), browser acceptance B1-B4 PASS; supervisor added a 15 s timeout and 20 MB cap to the new HTTP image fetch (`4aa05c9`); `upstream/main` had no new commits; `daily` merged as `f40715c`, pushed; backup tag `daily-backup-20261110`; build, tsc green, Vitest 520 passed, 0 failed; bundle checked; 4141 PID 57840 -> 29996, `/health` 200, live chat `DEPLOY12_OK`. |
 | Deploy 2026-11-09 (11) | COMPLETE | Phases 12-13: Windows acceptance kit, Windows phase-sweep, content-free reliability observations (`0f85d3f`, `0042195`, `97d073e`) plus `0b38be5` (summary-script shebang broke the CRLF production checkout); `upstream/main` had no new commits; `daily` merged as `2b94f49` and `bb8d827`, pushed; backup tag `daily-backup-20261109f`; build, tsc green, Vitest 517 passed, 0 failed; observations enabled in production; 4141 PID 24328 -> 57840 (an intermediate restart ran on a stale Nitro bundle, see S36), `/health` 200, live chat `DEPLOY11_OK`, `observations.jsonl` written with metadata only (no content). |
 | Deploy 2026-11-09 (10) | COMPLETE | Hotfix: H52 accepted only sentence-initial unfinished-work statements; pi stopped on production with "Bu turda çalışma tamamlanmadı ... henüz yapılmadı" (`debug.log` line 240978, no recovery). Fix `a89a853` (up to three leading words), cherry-picked to `daily` as `a1cce74` because `dev/integration` HEAD carried Phase 13 RED tests; backup tag `daily-backup-20261109e`; build, tsc green, Vitest 511 passed; 4141 PID 56788 -> 24328, `/health` 200, live chat `DEPLOY10_OK`. |
 | Deploy 2026-11-09 (9) | COMPLETE | Phase 11c: schema minimum/maximum validation and parameter descriptions in fenced contracts (`316d315`, `44a2828`, `531fbe3`), S31 timeout-unit fix; acceptance T1, T2, T4 PASS; `upstream/main` had no new commits; `daily` merged as `16c48e7`, pushed; backup tag `daily-backup-20261109d`; build, tsc green, Vitest 511 passed, 0 failed; 4141 PID 23988 -> 56788, `/health` 200, live chat `DEPLOY9_OK`. |
@@ -130,8 +186,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `bb8d827` (eleventh deploy 2026-11-09; rollback tags `daily-backup-20261109f`
-  = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
+  `f40715c` (twelfth deploy 2026-11-10; rollback tags `daily-backup-20261110`
+  = `bb8d827`, `daily-backup-20261109f` = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
   `b3355f9`, `daily-backup-20261109c` =
   `e279384`, `daily-backup-20261109b` =
   `8acee58`, `daily-backup-20261109` =
@@ -139,7 +195,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `57840` (since the eleventh deploy, 2026-11-09; it
+- Production port 4141 runs PID `29996` (since the twelfth deploy, 2026-11-10; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
@@ -582,6 +638,9 @@ worker harness or briefing issue, `model` = model behaviour only.
 | S37 | HTTP(S) OpenAI `image_url` inputs reached the data-URL-only M365 upload path and failed instead of being forwarded | proxy | FIXED Phase 16 (`c507a69`): fetch once, validate image content type, preserve bytes, convert to a data URL, and cover with RED/GREEN tests |
 | S38 | M365/browser continuation turns omitted `browser_exec` after the first successful call, preventing a multi-call browser workflow | integration | OPEN; Phase 16 acceptance used one bounded `browser_exec` call as a harness workaround and recorded the behavior in the external browser report |
 | S39 | Two early browser acceptance attempts rejected valid page state because generated assertions mishandled `rgb(255, 204, 51)` and surrounding text whitespace | model / worker | MITIGATED in the final run with exact computed-color comparison and trimmed text; final B1-B4 acceptance passed |
+| S40 | Phase 16 added proxy-side HTTP image fetching without a timeout or size limit; on the 0.0.0.0 production listener a slow or huge URL could stall or bloat the proxy | proxy | FIXED `4aa05c9` (15 s timeout, 20 MB cap) |
+| S41 | Worker and isolated agent stopped on a naming difference (AVD name vs adb serial) instead of verifying it; the supervisor brief named the serial, which made the stop look correct | worker | MITIGATED: briefs now say to verify ambiguity, pick the safest path, record it and continue; name devices by what the tool shows |
+| S42 | Production `priority_access_exhausted` 429s returned before contacting M365 were not written to `observations.jsonl` (last event 01:48, 429s at 02:10) | proxy | OPEN: instrument the early-return 429 path (`throttle`/`priority_quota`) |
 
 Add new rows as they are observed, whether or not a phase planned them; fix
 `proxy`, `integration` and `ops` rows in their own small phase with RED tests
