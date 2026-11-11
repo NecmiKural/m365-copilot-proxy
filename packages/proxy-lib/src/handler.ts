@@ -425,6 +425,17 @@ export async function handleChatCompletion(
   const knownExhaustion = activePriorityAccessExhaustion(requestedBudget ?? requestedModel);
   const fallbackModel = knownExhaustion && requestedBudget ? priorityAccessFallbackModel(requestedBudget) : null;
   if (knownExhaustion && !fallbackModel) {
+    const isFirstTurn = session.turnCount === 0;
+    const observation = {
+      conversationId: session.conversationId,
+      model: requestedModel,
+      stream: !!body.stream,
+      mode: isFirstTurn || conv.sentMessageCount === 0 ? "full" : "delta",
+      tools: body.tools?.length ?? 0,
+    };
+    recordObservation({ kind: "request", ...observation });
+    recordObservation({ kind: "throttle", ...observation });
+    recordObservation({ kind: "priority_quota", ...observation, remaining: 0 });
     log.info(`Priority access exhausted (${knownExhaustion.window}) until ${knownExhaustion.resetsAt.toISOString()} — 429 without contacting M365`);
     return priorityAccessResponse(knownExhaustion, requestedModel);
   }
