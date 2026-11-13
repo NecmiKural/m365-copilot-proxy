@@ -164,7 +164,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 | F1 adjacent command-wrapper edge case | COMPLETE | Adjacent `<command>a</command>` and `<command>b</command>` elements remain unchanged; focused test, build, core/proxy-lib TypeScript pass; only two known Windows Vitest failures |
 | Phase 2d, H45 full-history recovery live G | HISTORICAL FAIL, superseded by H51/H52 and Phase 10 PASS | Build `49bc1235` remains the historical 0/2 result. H51/H52 supersede its recovery gap; Phase 10 G passed with eight calls and zero give-ups. See `runtime/reports/phase10-summary.txt`. |
 | Phase 3, real token usage inventory | COMPLETE, no code change | Offline inspection found no real upstream input/output/total token field. Observed values are message counts, turn counts, classifier/routing metadata, priority-access turn allowances, or timestamps. OpenAI usage remains unchanged; no 4142 live request was warranted. H48: `docs/hypotheses.md`; external evidence: `runtime/reports/phase3-upstream-usage-inventory.txt`; analysis commit `0d2559d`. |
-| S42, cached priority-access observation gap | COMPLETE, not deployed | Early `priority_access_exhausted` 429s now record content-free `request`, `throttle`, and zero-remaining `priority_quota` observations without contacting M365. RED/GREEN regression, build, full Vitest, and core/proxy-lib TypeScript checks pass. External evidence: `runtime/reports/s42-red-test.txt`, `runtime/reports/s42-green-test.txt`, and `runtime/reports/s42-validation.txt`. |
+| S42, cached priority-access observation gap | COMPLETE, deployed (thirteenth deploy) | Early `priority_access_exhausted` 429s now record content-free `request`, `throttle`, and zero-remaining `priority_quota` observations without contacting M365. RED/GREEN regression, build, full Vitest, and core/proxy-lib TypeScript checks pass. External evidence: `runtime/reports/s42-red-test.txt`, `runtime/reports/s42-green-test.txt`, and `runtime/reports/s42-validation.txt`. |
+| Thirteenth production deploy (S42) | COMPLETE | 2026-11-13: tag `daily-backup-20261113` = `7983e8b`; upstream `main` unchanged; `dev/integration` merged `--no-ff` as `6c114d0`; install, build, full Vitest (521 passed, 6 skipped) and core/proxy-lib tsc pass; change present in `packages/proxy/.output`; 4141 restarted via scheduled task, PID 29996 -> 2072, `/health` 200, live chat OK. |
 | Phase 17, Android automation | COMPLETE, A1-A5 PASS; MobileUse coordinate mismatch diagnosed | mobile-mcp passed element listing, Settings launch, one-level navigation, search input/result, and screenshot capture. MobileUse was inspected read-only and `.env` remained unchanged. Its Qwen3 parser does rescale 999x999 coordinates to the 2048x2732 device, but M365 renders the screenshot at 768x1024; treating that non-square image as normalized 999x999 produces the observed wrong Clock taps near (453,1116). Recommended client mapping uses the actual sent image dimensions: x/768*2048 and y/1024*2732, retaining 999 normalization only for backends that guarantee it. External evidence: `runtime/reports/phase17-summary.txt` and `runtime/reports/phase17-*`. Production 4141 was unchanged. |
 | Deploy 2026-11-10 (12) | COMPLETE | Phase 16: image input keeps original pixel coordinates (`c507a69`; 2048x2732 and 1024x768 markers returned at scale 1.0000), browser acceptance B1-B4 PASS; supervisor added a 15 s timeout and 20 MB cap to the new HTTP image fetch (`4aa05c9`); `upstream/main` had no new commits; `daily` merged as `f40715c`, pushed; backup tag `daily-backup-20261110`; build, tsc green, Vitest 520 passed, 0 failed; bundle checked; 4141 PID 57840 -> 29996, `/health` 200, live chat `DEPLOY12_OK`. |
 | Deploy 2026-11-09 (11) | COMPLETE | Phases 12-13: Windows acceptance kit, Windows phase-sweep, content-free reliability observations (`0f85d3f`, `0042195`, `97d073e`) plus `0b38be5` (summary-script shebang broke the CRLF production checkout); `upstream/main` had no new commits; `daily` merged as `2b94f49` and `bb8d827`, pushed; backup tag `daily-backup-20261109f`; build, tsc green, Vitest 517 passed, 0 failed; observations enabled in production; 4141 PID 24328 -> 57840 (an intermediate restart ran on a stale Nitro bundle, see S36), `/health` 200, live chat `DEPLOY11_OK`, `observations.jsonl` written with metadata only (no content). |
@@ -189,7 +190,8 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
 ## Invariants
 
 - Production checkout: `m365-proxy-daily`, branch `daily`, commit
-  `f40715c` (twelfth deploy 2026-11-10; rollback tags `daily-backup-20261110`
+  `6c114d0` (thirteenth deploy 2026-11-13; rollback tags `daily-backup-20261113`
+  = `7983e8b`, `daily-backup-20261110`
   = `bb8d827`, `daily-backup-20261109f` = `a1cce74`, `daily-backup-20261109e` = `16c48e7`, `daily-backup-20261109d` =
   `b3355f9`, `daily-backup-20261109c` =
   `e279384`, `daily-backup-20261109b` =
@@ -198,7 +200,7 @@ debug logs, form a hypothesis, test it, and record it in `docs/hypotheses.md`.
   `ad4213b`, `daily-backup-20261108d` =
   `f6297d7`, `daily-backup-20261108c` = `816bccc`, `daily-backup-20261108b` = `a3ed0ba` and `daily-backup-20261108` =
   `d4af8e34`), clean. Parallel tool calls stay off unless `M365_PARALLEL_TOOLS=1`.
-- Production port 4141 runs PID `29996` (since the twelfth deploy, 2026-11-10; it
+- Production port 4141 runs PID `2072` (since the thirteenth deploy, 2026-11-13; it
   changes on every restart, so read the current LISTENING PID and record it
   before a run) and returns HTTP 200.
 - Production operations: `%USERPROFILE%\.config\opencode-m365\start-proxy.cmd`
