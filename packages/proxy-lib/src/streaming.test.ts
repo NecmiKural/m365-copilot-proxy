@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 
 // Replace core's ModelSession with a scripted fake so we can exercise the handler's
 // streaming path with no auth/WebSocket. Everything else in core stays real.
+const observations: Array<Record<string, unknown>> = [];
+
 const scripted: {
   deltas: string[];
   fullText?: string;
@@ -98,7 +100,12 @@ vi.mock("@m365-copilot/core", async (importActual) => {
     if (scripted.budgetHold) throw scripted.budgetHold;
     return { waitedMs: 0 };
   }
-  return { ...actual, ModelSession: FakeModelSession, awaitTurnBudget };
+  return {
+    ...actual,
+    ModelSession: FakeModelSession,
+    awaitTurnBudget,
+    recordObservation: (observation: Record<string, unknown>) => observations.push(observation),
+  };
 });
 
 /** Which fake ModelSession (by creation order) served every run() call, in order. */
@@ -1392,6 +1399,41 @@ describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, 
     scripted.queue = [CALL];
     expect((await send("claude-opus-4.8", "third task")).status).toBe(200);
     expect(scripted.models).toEqual(["claude-opus-4.8"]);
+  });
+
+  it("observes a remembered priority-access 429 without contacting M365", async () => {
+    scripted.queue = [REFUSAL];
+    await send();
+    observations.length = 0;
+
+    const res = await send("claude-opus", "another observed task");
+
+    expect(res.status).toBe(429);
+    expect(scripted.models).toEqual([]);
+    expect(observations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "request",
+        model: "claude-opus",
+        stream: false,
+        mode: "full",
+        tools: 1,
+      }),
+      expect.objectContaining({
+        kind: "throttle",
+        model: "claude-opus",
+        stream: false,
+        mode: "full",
+        tools: 1,
+      }),
+      expect.objectContaining({
+        kind: "priority_quota",
+        model: "claude-opus",
+        stream: false,
+        mode: "full",
+        tools: 1,
+        remaining: 0,
+      }),
+    ]));
   });
 
   it("with M365_OPUS_FALLBACK_MODEL, re-sends the whole request to it in a fresh conversation", async () => {
