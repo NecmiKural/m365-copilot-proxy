@@ -9,6 +9,7 @@ import {
   parseFencedToolCalls,
   renderFencedCall,
   transcriptStyleForVariant,
+  unwrapCodeModeShellScript,
 } from "./fenced.js";
 
 const log = createLogger("tools");
@@ -39,7 +40,7 @@ export interface ToolDef {
 
 export interface Message {
   role: string;
-  content?: string | Array<{ type: string; text?: string; image_url?: { url: string } }> | null;
+  content?: string | Array<{ type: string; text?: string; image_url?: { url: string }; file?: { filename?: string; file_data?: string } }> | null;
   tool_calls?: Array<{
     id: string;
     function: { name: string; arguments: string };
@@ -133,13 +134,14 @@ function toolCallSummary(rawArgs: string): { key: string; value: string } | null
   const hit = named.find(([, v]) => typeof v === "string") ??
     (() => { const v = Object.values(args).find((x) => typeof x === "string"); return v === undefined ? undefined : ["input", v] as [string, unknown]; })();
   if (!hit) return null;
+  const unwrapped = unwrapCodeModeShellScript(hit[1] as string);
   // A long value is cut, and says so: cut silently, the label reads as the call
   // itself cut short. GPT-5.6 took `command="… margin: 22m"` for its command
   // truncated there, and gave up ("I can't generate files in the current
-  // session", §39 F98).
-  const flat = (hit[1] as string).replace(/\s+/g, " ").trim();
+  // session", §45 F121).
+  const flat = (unwrapped ?? (hit[1] as string)).replace(/\s+/g, " ").trim();
   const value = (flat.length > 100 ? `${flat.slice(0, 100)}…` : flat).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return { key: hit[0], value };
+  return { key: unwrapped !== null ? "command" : hit[0], value };
 }
 
 /** One tool result as the model is meant to read it: named for the call that

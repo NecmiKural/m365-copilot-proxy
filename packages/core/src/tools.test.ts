@@ -612,6 +612,15 @@ describe("tool-result labelling", () => {
     const short = [{ role: "assistant", tool_calls: [{ id: "b3", function: { name: "bash", arguments: '{"command":"ls -la"}' } }] }];
     expect(formatToolResponse({ role: "tool", tool_call_id: "b3", content: "x" }, short)).toContain('command="ls -la">');
   });
+
+  it("unwraps a Codex Code Mode script and labels it as command with quotes escaped", async () => {
+    const { formatToolResponse } = await import("./tools.js");
+    const { codeModeShellScript } = await import("./fenced.js");
+    const cmd = 'echo "$HOME"';
+    const history = [{ role: "assistant", tool_calls: [{ id: "cm1", function: { name: "functions__exec", arguments: JSON.stringify({ input: codeModeShellScript(cmd) }) } }] }];
+    const out = formatToolResponse({ role: "tool", tool_call_id: "cm1", content: "/home/u" }, history);
+    expect(out).toContain('<tool_response tool="functions__exec" command="echo \\"$HOME\\"">');
+  });
 });
 
 describe("fenced tool format (the only format)", () => {

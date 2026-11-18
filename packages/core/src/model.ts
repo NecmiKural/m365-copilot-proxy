@@ -2,6 +2,7 @@ import { getToken } from "./auth.js";
 import { getOrCreateAgent } from "./agent.js";
 import { CopilotSession } from "./session.js";
 import { resolveImageInput, uploadImage, type ImageAnnotation } from "./image-input.js";
+import { uploadFile, type FileAnnotation } from "./file-upload.js";
 import { createLogger, trunc } from "./log.js";
 import { awaitTurnBudget } from "./turn-budget.js";
 import type { CopilotStream } from "./copilot.js";
@@ -105,21 +106,30 @@ export class ModelSession {
   ): Promise<CopilotStream> {
     let token = await this.resolveToken();
     // Image input (#39): upload each image for this conversation; the message points at them.
-    // A failed upload is said in the text, so the model doesn't answer about an image it never got.
-    const annotations: ImageAnnotation[] = [];
+    // Any other data URL is a document, which goes to OneDrive like the web client's (file-upload.ts).
+    // A failed upload is said in the text, so the model doesn't answer about a file it never got.
+    const annotations: (ImageAnnotation | FileAnnotation)[] = [];
     const imageDimensions: string[] = [];
-    for (const [index, url] of images.entries()) {
+    let imageIndex = 0;
+    for (const url of images) {
+      const isImage = !/^data:(?!image\/)/i.test(url);
       try {
-        const resolved = await resolveImageInput(url);
-        annotations.push(await uploadImage(token, this.conversationId, resolved.dataUrl));
-        if (resolved.width && resolved.height) {
-          imageDimensions.push(`image ${index + 1}: ${resolved.width}x${resolved.height} pixels`);
+        if (isImage) {
+          imageIndex++;
+          const resolved = await resolveImageInput(url);
+          annotations.push(await uploadImage(token, this.conversationId, resolved.dataUrl));
+          if (resolved.width && resolved.height) {
+            imageDimensions.push(`image ${imageIndex}: ${resolved.width}x${resolved.height} pixels`);
+          }
+        } else {
+          annotations.push(await uploadFile(url));
         }
       } catch (err: any) {
-        log.info(`Image upload failed: ${err.message}`);
+        const what = isImage ? "image" : "file";
+        log.info(`${isImage ? "Image" : "File"} upload failed: ${err.message}`);
         text += `
 
-(Note: an attached image could not be passed on — ${err.message.slice(0, 120)}. Don't describe it; say it didn't arrive.)`;
+(Note: an attached ${what} could not be passed on — ${err.message.slice(0, 120)}. Don't describe it; say it didn't arrive.)`;
       }
     }
     if (imageDimensions.length > 0) {
