@@ -135,6 +135,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   in answers (F156)
 - §56 — cursor deltas extend the adaptive card text rather than `m.text` (fixing doubled `<`, `(`, `[(`), and
   StreamHub's final character can arrive only in `patches` (`#134`, F157)
+- §57 — over-cap shell commands on Windows: save any non-heredoc or bundled command to a temp script
+  and run it whole without an extra M365 turn (F158)
 
 ---
 
@@ -7146,3 +7148,31 @@ missing their trailing `]`.
    deliver the complete card text in a final `message_part` `patches` item (`op: "replace"`,
    `path: "/<messageId>/adaptiveCards"` or `…/adaptiveCards/0/body/0/text`). Known non-Progress answer
    messages fold those card replacements through `composer.snapshot` (preserving `restoreStrippedBrackets`).
+
+---
+
+## 57. Oct 8 2026 — Running over-cap shell commands whole on Windows (`longCommandAsScript`)
+
+Follow-up from the Oct 4–8 real-pi runs on Windows (#70 split into standalone PRs).
+
+### F158 — the heredoc rewrite left every other long command cut; a script carries any of them 🟢 (model-free)
+F78's fix covers one shape: a lone quoted heredoc that writes a file. A long `py - <<'EOF'` analysis
+script, a long `py -c "…"`, or a heredoc bundled with other commands (`cd`, `find`, `wc`) still reached
+the shell cut at ~8.2k characters. The proxy holds the whole command, and the harness's write tool has
+no length cap, so an over-cap call to a POSIX shell on Windows now goes out in two steps: the write tool
+saves the command unchanged to `<dir>/m365-cmd-<id>.sh`, and when that result comes back the proxy
+answers `bash '<script>'; s=$?; rm -f '<script>'; exit $s` itself, with no M365 turn
+(`longCommandAsScript`). M365 never sees the write: the next delta is the run's output, after a note
+saying the command was saved and run unchanged. A lone heredoc write still goes straight to the write
+tool (one step); one bundled with other commands now runs whole instead of skipping them.
+**Measured** (real pi, the real handler with a scripted model, one 14,785-char `cd sub && py - <<'EOF'
+… EOF; echo …; pwd`): with the fix the script printed the right sum with Turkish text intact, the
+trailing `echo`/`pwd` ran in `sub`, the script was deleted, and M365's second message was the note plus
+that output; with it off (`M365_HOST_SHELL=powershell`) bash said "here-document … delimited by
+end-of-file" and Python a SyntaxError on the cut list. `<dir>` is the harness's working directory
+when its system prompt names one (pi's `<cwd>`, Claude Code's `Primary working directory:`, opencode's
+`Working directory:`), because Claude Code asks before writing outside the project and would stop the
+run halfway; otherwise the proxy host's temp dir. The cost: a script whose run never comes (the user
+stops the session between the two steps) stays in the project. **Not covered:** WSL bash (it can't see
+a Windows path), a PowerShell shell tool (left as it was), and Claude Code itself: the cwd choice
+follows from its permission rules, it wasn't run against it.

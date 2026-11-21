@@ -97,6 +97,9 @@ export {
   transcriptStyleForVariant,
   FRAMING_VARIANT_NAMES,
   longHeredocAsWrite,
+  longCommandAsScript,
+
+  harnessWorkingDirectory,
   strippedTypeMember,
   findRecognizedShellTool,
   toolsBlock,
