@@ -137,8 +137,8 @@ than "we eyeballed one run." See §M (Methods) for the experimental rig.
   StreamHub's final character can arrive only in `patches` (`#134`, F157)
 - §57 — over-cap shell commands on Windows: save any non-heredoc or bundled command to a temp script
   and run it whole without an extra M365 turn (F158)
-- §50 — GPT-5.6 Think Deeper through pi: its give-up is an instruction conflict that `relay` dissolves,
-  and `relay_batch` too at baseline's turn count (F149); a pile of global skills (F150)
+- §58 — GPT-5.6 Think Deeper through pi: its give-up is an instruction conflict that `relay` dissolves,
+  and `relay_batch` too at baseline's turn count (F159); a pile of global skills (F160)
 - §46–§56 — Hermes agent & daily integration work: union-typed fenced args (F126), terminal wrapper leak & tool-call parity (F127–F128), regression probes (F129), H42–H53
 
 ---
@@ -7111,8 +7111,6 @@ file name (`plainFileNames`); closed and unclosed backtick/tilde fenced blocks a
 alone, and a bare `<name.ext>` is not touched (`#include <stdio.h>`). Not applied to a tool-less streamed
 answer, which goes to the client delta by delta before the markup is complete.
 
----
-
 ## 56. Oct 5 / Nov 20 2026 — Cursor deltas extend adaptive card text (`#134`)
 
 Follow-up from the Oct 5 real-pi sweep (#70 split into standalone PRs), reworked after `#134` showed the
@@ -7142,8 +7140,6 @@ missing their trailing `]`.
    `path: "/<messageId>/adaptiveCards"` or `…/adaptiveCards/0/body/0/text`). Known non-Progress answer
    messages fold those card replacements through `composer.snapshot` (preserving `restoreStrippedBrackets`).
 
----
-
 ## 57. Oct 8 2026 — Running over-cap shell commands whole on Windows (`longCommandAsScript`)
 
 Follow-up from the Oct 4–8 real-pi runs on Windows (#70 split into standalone PRs).
@@ -7163,23 +7159,21 @@ tool (one step); one bundled with other commands now runs whole instead of skipp
 trailing `echo`/`pwd` ran in `sub`, the script was deleted, and M365's second message was the note plus
 that output; with it off (`M365_HOST_SHELL=powershell`) bash said "here-document … delimited by
 end-of-file" and Python a SyntaxError on the cut list. `<dir>` is the harness's working directory
-when its system prompt names one (pi's `<cwd>`, Claude Code's `Primary working directory:`, opencode's
+when its system prompt names one (pi's `Current working directory:`, Claude Code's `Primary working directory:`, opencode's
 `Working directory:`), because Claude Code asks before writing outside the project and would stop the
 run halfway; otherwise the proxy host's temp dir. The cost: a script whose run never comes (the user
 stops the session between the two steps) stays in the project. **Not covered:** WSL bash (it can't see
 a Windows path), a PowerShell shell tool (left as it was), and Claude Code itself: the cwd choice
 follows from its permission rules, it wasn't run against it.
 
----
-
-## 50. Oct 4–14 2026 — GPT-5.6 Think Deeper through pi on Windows (`relay_batch` default, give-up patterns, and global skills pile)
+## 58. Oct 4–14 2026 — GPT-5.6 Think Deeper through pi on Windows (`relay_batch` default, give-up patterns, and global skills pile)
 
 Follow-ups to §31 and §32 from the same real-pi setup (Windows, `gpt-5.6-think-deeper`, the user's
 Turkish prompts). Originally opened together in #70; the orthogonal fixes from those runs were split out
 into separate PRs (#113 SessionPool `replyKey`, #114 `TurnTextComposer`, #115 tool-result labels &
 file-chip markup, #116 `longCommandAsScript`).
 
-### F149 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper (`relay_batch` ships) 🟢
+### F159 — the give-up is an instruction conflict, and `relay` dissolves it for GPT-5.6 Think Deeper (`relay_batch` ships) 🟢
 **Why it gives up.** M365 streams chain-of-thought summaries as `addToChainOfThought` frames (visible
 with `M365_DEBUG`). In give-up turns they name a conflict between two instruction sources: "There
 seems to be a conflict between the developer's statement about file generation being disabled and
@@ -7233,19 +7227,19 @@ wasn't able to complete … in this run" scoped to the whole task or run, so "I 
 integration tests because they need Docker" stays an answer — plus "erişilebilir değil" for Turkish.
 Old vs new detector over every distinct no-tool reply in those transcripts (198): 4 new hits, all
 give-ups; 0 lost; 0 false positives. The old detector's 38 hits are all give-ups too: they reached
-the user because the one forcing retry didn't turn them (the F149 conflict). Caveat: only 18 of the
+the user because the one forcing retry didn't turn them (the F159 conflict). Caveat: only 18 of the
 198 are English and about 6 of those are genuine answers (the prompts were Turkish; the rest are
 give-ups, hand-backs and two unparsed tool calls), which is why the English patterns stay narrow.
 
 **GPT-5.5 Think Deeper after the fork fix (F85)** (Oct 5, 01:54; real pi, baseline vs relay via
-`M365_FRAMING_FILE`, interleaved; .pdf and .docx in Turkish as F149, write-code and fix-bug in
+`M365_FRAMING_FILE`, interleaved; .pdf and .docx in Turkish as F159, write-code and fix-bug in
 English; × 2): baseline **8/8**, relay 8/8, **0 give-up turns in either arm**. Relay took about twice
 the calls (write-code 4 vs 1, pdf 7.5 vs 4). The run first scored baseline 7/8: its "failure" was a
 valid one-page PDF 1.7 (pandoc + xelatex) whose page object sits in a compressed object stream, where
 the verifier's plain-bytes `/Type /Page` search can't see it; the verifier now accepts `/ObjStm`. So
 5.5 keeps `baseline`.
 
-**GPT-5.6 Think Deeper after the fork fix (F85)** (Oct 5, 05:39; F149's document sweep with its prompts,
+**GPT-5.6 Think Deeper after the fork fix (F85)** (Oct 5, 05:39; F159's document sweep with its prompts,
 baseline vs relay, × 4, interleaved, one job): the conflict survives the fork fix.
 
 | arm | task passed | runs with a give-up final |
@@ -7257,7 +7251,7 @@ Baseline's give-ups came after the first obstacle: "PDF oluşturma işlemi tamam
 WeasyPrint lacked a system library (2 calls, no file); "PDF dosyası oluşturamıyorum veya komut
 çalıştıramıyorum; bu oturumda dosya üretme ve betik yürütme özellikle…" (detected, the retry didn't
 turn it); and "Şu anda dosyayı doğrudan oluşturup doğrulayamıyorum" after a pandoc run that had in
-fact made the file. Fewer than F149's 12/14 on forked conversations, but relay is still the only arm
+fact made the file. Fewer than F159's 12/14 on forked conversations, but relay is still the only arm
 without them, so `Gpt_5_6_Reasoning` keeps `relay`. The passive form was invisible to the detector
 (its Turkish verbs are first person); it now catches "tamamlanamadı / oluşturulamadı" as a whole
 word, not "tamamlanamadıysa" or "oluşturulamadığında". Old vs new detector over the 245 distinct
@@ -7282,7 +7276,7 @@ command (#115, now covered for detection by §43 F118), and with that fixed `rel
 ran on Windows with a local adaptation of `phase-sweep.sh` (under Git Bash its port check doesn't
 parse and `$!` isn't the node process).
 
-### F150 — a pile of global pi skills: cheap up to ~120, a few broad descriptions are the real risk 🟡
+### F160 — a pile of global pi skills: cheap up to ~120, a few broad descriptions are the real risk 🟡
 **Question.** What does installing many skills in `~/.pi/agent/skills` do through the proxy? pi puts every
 skill's name, description and path in the system prompt of every session (the instructions load only when
 the model reads `SKILL.md`), so the cost is the listing.

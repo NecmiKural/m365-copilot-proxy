@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const CONFIG_DIR = join(homedir(), ".config", "opencode-m365");
 
@@ -13,20 +13,7 @@ async function load(env: Record<string, string | undefined>) {
 }
 
 describe("debug log and frame dump paths", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  function tempLog(name = "debug.log") {
-    const dir = mkdtempSync(join(tmpdir(), "m365-log-"));
-    tempDirs.push(dir);
-    return join(dir, name);
-  }
+  afterEach(() => vi.unstubAllEnvs());
 
   it("default to debug.log and frames/ in the config dir", async () => {
     const m = await load({ M365_LOG_FILE: undefined, M365_FRAME_DIR: undefined });
@@ -46,40 +33,122 @@ describe("debug log and frame dump paths", () => {
     expect(m.LOG_PATH).toBe(absoluteLog);
     expect(m.FRAME_DIR).toBe(join(CONFIG_DIR, "frames"));
   });
+});
 
+describe("rolling window over the debug log (M365_LOG_MAX_BYTES)", () => {
+  const dirs: string[] = [];
 
-  it("rotates to one backup before a write exceeds M365_LOG_MAX_BYTES", async () => {
-    const log = tempLog();
-    writeFileSync(log, "seed");
-    const m = await load({
+  /** A log path under a fresh temp dir, removed after the test. */
+  function tempLog(): string {
+    const dir = mkdtempSync(join(tmpdir(), "m365-log-"));
+    dirs.push(dir);
+    return join(dir, "debug.log");
+  }
+
+  /** A logger writing to `logFile`, with the env read at modules-reset time. */
+  async function loggerAt(logFile: string, maxBytes?: string) {
+    for (const [k, v] of Object.entries({
+      M365_TRACE: undefined,
       M365_DEBUG: "1",
-      M365_LOG_FILE: log,
-      M365_LOG_MAX_BYTES: "5",
-    });
+      M365_LOG_STDOUT: undefined,
+      M365_LOG_FILE: logFile,
+      M365_FRAME_DIR: undefined,
+      M365_LOG_MAX_BYTES: maxBytes,
+    })) vi.stubEnv(k, v);
+    vi.resetModules();
+    const m = await import("./log.js");
+    return m.createLogger("test");
+  }
 
-    m.createLogger("test").info("next");
+  /** Whole numbered lines, `bytes` of them at 9 bytes a line. */
+  function history(bytes: number): string {
+    const lines: string[] = [];
+    for (let i = 0, size = 0; size < bytes; i++, size += 9) lines.push(`line ${String(i).padStart(3, "0")}`);
+    return `${lines.join("\n")}\n`;
+  }
 
-    expect(readFileSync(`${log}.1`, "utf8")).toBe("seed");
-    expect(readFileSync(log, "utf8")).toContain("[test] next");
+  afterEach(() => {
+    while (dirs.length) rmSync(dirs.pop()!, { recursive: true, force: true });
+    vi.unstubAllEnvs();
   });
 
-  it("does not rotate when M365_LOG_MAX_BYTES is unset", async () => {
-    const log = tempLog();
-    writeFileSync(log, "seed");
-    const m = await load({
-      M365_DEBUG: "1",
-      M365_LOG_FILE: log,
-      M365_LOG_MAX_BYTES: undefined,
-    });
+  it("cuts the oldest bytes once the file passes 1.6x the window", async () => {
+    const logFile = tempLog();
+    writeFileSync(logFile, history(2_000));
+    const logger = await loggerAt(logFile, "1000");
 
-    m.createLogger("test").info("next");
+    logger.info("the newest line");
+    const text = readFileSync(logFile, "utf8");
 
-    expect(existsSync(`${log}.1`)).toBe(false);
-    expect(readFileSync(log, "utf8")).toMatch(/^seed.*\[test\] next/s);
+    expect(text).toContain("the newest line");
+    expect(text).not.toContain("line 000");
+    expect(text.length).toBeLessThan(1_200);
+    // The cut is on a line boundary: the first kept line is whole.
+    expect(text.split("\n")[0]).toMatch(/^line \d{3}$/);
+    expect(existsSync(`${logFile}.tmp`)).toBe(false);
   });
+
+  it("leaves a log under the threshold alone", async () => {
+    const logFile = tempLog();
+    const original = history(2_000);
+    writeFileSync(logFile, original);
+    const logger = await loggerAt(logFile, "50MB");
+
+    logger.info("the newest line");
+    const text = readFileSync(logFile, "utf8");
+
+    expect(text.startsWith(original)).toBe(true);
+    expect(text).toContain("the newest line");
+  });
+
+  it("keeps the tail when it holds no newline at all", async () => {
+    const logFile = tempLog();
+    writeFileSync(logFile, "x".repeat(2_000));
+    const logger = await loggerAt(logFile, "1000");
+
+    logger.info("the newest line");
+    const text = readFileSync(logFile, "utf8");
+
+    expect(text.startsWith("xxx")).toBe(true);
+    expect(text).toContain("the newest line");
+    // Never emptied: the window is kept even though no line boundary was found.
+    expect(text.length).toBeGreaterThan(1_000);
+  });
+
+  it("takes a KB/MB suffix and falls back to the default on nonsense", async () => {
+    const suffixed = tempLog();
+    writeFileSync(suffixed, history(2_000));
+    const withSuffix = await loggerAt(suffixed, "1KB");
+    withSuffix.info("the newest line");
+    expect(readFileSync(suffixed, "utf8").length).toBeLessThan(1_200);
+
+    const nonsense = tempLog();
+    const original = history(2_000);
+    writeFileSync(nonsense, original);
+    const withDefault = await loggerAt(nonsense, "sixty megabytes");
+    withDefault.info("the newest line");
+    expect(readFileSync(nonsense, "utf8").startsWith(original)).toBe(true);
+  });
+});
+
+describe("reliability observations (M365_OBSERVATIONS_FILE)", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function tempPath(name: string) {
+    const dir = mkdtempSync(join(tmpdir(), "m365-log-"));
+    tempDirs.push(dir);
+    return join(dir, name);
+  }
 
   it("does not create an observations file when M365_OBSERVATIONS_FILE is unset", async () => {
-    const observations = tempLog("observations.ndjson");
+    const observations = tempPath("observations.ndjson");
     const m = await load({
       M365_OBSERVATIONS_FILE: undefined,
       M365_LOG_MAX_BYTES: undefined,
@@ -99,7 +168,7 @@ describe("debug log and frame dump paths", () => {
   });
 
   it("writes content-free JSONL observations when enabled", async () => {
-    const observations = tempLog("observations.ndjson");
+    const observations = tempPath("observations.ndjson");
     const sentinel = "PHASE13_SECRET_PROMPT_SENTINEL";
     const m = await load({
       M365_OBSERVATIONS_FILE: observations,
@@ -143,7 +212,7 @@ describe("debug log and frame dump paths", () => {
   });
 
   it("allows only fields belonging to each observation kind", async () => {
-    const observations = tempLog("observations.ndjson");
+    const observations = tempPath("observations.ndjson");
     const sentinel = "PHASE13_RESPONSE_SENTINEL";
     const m = await load({ M365_OBSERVATIONS_FILE: observations });
 
@@ -168,7 +237,7 @@ describe("debug log and frame dump paths", () => {
   });
 
   it("rotates observations to one backup using M365_LOG_MAX_BYTES", async () => {
-    const observations = tempLog("observations.ndjson");
+    const observations = tempPath("observations.ndjson");
     writeFileSync(observations, "old-observations\n");
     const m = await load({
       M365_OBSERVATIONS_FILE: observations,
@@ -186,22 +255,5 @@ describe("debug log and frame dump paths", () => {
 
     expect(readFileSync(`${observations}.1`, "utf8")).toBe("old-observations\n");
     expect(JSON.parse(readFileSync(observations, "utf8").trim()).kind).toBe("request");
-  });
-
-  it("rotates a Windows absolute log path without changing FRAME_DIR", async () => {
-    const log = tempLog("windows-path.log");
-    writeFileSync(log, "seed");
-    const m = await load({
-      M365_DEBUG: "1",
-      M365_LOG_FILE: log,
-      M365_FRAME_DIR: "frames-kept-separate",
-      M365_LOG_MAX_BYTES: "5",
-    });
-
-    m.createLogger("test").info("next");
-
-    expect(m.LOG_PATH).toBe(log);
-    expect(m.FRAME_DIR).toBe(join(CONFIG_DIR, "frames-kept-separate"));
-    expect(readFileSync(`${log}.1`, "utf8")).toBe("seed");
   });
 });

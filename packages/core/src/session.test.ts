@@ -250,6 +250,10 @@ describe("TurnTextComposer (multi-message turns)", () => {
     expect(cardReplacePatches({
       patches: [{ op: "replace", path: "/m1/adaptiveCards/0/body/0/text", value: "done]" }],
     })).toEqual([{ id: "m1", text: "done]" }]);
+    // A later body block (sources, citations) is not the message's text.
+    expect(cardReplacePatches({
+      patches: [{ op: "replace", path: "/m1/adaptiveCards/0/body/1/text", value: "Sources: a much longer citation block here" }],
+    })).toEqual([]);
   });
 
   it("falls back to the snapshot's message when no cursor was ever sent", () => {

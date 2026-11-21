@@ -733,6 +733,10 @@ describe("longHeredocAsWrite", () => {
       expect(harnessWorkingDirectory("Environment\n - Primary working directory: C:\\Users\\necmi\\my proj\n - Is a git repository: true")).toBe("C:\\Users\\necmi\\my proj"); // Claude Code
       expect(harnessWorkingDirectory("<env>\n  Working directory: D:\\work\n</env>")).toBe("D:\\work"); // opencode
       expect(harnessWorkingDirectory("<cwd>\n/home/necmi\n</cwd>")).toBeUndefined(); // not a Windows path the write tool can reach
+      // pi 0.78 ends its system prompt with this line, after AGENTS.md and the context files
+      expect(harnessWorkingDirectory("You are an expert coding assistant…\nCurrent date: 2026-11-21\nCurrent working directory: C:/Users/necmi/proj")).toBe("C:/Users/necmi/proj");
+      // a context file quoting a cwd line comes first; the harness's own (last) one wins
+      expect(harnessWorkingDirectory("# AGENTS.md\nWorking directory: C:/elsewhere\n…\nCurrent working directory: C:/Users/necmi/proj")).toBe("C:/Users/necmi/proj");
       expect(harnessWorkingDirectory("edit files in the working directory: create or overwrite them")).toBeUndefined();
     });
   });
@@ -826,7 +830,7 @@ describe("defaultFramingForTone", () => {
     expect(defaultFramingForModel("gpt-6.1-sol")).toBe("relay_batch");
   });
 
-  it("gives GPT-5.6 Think Deeper relay_batch (instruction conflict on the agent path, docs §50 F149)", () => {
+  it("gives GPT-5.6 Think Deeper relay_batch (instruction conflict on the agent path, docs §58 F159)", () => {
     expect(defaultFramingForTone("Gpt_5_6_Reasoning")).toBe("relay_batch");
     expect(defaultFramingForModel("gpt-5.6-think-deeper")).toBe("relay_batch");
     // Measured on the reasoning tone only; the chat tone keeps baseline.

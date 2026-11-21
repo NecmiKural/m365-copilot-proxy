@@ -223,7 +223,9 @@ export function cardReplacePatches(arg: unknown): Array<{ id: string; text: stri
       if (typeof cardText === "string" && cardText.length > 0) out.push({ id: card[1], text: cardText });
       continue;
     }
-    const textPatch = path.match(/^\/([^/]+)\/adaptiveCards\/(\d+)\/body\/(\d+)\/text$/);
+    // Only the answer's own text block, as in the whole-card branch above: a
+    // later body block (sources, a citation list) isn't the message's text.
+    const textPatch = path.match(/^\/([^/]+)\/adaptiveCards\/0\/body\/0\/text$/);
     if (textPatch && typeof value === "string" && value.length > 0) {
       out.push({ id: textPatch[1], text: value });
     }

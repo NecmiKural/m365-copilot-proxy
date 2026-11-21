@@ -370,7 +370,7 @@ without NixOS: `nix run github:cramt/m365-copilot-proxy -- 4141`.
 | `gpt-6.2-sol` | Gpt_62_Sol_Reasoning | GPT-6.2 Sol ("GPT-6.2 Sol" in the web UI, since 2026-11-17). Serves on the included scenario. Defaults to `relay_batch`, not yet benched; Codex 3/3 over StreamHub ([hypotheses §45](docs/hypotheses.md)) |
 | `gpt-6.2-astra` | Gpt_62_Astra_Reasoning | GPT-6.2 Astra (marked "Uses credits" in the web UI): **its turns are charged to the user's Copilot credits.** Serves on the included scenario. Defaults to `relay_batch`, not yet benched |
 | `gpt-6-astra` | Gpt_6_Astra_Reasoning (paid scenario) | GPT-6 Astra, also charged to Copilot credits. **Needs a paid/premium Copilot seat**: the included scenario gives M365's canned apology. The web UI replaced it with GPT-6.2 Astra on 2026-11-17. Defaults to `relay_batch`, not yet benched |
-| `gpt-5.6-think-deeper` | Gpt_5_6_Reasoning | GPT-5.6 reasoning ("GPT-5.6 Sol Think deeper" in the reported web picker; see H-SOL56 in `docs/hypotheses.md`) — 27/30 on the bench, tied with `gpt-5.5-think-deeper` |
+| `gpt-5.6-think-deeper` | Gpt_5_6_Reasoning | GPT-5.6 reasoning ("GPT-5.6 Sol Think deeper" in the reported web picker; see H-SOL56 in `docs/hypotheses.md`) — 27/30 on the bench, tied with `gpt-5.5-think-deeper`. Defaults to the `relay_batch` framing, which ends its give-ups in pi ([hypotheses §58](docs/hypotheses.md)) |
 | `gpt-5.6` / `gpt-5.6-quick` | Gpt_5_6_Chat | GPT-5.6 fast ("GPT-5.6 Sol Quick response" in the reported web picker). **Weak at tool calling** — 7/30 on the bench (see below) |
 | `gpt-5.5-think-deeper` | Gpt_5_5_Reasoning | **Recommended default for agents/tool-calling** — 26/30 on the bench |
 | `gpt-5.5` / `gpt-5.5-quick` | Gpt_5_5_Chat | GPT-5.5 fast — 16/30 on the bench, the strongest benchmarked chat tone |
@@ -820,6 +820,7 @@ not an exemption from your organization's Conditional Access policy.
 |---|---|
 | `M365_DEBUG` | Set to `1` to enable debug logging to `~/.config/opencode-m365/debug.log` (truncated payloads) |
 | `M365_LOG_FILE` | Debug log name, relative to `~/.config/opencode-m365/` (default `debug.log`; an absolute path is used as is). `M365_LOG_FILE=my/log.log` logs to `~/.config/opencode-m365/my/log.log`. |
+| `M365_LOG_MAX_BYTES` | The most debug-log history kept on disk: bytes, or a `KB`/`MB` suffix (`M365_LOG_MAX_BYTES=60MB`; default `50MB`, an unreadable value falls back to it). Once the file passes 1.6× the window, the oldest bytes are cut from its head, on a line boundary, and written back through a temporary file and an atomic rename. The file is never emptied or renamed away, because the turn budget replays that history. |
 | `M365_TRACE` | Set to `1` for full, untruncated debug logging (every WS frame/prompt/response) — implies `M365_DEBUG`. For reverse engineering. |
 | `M365_LOG_STDOUT` | Set to `1` to mirror debug lines to the proxy's stdout as well as the log file, so you can watch a run without tailing it in a second terminal. Needs `M365_DEBUG` or `M365_TRACE` — on its own it logs nothing. |
 | `M365_DUMP_FRAMES` | Set to `1` to write every WebSocket frame (both directions) to `~/.config/opencode-m365/frames/<requestId>.ndjson`. For offline diffing of new M365 fields. |

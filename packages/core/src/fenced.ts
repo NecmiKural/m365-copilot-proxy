@@ -182,11 +182,14 @@ export function longCommandAsScript(
 }
 
 /** The working directory a harness states in its system prompt — pi's
- *  `<cwd>…</cwd>`, Claude Code's `Primary working directory: …`, opencode's
- *  `Working directory: …` — if it is a Windows drive path. */
+ *  `Current working directory: …` (or a `<cwd>…</cwd>` block), Claude Code's
+ *  `Primary working directory: …`, opencode's `Working directory: …` — if it is a
+ *  Windows drive path. The last statement wins: pi appends its cwd after the
+ *  AGENTS.md and context files, which may quote a `Working directory:` line of
+ *  their own. */
 export function harnessWorkingDirectory(system: string): string | undefined {
-  const m = /<cwd>\s*([^<\n]+?)\s*<\/cwd>/.exec(system)
-    ?? /^[ \t-]*(?:primary )?working directory:[ \t]*(\S[^\n]*?)[ \t]*$/im.exec(system);
+  const m = [...system.matchAll(/<cwd>\s*([^<\n]+?)\s*<\/cwd>/g)].at(-1)
+    ?? [...system.matchAll(/^[ \t-]*(?:current |primary )?working directory:[ \t]*(\S[^\n]*?)[ \t]*$/gim)].at(-1);
   return m && /^[A-Za-z]:[\\/]/.test(m[1]) ? m[1] : undefined;
 }
 
@@ -711,7 +714,7 @@ export function currentFramingVariant(toneDefault?: string): string {
  *  its sandbox: under relay_batch it never went in (0 of 80 bench tasks and pi
  *  runs, GPT-6 Sol 25 of 100), under honest 3 of 40 (GPT-6 Sol 17 of 20; docs §29).
  *
- *  `Gpt_5_6_Reasoning` (gpt-5.6-think-deeper) defaults to `relay_batch` (docs §50 F149).
+ *  `Gpt_5_6_Reasoning` (gpt-5.6-think-deeper) defaults to `relay_batch` (docs §58 F159).
  *  It serves with the agent, and M365's own instructions there tell it file
  *  generation is disabled; baseline's `<system>` block, which the model calls
  *  "the user's embedded system", tells it to create files. Its chain of thought
