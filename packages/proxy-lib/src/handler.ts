@@ -7,6 +7,7 @@ import {
   type Backend,
   resolveModelRoute,
   createLogger,
+  recordObservation,
   trunc,
   getToneForModel,
   requestUsesAgent,
@@ -35,6 +36,7 @@ import {
   formatMessages,
   attachmentUrls,
   parseToolCalls,
+  validateToolArguments,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
   looksLikeRemoteArtifactCompletion,
@@ -44,7 +46,6 @@ import {
   unreadableToolCall,
   longHeredocAsWrite,
   longCommandAsScript,
-
   harnessWorkingDirectory,
   strippedTypeMember,
   findRecognizedShellTool,
@@ -684,6 +685,10 @@ export async function handleChatCompletion(
   if (conv.chain && !run) conv.pendingNote = null; // its note says the script ran
   conv.chain = null;
   const hasTools = body.tools && body.tools.length > 0 && body.tool_choice !== "none";
+  const parallelToolCalls = body.parallel_tool_calls === true &&
+    process.env.M365_PARALLEL_TOOLS === "1" &&
+    process.env.M365_NO_PARALLEL_TOOLS !== "1" &&
+    process.env.M365_NO_PARALLEL_TOOL_CALLS !== "1";
   const requestedModel = route.model;
   const turnOptions = { reasoningEffort: body.reasoning_effort };
 
@@ -698,6 +703,17 @@ export async function handleChatCompletion(
   const knownExhaustion = chat ? activePriorityAccessExhaustion(requestedBudget ?? requestedModel) : null;
   const fallbackModel = knownExhaustion && requestedBudget ? priorityAccessFallbackModel(requestedBudget) : null;
   if (knownExhaustion && !fallbackModel) {
+    const isFirstTurn = session.turnCount === 0;
+    const observation = {
+      conversationId: session.conversationId,
+      model: requestedModel,
+      stream: !!body.stream,
+      mode: isFirstTurn || conv.sentMessageCount === 0 ? "full" : "delta",
+      tools: body.tools?.length ?? 0,
+    };
+    recordObservation({ kind: "request", ...observation });
+    recordObservation({ kind: "throttle", ...observation });
+    recordObservation({ kind: "priority_quota", ...observation, remaining: 0 });
     log.info(`Priority access exhausted (${knownExhaustion.window}) until ${knownExhaustion.resetsAt.toISOString()} — 429 without contacting M365`);
     return priorityAccessResponse(knownExhaustion, requestedModel);
   }
@@ -779,13 +795,28 @@ export async function handleChatCompletion(
   // long for one turn (cut shorter once M365 has failed to keep a long opening
   // of this model's), with `then` after it.
   const formatWhole = (variant = framingVariant, then?: string | null): string => {
-    const plan = planFullPrompt(body.messages, body.tools, body.tool_choice, session.conversationId, variant, turnLimit(pool, model, chat));
+    const plan = planFullPrompt(body.messages, body.tools, body.tool_choice, session.conversationId, variant, turnLimit(pool, model, chat), parallelToolCalls);
     pendingParts = plan.parts;
     partsCarryHistory = plan.parts.length > 0;
     const prompt = then ? `${plan.final}\n\n${then}` : plan.final;
     if (plan.parts.length === 0) wholePrompts.add(prompt);
     return prompt;
   };
+  const observationMode = isFirstTurn || conv.sentMessageCount === 0 ? "full" : "delta";
+  const observe = (
+    kind: Parameters<typeof recordObservation>[0]["kind"],
+    fields: Partial<Parameters<typeof recordObservation>[0]> = {},
+  ) => recordObservation({
+    kind,
+    conversationId: convId,
+    model,
+    stream: !!body.stream,
+    mode: observationMode,
+    tools: body.tools?.length ?? 0,
+    ...fields,
+  });
+  observe("request");
+  if (fallbackModel) observe("fallback_model");
   let text: string;
   // Images and files ride on the message that carries their text (core image-input.ts, file-upload.ts).
   let inputAttachments: string[] = [];
@@ -1057,6 +1088,7 @@ export async function handleChatCompletion(
           copilotStream = await session.run(text, model, signal, useToolAgent, inputAttachments, waitForBudget, { ...turnOptions, onReasoning: reasoningSink() });
         } catch (err: any) {
           if (err instanceof TurnBudgetHold) return { error: turnBudgetHoldResponse(err) };
+          observe("upstream_http_error", { status: 502 });
           return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
         }
       }
@@ -1096,6 +1128,7 @@ export async function handleChatCompletion(
           fullText = copilotStream.fullText;
         }
       } catch (err: any) {
+        observe("upstream_http_error", { status: 502 });
         return { error: jsonResponse(502, { error: { message: err.message, type: "upstream_error" } }) };
       }
 
@@ -1122,6 +1155,15 @@ export async function handleChatCompletion(
       lastMetering = copilotStream.metering;
       if (!refused && typeof copilotStream.credits === "number") {
         requestCredits = Math.round(((requestCredits ?? 0) + copilotStream.credits) * 1e6) / 1e6;
+      }
+      const meteredBudget = meteredBudgetOf(model);
+      if (meteredBudget) {
+        const allowance = meteredAllowance(lastMetering, meteredBudget);
+        const remaining = [allowance?.daily, allowance?.weekly]
+          .filter((value): value is number => value !== undefined);
+        if (remaining.length > 0) {
+          observe("priority_quota", { remaining: Math.min(...remaining) });
+        }
       }
       // The classifier scores reach clients only as `usage` extension fields,
       // which a gateway drops; experiments read them from the debug log instead.
@@ -1161,6 +1203,8 @@ export async function handleChatCompletion(
       if (copilotStream.result?.value === "Throttled") {
         noteOutcome(true, convId);
         log.info(`Upstream Throttled (${copilotStream.result.errorCode ?? "no errorCode"}) — 429, no retry`);
+        observe("upstream_http_error", { status: 429 });
+        observe("throttle");
         return { error: throttledResponse(copilotStream.result) };
       }
 
@@ -1281,6 +1325,7 @@ export async function handleChatCompletion(
         const fallback = budget && !priorityFallbackDone ? priorityAccessFallbackModel(budget) : null;
         if (fallback) {
           priorityFallbackDone = true;
+          observe("fallback_model");
           log.info(`Priority access exhausted (${exhausted.window}) — re-sending to ${fallback} (${PRIORITY_ACCESS_FALLBACK_ENV[budget!]}) in a fresh conversation`);
           model = fallback;
           tone = getToneForModel(model);
@@ -1550,29 +1595,69 @@ export async function handleChatCompletion(
     // thread, cheap). Disable with M365_NO_CONFAB_RETRY; tune count with M365_CONFAB_RETRIES.
     const maxConfabRetries = process.env.M365_NO_CONFAB_RETRY
       ? 0
-      : Number(process.env.M365_CONFAB_RETRIES ?? 1);
+      : Number(process.env.M365_CONFAB_RETRIES ?? 2);
     // The model never actually acted if no assistant turn in the history carried a
     // tool call. Used to gate the hallucinated-completion retry (a model that did
     // real work called at least one tool), keeping false positives near zero.
     const everActed = (body.messages ?? []).some(
       (m) => m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0,
     );
-    // Not after asking again: the model was just told it could reply without the
-    // call, and a forcing retry would override the answer it gave to that.
-    for (let attempt = 0; attempt < (unreadable ? 0 : maxConfabRetries) && !parsed.hasToolCalls; attempt++) {
-      const confab = looksLikeConfabulation(judged);
+    // H52 applies only immediately after a client-held tool result. Preserve
+    // ordinary plain answers after a syntax re-ask; explicit give-ups still use
+    // the same full-contract recovery as other confabulations.
+    const afterToolResult = body.messages.at(-1)?.role === "tool";
+    const capabilityContext = !!hasTools && (isFirstTurn || afterToolResult);
+    const retryAfterUnreadable =
+      !unreadable || looksLikeConfabulation(judged, afterToolResult, capabilityContext);
+    let recoveryAttempted = false;
+    for (let attempt = 0; attempt < (retryAfterUnreadable ? maxConfabRetries : 0) && !parsed.hasToolCalls; attempt++) {
+      const confab = looksLikeConfabulation(judged, afterToolResult, capabilityContext);
       const remoteArtifact = looksLikeRemoteArtifactCompletion(parsed.textContent);
       const halluc = !everActed && looksLikeHallucinatedCompletion(judged);
       if (!confab && !remoteArtifact && !halluc) break;
+      recoveryAttempted = true;
+      const normalizedJudged = (judged ?? "").toLocaleLowerCase("en-US")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ı/g, "i");
+      const recoveryRule = parallelToolCalls &&
+          /\b(?:runtime|policy)\b[^.\n]{0,80}\b(?:one|exactly one)\b[^.\n]{0,40}\btool call\b/.test(normalizedJudged)
+        ? "parallel-limit"
+        : afterToolResult &&
+            (/\blong_chain_incomplete:\d+\b/.test(normalizedJudged) ||
+             /\b(?:work|calisma|gorev)\b[^.\n]{0,40}\b(?:not complete|not completed|tamamlanmadi)\b/.test(normalizedJudged))
+          ? "H52"
+          : capabilityContext &&
+              (/\bi(?:.?m|\s+am)?\s+(?:unable|not able)\s+to\b/.test(normalizedJudged) ||
+               /\bi\s+(?:can.?t|cannot|could not|couldn.?t)\b/.test(normalizedJudged))
+            ? "H53"
+            : "H51";
+      observe("recovery", { rule: recoveryRule, attempt: attempt + 1 });
       const retryKind = remoteArtifact ? "Remote artifact completion" : confab ? "Confabulation" : "Hallucinated completion";
-      log.info(`${retryKind} detected (no tool call) — forcing retry ${attempt + 1}/${maxConfabRetries}`);
-      text = recoveryPrompt(body, remoteArtifact ? "remote" : confab ? "confab" : "halluc", everActed);
-      const retry = await runBuffered(undefined, { forcing: true });
+      const fullGiveUpRecovery =
+        confab && !process.env.M365_NO_GIVEUP_FULL_RESEND;
+      if (fullGiveUpRecovery) {
+        // H45: a delta continuation can outlive M365's retained tool contract.
+        // Recover outside that state by replaying the complete client-held
+        // history and tool definitions in a fresh upstream conversation
+        // (in parts when it's too long for one turn).
+        session.newConversation();
+        text = formatWhole();
+        inputAttachments = attachmentUrls(body.messages);
+        log.info(`Confabulation detected after tool use — re-sending full history and tool contract in a fresh conversation (${attempt + 1}/${maxConfabRetries})`);
+      } else {
+        log.info(`${retryKind} detected (no tool call) — forcing retry ${attempt + 1}/${maxConfabRetries}`);
+        text = recoveryPrompt(body, remoteArtifact ? "remote" : confab ? "confab" : "halluc", everActed);
+      }
+      // The full resend is the history itself, nothing to re-send it with.
+      const retry = await runBuffered(undefined, { forcing: !fullGiveUpRecovery });
       if ("error" in retry) return { kind: "error", resp: retry.error };
       conv.sentMessageCount = body.messages.length;
       fullText = stopAtFabricatedResult(retry.fullText);
       ({ parsed, judged } = parseReply(fullText, body.tools));
+      observe("recovery_result", { hasToolCalls: parsed.hasToolCalls });
       log.info(`After forcing retry: hasToolCalls=${parsed.hasToolCalls}, count=${parsed.toolCalls.length}`);
+    }
+    if (recoveryAttempted && !parsed.hasToolCalls) {
+      observe("final_without_tool_after_recovery");
     }
 
     // Never pass a remote M365 artifact off as a successful local edit. A retry
@@ -1594,6 +1679,47 @@ export async function handleChatCompletion(
           },
         }),
       };
+    }
+
+    // Validate parsed arguments before exposing tool_calls. A genuine schema
+    // violation gets one bounded correction turn; lossless scalar coercions do not.
+    if (parsed.hasToolCalls && process.env.M365_NO_ARG_VALIDATION !== "1") {
+      let validation = validateToolArguments(parsed.toolCalls, body.tools);
+      if (validation.errors.length > 0) {
+        // Preserve the original parsed calls after lossless conversions. Argument
+        // repair is best-effort: a failed repair must not break clients that apply
+        // their own looser schema validation.
+        const originalCalls = validation.calls;
+        log.info(`Tool argument validation failed — asking once for correction: ${validation.errors.join("; ")}`);
+        text = `(Note: your tool call arguments failed validation: ${validation.errors.join("; ")}. Nothing ran. Fix only these argument errors and send the corrected tool call once, with no prose.)`;
+        const retry = await runBuffered();
+        if ("error" in retry) return { kind: "error", resp: retry.error };
+        conv.sentMessageCount = body.messages.length;
+        fullText = stopAtFabricatedResult(retry.fullText);
+        ({ parsed, judged } = parseReply(fullText, body.tools));
+        if (parsed.hasToolCalls) {
+          validation = validateToolArguments(parsed.toolCalls, body.tools);
+          if (validation.errors.length === 0) {
+            parsed.toolCalls = validation.calls;
+            observe("arg_validation", { result: "corrected" });
+          } else {
+            log.info(`Corrected tool arguments remain invalid; returning original calls: ${validation.errors.join("; ")}`);
+            observe("arg_validation", { result: "fail_open" });
+            parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
+          }
+        } else {
+          log.info("Argument correction returned no tool call; returning original calls");
+          observe("arg_validation", { result: "fail_open" });
+          parsed = { hasToolCalls: true, toolCalls: originalCalls, textContent: null };
+        }
+      } else {
+        if (validation.calls.some((call, index) =>
+          call.function.arguments !== parsed.toolCalls[index]?.function.arguments
+        )) {
+          observe("arg_validation", { result: "coerced" });
+        }
+        parsed.toolCalls = validation.calls;
+      }
     }
 
     // M365's post-processing can strip a `[Type]:` out of a PowerShell command
@@ -1667,7 +1793,7 @@ export async function handleChatCompletion(
       // premature success claim ride along at the end. Keeping only the first
       // call forces a real step-by-step loop where each call reacts to the
       // previous tool_response. Set M365_ALLOW_MULTI_TOOL to restore batching.
-      if (!process.env.M365_ALLOW_MULTI_TOOL && parsed.toolCalls.length > 1) {
+      if (!parallelToolCalls && !process.env.M365_ALLOW_MULTI_TOOL && parsed.toolCalls.length > 1) {
         log.info(`One-call-per-turn: keeping ${parsed.toolCalls[0].function.name}, dropping ${parsed.toolCalls.length - 1} batched call(s)`);
         droppedCalls = parsed.toolCalls.length - 1;
         parsed.toolCalls = [parsed.toolCalls[0]];
@@ -1679,10 +1805,12 @@ export async function handleChatCompletion(
       // short. A lone heredoc file write goes through the harness's write tool;
       // anything else (other commands with it, `py - <<'EOF'`, `py -c`) is saved
       // to a script by the write tool and run whole on the next request.
-      const heredoc = longHeredocAsWrite(parsed.toolCalls[0], body.tools);
+      // Rewrites are inherently serial because the script path chains a second call.
+      const rewriteCandidate = parsed.toolCalls.length === 1 ? parsed.toolCalls[0] : null;
+      const heredoc = rewriteCandidate ? longHeredocAsWrite(rewriteCandidate, body.tools) : null;
       const asWrite = heredoc && !heredoc.skipped ? heredoc : null;
       const system = body.messages.filter((m) => m.role === "system").map(getMessageContent).join("\n");
-      const asScript = asWrite ? null : longCommandAsScript(parsed.toolCalls[0], body.tools, undefined, harnessWorkingDirectory(system));
+      const asScript = asWrite || !rewriteCandidate ? null : longCommandAsScript(rewriteCandidate, body.tools, undefined, harnessWorkingDirectory(system));
       let rewriteNote: string | null = null;
       if (asWrite) {
         log.info(`Heredoc write to ${asWrite.path} is over the Windows command-line cap — sent as ${asWrite.call.function.name} instead`);

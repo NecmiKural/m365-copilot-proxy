@@ -28,6 +28,7 @@ export interface ToolFunction {
   parameters?: {
     properties?: Record<string, { type?: string; [k: string]: unknown }>;
     required?: string[];
+    additionalProperties?: boolean;
     [k: string]: unknown;
   };
 }
@@ -206,6 +207,51 @@ function maybeInjectReplyTool(tools: ToolDef[]): ToolDef[] {
   return [replyTool, ...tools];
 }
 
+
+/** Request-scoped removal of serial-only wording from any framing variant. */
+function parallelToolFraming(framing: string): string {
+  const relaxed = framing
+    .replace(/reply with just a single ```([^`]+) block/gi, "reply with one or more independent ```$1 blocks")
+    .replace(/reply with one ```([^`]+) block/gi, "reply with one or more independent ```$1 blocks")
+    .replace(/write a single ```bash block/gi, "write one or more independent ```bash blocks")
+    .replace(/emit ONE ```bash block/gi, "emit one or more independent ```bash blocks")
+    .replace(/output ONLY a single fenced code block/gi, "output one or more fenced code blocks")
+    .replace(/reply with (?:just )?the command in a single ```([^`]+) block/gi, "reply with the commands in one or more ```$1 blocks")
+    .replace(/reply with a single fenced code block/gi, "reply with one or more fenced code blocks")
+    .replace(/the ONLY thing SHGEN can emit is a single ```bash block/gi, "the ONLY thing SHGEN can emit is one or more independent ```bash blocks")
+    .replace(/your ONLY legal output is a single ```bash block/gi, "your ONLY legal output is one or more independent ```bash blocks")
+    .replace(/emit exactly one ```bash block now/gi, "Emit one or more independent ```bash blocks now")
+    .replace(/your VERY NEXT output must be ONE ```bash block/gi, "your VERY NEXT output must be one or more independent ```bash blocks")
+    .replace(/your first output must be a ```bash block/gi, "your first output must contain one or more independent ```bash blocks")
+    .replace(/your first output is always a ```bash block/gi, "your first output always contains one or more independent ```bash blocks")
+    .replace(/your FIRST output is a ```bash block/gi, "your FIRST output contains one or more independent ```bash blocks")
+    .replace(/your first output must be a ```bash block/gi, "your first output must contain one or more independent ```bash blocks")
+    .replace(/emit ONE ```bash block per turn/gi, "emit one or more independent ```bash blocks per turn")
+    .replace(/ONE ```bash block per turn/gi, "one or more independent ```bash blocks per turn")
+    .replace(/One self-contained ```bash block per turn\./gi, "One or more independent, self-contained ```bash blocks may be emitted per turn.")
+    .replace(/One ```bash block per turn;/gi, "One or more independent ```bash blocks per turn;")
+    .replace(/One block per turn;/gi, "One or more independent blocks per turn;")
+    .replace(/ONE block per turn\./gi, "ONE OR MORE INDEPENDENT blocks per turn.")
+    .replace(/Send one block per reply and wait for its result\./gi, "Send independent blocks together and wait for all their results.")
+    .replace(/one command at a time/gi, "independent commands together")
+    .replace(/next, one at a time/gi, "next, batching independent commands")
+    .replace(/No text before or after it:/gi, "No prose before, between, or after the block or blocks:")
+    .replace(/No prose, no second fence, no commentary before or after\./gi, "No prose or commentary before, between, or after the fences.")
+    .replace(/Each turn is exactly one fenced tool call OR the final answer/gi, "Each turn is one or more independent fenced tool calls OR the final answer")
+    .replace(/One tool call per response, then stop and wait for its <tool_response>\. Never emit two fenced blocks in one response\./gi, "You may emit multiple fenced tool calls in one response when they are independent. Emit one complete fence per call, then wait for every matching <tool_response>.")
+    .replace(/Work one step at a time: one tool call per reply, then wait for its <tool_response>\./gi, "Batch independent tool calls in one reply, then wait for every matching <tool_response>.")
+    .replace(/Exactly one Thought line and exactly one or more independent ```bash blocks per turn — never two blocks/gi, "One Thought line followed by one or more independent ```bash blocks per turn")
+    .replace(/Exactly one Thought line and exactly one ```bash block per turn — never two blocks/gi, "One Thought line followed by one or more independent ```bash blocks per turn")
+    .replace(/every assistant turn is either ONE ```bash block or the final one-line answer/gi, "every assistant turn is either one or more independent ```bash blocks or the final one-line answer");
+
+  return `${relaxed}
+
+PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST:
+- You may emit multiple complete fenced tool calls in one assistant response.
+- Calls in the same batch must be independent; no call may depend on another call's result.
+- Every fence becomes a separate tool call with its own identifier and receives its own matching <tool_response>.`;
+}
+
 /**
  * Render a request as one prompt. `history` is the whole conversation when
  * `messages` is a slice of it (a history sent in parts): a tool result is named
@@ -218,6 +264,7 @@ export function formatMessages(
   conversationId?: string,
   framingVariant?: string,
   history: Message[] = messages,
+  parallelToolCalls = false,
 ): string {
   const parts: string[] = [];
 
@@ -233,7 +280,8 @@ export function formatMessages(
   // source.
   const style = transcriptStyleForVariant(framingVariant ?? currentFramingVariant());
   if (effectiveTools && effectiveTools.length > 0 && toolChoice !== "none") {
-    const framing = `${formatToolDefinitions(effectiveTools, framingVariant)}${formatToolChoiceInstruction(toolChoice)}`;
+    const serialFraming = formatToolDefinitions(effectiveTools, framingVariant);
+    const framing = `${parallelToolCalls ? parallelToolFraming(serialFraming) : serialFraming}${formatToolChoiceInstruction(toolChoice)}`;
     parts.push(style.framingTag ? `<${style.framingTag}>\n${framing}\n</${style.framingTag}>` : framing);
   }
 
@@ -290,6 +338,104 @@ export interface ParseResult {
   textContent: string | null;
 }
 
+export interface ToolArgumentValidation {
+  calls: ParsedToolCall[];
+  errors: string[];
+}
+
+function losslessScalar(value: unknown, type: string): { ok: boolean; value: unknown } {
+  if (type === "string") return { ok: typeof value === "string", value };
+  if (type === "integer") {
+    if (typeof value === "number" && Number.isInteger(value)) return { ok: true, value };
+    if (typeof value === "string" && /^-?(?:0|[1-9]\d*)$/.test(value)) {
+      const converted = Number(value);
+      if (Number.isSafeInteger(converted) && String(converted) === value.replace(/^\+/, "")) {
+        return { ok: true, value: converted };
+      }
+    }
+    return { ok: false, value };
+  }
+  if (type === "number") {
+    if (typeof value === "number" && Number.isFinite(value)) return { ok: true, value };
+    if (typeof value === "string" && value.trim() === value && value !== "") {
+      const converted = Number(value);
+      if (Number.isFinite(converted) && String(converted) === value) return { ok: true, value: converted };
+    }
+    return { ok: false, value };
+  }
+  if (type === "boolean") {
+    if (typeof value === "boolean") return { ok: true, value };
+    if (value === "true") return { ok: true, value: true };
+    if (value === "false") return { ok: true, value: false };
+    return { ok: false, value };
+  }
+  if (type === "null") return { ok: value === null, value };
+  return { ok: true, value };
+}
+
+/** Validate parsed calls against the request schemas without adding a JSON-schema dependency. */
+export function validateToolArguments(calls: ParsedToolCall[], tools?: ToolDef[]): ToolArgumentValidation {
+  if (!tools?.length || process.env.M365_NO_ARG_VALIDATION === "1") return { calls, errors: [] };
+  const schemas = new Map(tools.map((tool) => [tool.function.name, tool.function.parameters]));
+  const errors: string[] = [];
+  const validated = calls.map((call, index) => {
+    const schema = schemas.get(call.function.name);
+    if (!schema) return call;
+    let args: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(call.function.arguments);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      args = parsed;
+    } catch {
+      errors.push(`call ${index + 1} (${call.function.name}): arguments must be an object`);
+      return call;
+    }
+    for (const key of schema.required ?? []) {
+      if (!Object.prototype.hasOwnProperty.call(args, key)) {
+        errors.push(`call ${index + 1} (${call.function.name}): required property "${key}" is missing`);
+      }
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(args)) {
+        if (!Object.prototype.hasOwnProperty.call(schema.properties ?? {}, key)) {
+          errors.push(`call ${index + 1} (${call.function.name}): additional property "${key}" is not allowed`);
+        }
+      }
+    }
+    for (const [key, property] of Object.entries(schema.properties ?? {})) {
+      if (!Object.prototype.hasOwnProperty.call(args, key) || typeof property.type !== "string") continue;
+      let value = args[key];
+      // Fenced scalar headers preserve explicit YAML/JSON quotes for non-string
+      // fields. Unwrap exactly one valid JSON string before applying the schema;
+      // this is lossless because parsing and re-encoding preserves its contents.
+      if (property.type !== "string" && typeof value === "string" && value.startsWith('"') && value.endsWith('"')) {
+        try {
+          const unquoted = JSON.parse(value);
+          if (typeof unquoted === "string") value = unquoted;
+        } catch {
+          // Leave malformed quoting untouched so validation reports the type error.
+        }
+      }
+      const result = losslessScalar(value, property.type);
+      if (!result.ok) {
+        errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be ${property.type === "integer" ? "an integer" : `a ${property.type}`}`);
+      } else {
+        args[key] = result.value;
+        if (typeof result.value === "number") {
+          if (typeof property.minimum === "number" && result.value < property.minimum) {
+            errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be at least ${property.minimum}`);
+          }
+          if (typeof property.maximum === "number" && result.value > property.maximum) {
+            errors.push(`call ${index + 1} (${call.function.name}): property "${key}" must be at most ${property.maximum}`);
+          }
+        }
+      }
+    }
+    return { ...call, function: { ...call.function, arguments: JSON.stringify(args) } };
+  });
+  return { calls: validated, errors };
+}
+
 // Patterns of M365's stochastic turn-1 "give-up" confabulation: it claims it can't
 // see/run anything and asks the user to paste files, WITHOUT ever calling a tool —
 // even though the environment is real. Used to trigger a forcing retry (handler).
@@ -300,7 +446,7 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // old `to?` made the *t* mandatory, so "can't inspect"/"can't access" slipped
   // through). `execute`/`retrieve`/`fetch` added: the give-up reflex phrases them
   // ("unable to execute or retrieve any output") and they were absent from the list.
-  /(?:unable|not able|can.?t|cannot)\s+(?:to\s+)?(?:access|inspect|list|read|run|execute|retrieve|fetch|locate|see|open)/i,
+  /\bI(?:\s+(?:am|.?m)\s+)?(?:unable|not able|can.?t|cannot)\s+(?:to\s+)?(?:access|inspect|list|read|run|execute|retrieve|fetch|locate|see|open)/i,
   /don.?t\s+have\s+access/i,
   /no\s+(?:longer\s+have|access\s+to)/i,   // "no access to" + "no longer have access/the tools"
   /lost\s+(?:access|my\s+access|the\s+ability)/i,
@@ -348,6 +494,12 @@ const CONFABULATION_PATTERNS: RegExp[] = [
   // is scoped to the whole task or run: "I couldn't complete the integration
   // tests because they need Docker" is an honest partial report, not a give-up.
   /\bno\s+(?:[\w-]+\s+){0,4}tools?\s+(?:is|are)\s+(?:currently\s+)?enabled\b/i,
+  // Phase 2e live replies. Require a named tool and an explicit availability
+  // state, in either word order, to avoid matching ordinary tool documentation.
+  /\b(?:terminal|shell|bash|command|execution|file)(?:\s+[\w-]+){0,2}\s+tools?\b[^.\n]{0,40}\b(?:unavailable|not\s+available|no\s+longer\s+available|disabled)\b/i,
+  /\bterminal\s+execution\b[^.\n]{0,40}\b(?:unavailable|isn.?t\s+available|not\s+available|disabled)\b/i,
+  /\bno\s+(?:[\w-]+\s+){0,3}(?:terminal|shell|bash|command|execution|file)(?:\s+[\w-]+){0,2}\s+tools?\b[^.\n]{0,30}\bavailable\b/i,
+  /\b(?:this|the)\s+runtime\s+permits\s+(?:only|exactly)\s+one\s+tool\s+call\s+per\s+(?:assistant\s+message|turn)\b/i,
   /\btools?\s+(?:aren.?t|isn.?t|are\s+not|is\s+not)\s+(?:currently\s+)?enabled\s+(?:in\s+this|for\s+this|here|(?:to|for)\s+me)/i,
   /\bI\s+(?:wasn.?t\s+able\s+to|was\s+not\s+able\s+to|was\s+unable\s+to|couldn.?t|could\s+not)\s+(?:complete|finish)\b[^.\n]{0,80}\b(?:in\s+this\s+(?:run|session|turn|chat|conversation|environment)|(?:the|this|your)\s+(?:task|request))/i,
   // Turkish. The model answers in the user's language, so every pattern above was
@@ -454,11 +606,51 @@ export function looksLikeRemoteArtifactCompletion(text: string | null): boolean 
   return REMOTE_ARTIFACT_COMPLETION_PATTERNS.some((re) => re.test(t));
 }
 
-export function looksLikeConfabulation(text: string | null): boolean {
+export function looksLikeConfabulation(
+  text: string | null,
+  afterToolResult = false,
+  capabilityContext = afterToolResult,
+): boolean {
   if (!text) return false;
   const t = text.trim();
   if (t.length < 12) return false;
-  return CONFABULATION_PATTERNS.some((re) => re.test(t));
+  const normalized = t.toLocaleLowerCase("en-US")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  // H52: after a real tool result, an explicit unfinished-work summary is a
+  // mid-task give-up. The context gate prevents ordinary prose containing
+  // "remaining" from being retried.
+  const incompleteText = normalized.replace(/ı/g, "i");
+  const incompleteStatement =
+    // Up to three leading words in the same sentence ("Bu turda çalışma
+    // tamamlanmadı", "So far the work is not complete") still state the outcome.
+    /(?:^|[.!;]\s*)(?:[^\s.!?;]+\s+){0,3}(?:is|calisma|gorev) tamamlanmadi\b/.test(incompleteText) ||
+    /(?:^|[.!;]\s*)(?:[^\s.!?;]+\s+){0,3}work (?:is )?not (?:complete|completed|finished|done)\b/.test(incompleteText);
+  const remainingWork =
+    /\b(?:henuz|kalan|remaining|pending|not yet)\b|\bstill (?:need|needs|needed|remain|remains)\b/.test(incompleteText);
+  const incompleteWork = afterToolResult && (
+    /\blong_chain_incomplete:\d+\b/.test(incompleteText) ||
+    (incompleteStatement && remainingWork)
+  );
+  // Only first-person/session-scoped claims about the model's own execution
+  // capability belong here. General API, user-access, and environment facts
+  // remain valid answers even when they use the same nouns.
+  const capabilityDenial =
+    /(?:\bi (?:do not|don.t|cannot|can.t|am unable to|lack|have no)\b[^.\n]{0,100}\b(?:access|execute|run|use|complete)|\b(?:my|this session.s|this turn.s) (?:tool|terminal|shell|command|bash|access|capabil)|\bno (?:terminal|shell|bash|command) tool\b[^.\n]{0,80}\b(?:available|enabled)\b|\bbu oturumda\b[^.\n]{0,80}\b(?:arac|terminal|shell|komut|eris)|\b(?:edebilmem icin|erisimi yeniden)\b[^.\n]{0,80}\b(?:etkinlestirilmeli|kullanilabilir olmali)\b)/.test(normalized) &&
+    /\b(?:tool|terminal|shell|command|bash|execute|run|arac|komut|eris\w*|access|capabil\w*)\b/.test(normalized);
+  // H53: when tools are actually defined and this is either the first turn or
+  // immediately after a tool result, a first-person claim that the execution
+  // resource is unavailable is a capability refusal. Match the relationship
+  // between actor, action/resource, and unavailable state rather than an
+  // ever-growing list of complete replies.
+  const firstPersonDenial =
+    /\bi(?:.?m|\s+am)?\s+(?:unable|not\s+able)\s+to\b|\bi\s+(?:can.?t|cannot|could\s+not|couldn.?t)\b/.test(normalized) &&
+    /\b(?:complete|generate|validate|write|retrieve|access|use|run|execute)\w*\b/.test(normalized) &&
+    /\b(?:tool|terminal|shell|command|output|process|file(?:[ -]?(?:writing|generation))?|capabilit\w*|environment|execution context)\b/.test(normalized) &&
+    /(?:\b(?:unavailable|inaccessible|disabled|not available|no longer (?:available|exposes?)|could not be retrieved|cannot be retrieved|can.?t be retrieved|did not provide)\b|\bno\b[^.\n]{0,80}\b(?:tool|output|process|capabilit\w*)\b[^.\n]{0,40}\bavailable\b)/.test(normalized);
+  return incompleteWork ||
+    capabilityDenial ||
+    (capabilityContext && firstPersonDenial) ||
+    CONFABULATION_PATTERNS.some((re) => re.test(t));
 }
 
 // A tool result the MODEL wrote. The proxy is the only thing that sends

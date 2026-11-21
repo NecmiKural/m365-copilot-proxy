@@ -68,6 +68,8 @@ export const ChatCompletionRequest = z.object({
       function: z.object({ name: z.string() }),
     }),
   ]).optional(),
+  // Explicit OpenAI-compatible request capability. Missing/false remains serial.
+  parallel_tool_calls: z.boolean().optional(),
   // A stable per-session key. copilot-api fills it from Claude Code's
   // `metadata.user_id` session and from Codex's own `prompt_cache_key`: both are
   // the client's session id, which tells two sessions with the same first

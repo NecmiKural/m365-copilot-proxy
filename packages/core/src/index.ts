@@ -23,7 +23,7 @@ export {
   type ImageGenFailureReason,
 } from "./image.js";
 
-export { uploadImage, imageUrls, type ImageAnnotation } from "./image-input.js";
+export { uploadImage, imageUrls, resolveImageInput, type ImageAnnotation, type ResolvedImageInput } from "./image-input.js";
 export { uploadFile, attachmentUrls, type FileAnnotation } from "./file-upload.js";
 
 export {
@@ -98,7 +98,6 @@ export {
   FRAMING_VARIANT_NAMES,
   longHeredocAsWrite,
   longCommandAsScript,
-
   harnessWorkingDirectory,
   strippedTypeMember,
   findRecognizedShellTool,
@@ -171,6 +170,7 @@ export {
   formatToolChoiceInstruction,
   getMessageContent,
   parseToolCalls,
+  validateToolArguments,
   looksLikeConfabulation,
   looksLikeHallucinatedCompletion,
   looksLikeRemoteArtifactCompletion,
@@ -186,9 +186,19 @@ export {
   type ToolChoice,
   type ParsedToolCall,
   type ParseResult,
+  type ToolArgumentValidation,
 } from "./tools.js";
 
-export { createLogger, trunc, LOG_PATH, FRAME_DIR, fileLoggingEnabled } from "./log.js";
+export {
+  createLogger,
+  recordObservation,
+  trunc,
+  LOG_PATH,
+  FRAME_DIR,
+  OBSERVATIONS_PATH,
+  fileLoggingEnabled,
+  type Observation,
+} from "./log.js";
 export {
   budgetConfig,
   parseEvents,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseToolCalls, formatToolDefinitions, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
+import { parseToolCalls, formatToolDefinitions, formatMessages, validateToolArguments, looksLikeConfabulation, looksLikeHallucinatedCompletion, looksLikeRemoteArtifactCompletion, isProseDocument } from "./tools.js";
 import type { ToolDef } from "./tools.js";
 
 describe("parseToolCalls", () => {
@@ -601,8 +601,34 @@ describe("a call the model restates as a correction", () => {
   });
 });
 
+const PHASE2E_LIVE_GIVE_UPS = [
+  "I can’t execute terminal commands in this session because no terminal tool is enabled.",
+  "Terminal aracı bu oturumda etkin değil; bu nedenle komutları gerçekten çalıştırmadan bir `bash` bloğu yayımlayıp çalışmış gibi gösteremem.",
+  "I couldn’t complete the two required terminal calls because the first tool invocation failed before executing `pwd`, and this runtime permits only one tool call per assistant message.",
+  "I can’t complete the requested eight-call sequence because the terminal invocation was malformed and no terminal tool is currently available in this turn.",
+  "```terminal\nbackground: false\ntimeout: 30\n\nmkdir -p \"C:/Users/NecmiKural/projects/hermes-m365-development/runtime/work/phase2c-g-head-20261106-032238/data\"\n```I can’t execute the requested terminal calls because no terminal tool is available in this session.",
+  "I can’t complete the requested eight-call sequence because the provided execution context contains only one real tool result, for step 2, and no terminal tool is available in the current tool interface.",
+  "I can’t perform the requested terminal calls because no terminal tool is available in this session.",
+  "I can’t continue because the terminal tool is not available in this turn.",
+  "I can’t continue because no terminal tool is available in this turn.",
+  "I can’t complete the remaining terminal calls because the terminal tool is no longer available in the current execution context.",
+  "I can’t execute the requested terminal calls because no terminal tool is available in this turn.",
+] as const;
+
 describe("looksLikeConfabulation", () => {
+  it("flags every exact Phase 2e live give-up fixture", () => {
+    for (const response of PHASE2E_LIVE_GIVE_UPS) {
+      expect(looksLikeConfabulation(response), response).toBe(true);
+    }
+  });
+
+  it("does not flag tool-free normal answers", () => {
+    expect(looksLikeConfabulation("HERMES_PROXY_OK")).toBe(false);
+    expect(looksLikeConfabulation("The run completed successfully. The two files differ, and the temporary directory was removed.")).toBe(false);
+  });
+
   it("flags real M365 give-up confabulations", () => {
+    expect(looksLikeConfabulation("I can’t create or read files because terminal execution isn’t available in this session.")).toBe(true); // Exact Phase 7 C attempt 1
     expect(looksLikeConfabulation("I'm unable to access or list any files in the working directory (all shell commands are returning no output).")).toBe(true);
     expect(looksLikeConfabulation("I don't have access to your project files or the ability to run python3 check.py here.")).toBe(true);
     expect(looksLikeConfabulation("To move forward, please paste the contents of calc.py and check.py.")).toBe(true);
@@ -650,6 +676,20 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("Bunu hazırlayabilmem için **data.csv dosyasının içeriğine erişmem gerekiyor**. Dosyayı buraya yüklediğinizde kısa raporu şu yapıda sunabilirim:")).toBe(true);
   });
 
+  it("flags tool-unavailable claims when the request contains tools", () => {
+    // Exact replies from the Hermes parallel probe (debug-4142.log:2837,2895).
+    expect(looksLikeConfabulation("I can't execute terminal commands in this session because no terminal tool is enabled.")).toBe(true);
+    expect(looksLikeConfabulation("Terminal aracı bu oturumda etkin değil.")).toBe(true);
+
+    // Narrow equivalents from the same failure family.
+    expect(looksLikeConfabulation("No terminal tool is enabled in this session.")).toBe(true);
+    expect(looksLikeConfabulation("The terminal tool is unavailable in this session.")).toBe(true);
+    expect(looksLikeConfabulation("Bu oturumda terminal aracı etkin değil.")).toBe(true);
+    expect(looksLikeConfabulation("Terminal aracı bu oturumda kullanılamıyor.")).toBe(true);
+    expect(looksLikeConfabulation("Devam edebilmem icin terminal erisimi yeniden etkinlestirilmeli.")).toBe(true);
+    expect(looksLikeConfabulation("I’m sorry, but I can’t complete the remaining terminal calls in this response because the terminal tool is not currently available.")).toBe(true);
+  });
+
   it("flags GPT-5.6's English give-ups (it answers a Turkish prompt in English now and then)", () => {
     // Exact strings from live Windows/pi runs that went straight to the user.
     expect(looksLikeConfabulation("I’m sorry, but I wasn’t able to complete and verify the code change in this run.")).toBe(true);
@@ -657,10 +697,66 @@ describe("looksLikeConfabulation", () => {
     expect(looksLikeConfabulation("I can’t create or inspect files in the current directory because file tools aren’t enabled in this chat. To create `ozet.md`, copy the contents of `note.txt` here, and I’ll provide a one-line summary ready to paste into the file.")).toBe(true);
   });
 
+  it("flags explicit incomplete-work summaries after a tool result", () => {
+    expect(looksLikeConfabulation("Çalışma tamamlanmadı. Kalan adımlar: H52 dokümantasyonu ve kod değişikliği, RED testler, build ve tam test, 4142 canlı G x3 + C x1, raporlar, issue tracker güncellemesi, commit ve push.", true)).toBe(true);
+    expect(looksLikeConfabulation("İş tamamlanmadı. S16 kodu ve testleri pushlandı, ancak H52 kapsam raporu, tam doğrulamalar, plan güncellemeleri ve final commit henüz tamamlanmadı.", true)).toBe(true);
+    expect(looksLikeConfabulation("Görev tamamlanmadı; kalan doğrulamalar henüz çalıştırılmadı.", true)).toBe(true);
+    expect(looksLikeConfabulation("Bu turda çalışma tamamlanmadı. Tamamlanan ve pushlanan kısım: Phase 13 tasarımı ve RED testleri. Uygulama, özet komutu ve tam doğrulama henüz yapılmadı.", true)).toBe(true);
+    expect(looksLikeConfabulation("So far the work is not complete. Remaining steps: build and tests.", true)).toBe(true);
+    expect(looksLikeConfabulation("Bu turda çalışma tamamlandı; tüm adımlar bitti.", true)).toBe(false);
+    expect(looksLikeConfabulation("LONG_CHAIN_INCOMPLETE:2", true)).toBe(true);
+    expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code, run the tests, and commit the result.", true)).toBe(true);
+    expect(looksLikeConfabulation("Work is not finished; I still need to run the tests.", true)).toBe(true);
+    expect(looksLikeConfabulation("Work is not done. The final commit is not yet created.", true)).toBe(true);
+  });
+
+  it("does NOT flag incomplete-work lookalikes", () => {
+    expect(looksLikeConfabulation("Would you like me to continue with the remaining steps?", true)).toBe(false);
+    expect(looksLikeConfabulation("All steps complete. The remaining temporary files were removed.", true)).toBe(false);
+    expect(looksLikeConfabulation("Tüm adımlar tamamlandı; kalan geçici dosyalar silindi.", true)).toBe(false);
+    expect(looksLikeConfabulation("Is the work not finished yet?", true)).toBe(false);
+    expect(looksLikeConfabulation("The remaining budget is 3 GB.", true)).toBe(false);
+    expect(looksLikeConfabulation("İlk iki adım tamamlandı; kalan doğrulamalar hakkında kullanıcıya bilgi verildi.", true)).toBe(false);
+    expect(looksLikeConfabulation("Work is not complete. Remaining steps: update the code and run tests.")).toBe(false);
+  });
+
+  it("flags Phase 11 capability refusals when the request context is eligible", () => {
+    const replies = [
+      "I’m unable to complete the repository assessment because the terminal output could not be retrieved reliably. I won’t invent details about the requested files or architecture.",
+      "I’m unable to complete the code fix because the test command was moved to a background process, and no process-management tool is currently available to retrieve its output.",
+      "Available skills reported by `hermes skills list`:\\n\\nVerified total: 38 enabled built-in skills, 0 disabled.\\n\\nRead-only result: the workspace scan found one file, `AGENTS.md`; no source-code files were present to analyze. I could not write `skill-evidence.txt` because the current execution context no longer exposes a file-writing tool.\\n\\nT3_DONE",
+      "I can’t generate or validate the requested DOCX and PDF files because file-generation capabilities are disabled in this environment.\\n\\nT5_DONE",
+    ];
+    for (const reply of replies) {
+      expect(looksLikeConfabulation(reply, false, true), reply).toBe(true);
+    }
+  });
+
+  it("does NOT flag structural capability-refusal false positives", () => {
+    const replies = [
+      "The terminal tool lets an agent run commands and inspect output.",
+      "I checked the documentation: API access is unavailable for guest users.",
+      "The user cannot access the API until an administrator grants the required scope.",
+      "Kontrol ettim: kullanıcının dosya erişimi bu ortamda etkin değil.",
+      "The command failed with exit code 1: Error: expected 4 but received 5.",
+      "I could not complete the integration tests because Docker is not installed; the 12 unit tests pass.",
+      "The background process is inaccessible after the operating system removes its completed job record.",
+      "File writing is unavailable when the filesystem is mounted read-only.",
+    ];
+    for (const reply of replies) {
+      expect(looksLikeConfabulation(reply, false, true), reply).toBe(false);
+    }
+  });
+
   it("does NOT flag an honest partial report or prose about tool settings", () => {
     expect(looksLikeConfabulation("I couldn't complete the integration tests because they need Docker; the 12 unit tests pass.")).toBe(false);
     expect(looksLikeConfabulation("The bash tool is enabled by default; set M365_HOST_SHELL to override the dialect.")).toBe(false);
     expect(looksLikeConfabulation("Tools are not enabled for requests without a tools array, so the proxy answers in plain text.")).toBe(false);
+    expect(looksLikeConfabulation("The requested analysis is complete. No further action is needed.")).toBe(false);
+    expect(looksLikeConfabulation("I checked: the API access is unavailable on weekends.")).toBe(false);
+    expect(looksLikeConfabulation("My report says terminal access is disabled for guest users.")).toBe(false);
+    expect(looksLikeConfabulation("Bu projede API erişimi bakım sırasında kullanılamıyor.")).toBe(false);
+    expect(looksLikeConfabulation("Kontrol ettim: kullanıcının terminal erişimi bu ortamda etkin değil.")).toBe(false);
   });
 
   it("does NOT flag a Turkish project summary that merely talks about sessions or disabled flags", () => {
@@ -1072,5 +1168,112 @@ describe("transcript style (which tags wrap the framing and harness system promp
     for (const v of ["honest", "terse_user", "relay", "relay_batch"]) {
       expect(formatToolDefinitions(tools, v)).toMatch(/sandbox/);
     }
+  });
+});
+
+
+describe("parallel tool-call framing", () => {
+  const tools = [{
+    type: "function" as const,
+    function: {
+      name: "bash",
+      description: "Run a command",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+    },
+  }];
+
+  it("preserves the exact serial only-first contract by default", () => {
+    const out = formatMessages(
+      [{ role: "user", content: "inspect" }],
+      tools,
+      undefined,
+      undefined,
+      "baseline",
+    );
+    expect(out).toContain("One tool call per response, then stop and wait for its <tool_response>. Never emit two fenced blocks in one response.");
+    expect(out).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("removes every serial-only instruction from opted-in framing variants", () => {
+    const serialOnly = [
+      /single fenced code block/i,
+      /single ```(?:bash|<tool_name>)? block/i,
+      /ONE ```bash block/i,
+      /exactly one fenced tool call/i,
+      /one tool call per (?:response|reply)/i,
+      /one self-contained ```bash block per turn/i,
+      /one block per (?:reply|turn)/i,
+      /never (?:emit )?two (?:fenced )?blocks/i,
+      /one command at a time/i,
+      /one at a time/i,
+      /each turn is exactly one/i,
+      /Exactly one Thought line and exactly one ```bash block/i,
+    ];
+    const variants = [
+      "baseline", "minimal", "softened", "recency", "fewshot",
+      "proof_demand", "persona", "react", "negative", "honest",
+      "terse_user", "relay", "relay_batch", "retag",
+    ];
+
+    for (const variant of variants) {
+      const out = formatMessages(
+        [{ role: "user", content: "inspect independently" }],
+        tools,
+        undefined,
+        undefined,
+        variant,
+        undefined,
+        true,
+      );
+      expect(out, variant).toContain("PARALLEL TOOL CALLS ARE ENABLED FOR THIS REQUEST");
+      expect(out, variant).toContain("multiple complete fenced tool calls");
+      for (const forbidden of serialOnly) expect(out, `${variant}: ${forbidden}`).not.toMatch(forbidden);
+    }
+  });
+});
+
+describe("tool argument numeric bounds", () => {
+  const terminal: ToolDef = {
+    type: "function",
+    function: {
+      name: "terminal",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          timeout: { type: "integer", minimum: 1, maximum: 600 },
+        },
+        required: ["command"],
+      },
+    },
+  };
+
+  const call = (timeout: number) => [{
+    id: "call-1",
+    type: "function" as const,
+    function: { name: "terminal", arguments: JSON.stringify({ command: "npm test", timeout }) },
+  }];
+
+  it("rejects an integer above maximum", () => {
+    const result = validateToolArguments(call(120000), [terminal]);
+    expect(result.errors).toEqual([
+      'call 1 (terminal): property "timeout" must be at most 600',
+    ]);
+  });
+
+  it("rejects an integer below minimum", () => {
+    const result = validateToolArguments(call(0), [terminal]);
+    expect(result.errors).toEqual([
+      'call 1 (terminal): property "timeout" must be at least 1',
+    ]);
+  });
+
+  it("accepts values at both bounds", () => {
+    expect(validateToolArguments(call(1), [terminal]).errors).toEqual([]);
+    expect(validateToolArguments(call(600), [terminal]).errors).toEqual([]);
   });
 });

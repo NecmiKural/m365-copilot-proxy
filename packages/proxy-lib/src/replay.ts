@@ -151,15 +151,16 @@ export function planFullPrompt(
   conversationId: string,
   framingVariant: string,
   limit: number,
+  parallelToolCalls = false,
 ): TurnPlan {
-  const full = formatMessages(messages, tools, toolChoice, conversationId, framingVariant);
+  const full = formatMessages(messages, tools, toolChoice, conversationId, framingVariant, messages, parallelToolCalls);
   if (limit <= 0 || utf8Bytes(full) <= limit) return { parts: [], final: full };
 
   let lead = 0;
   while (lead < messages.length && messages[lead].role === "system") lead++;
   const system = messages.slice(0, lead);
   const finalFrom = (k: number) =>
-    formatMessages([...system, ...messages.slice(k)], tools, toolChoice, conversationId, framingVariant, messages);
+    formatMessages([...system, ...messages.slice(k)], tools, toolChoice, conversationId, framingVariant, messages, parallelToolCalls);
   // Each later message as the transcript renders it: the request's tool specs, no framing.
   const cache = new Map<number, { text: string; bytes: number }>();
   const rendered = (i: number) => {

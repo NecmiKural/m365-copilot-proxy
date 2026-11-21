@@ -337,8 +337,10 @@ function toCodeModeInput(body: string, mode: "always" | "auto"): string {
 export interface FencedToolSpec {
   name: string;
   description?: string;
-  /** Declared JSON-Schema `type` per param, for coercing header values. */
-  parameterTypes: Record<string, string>;
+  /** Declared JSON-Schema types per param, including anyOf/oneOf alternatives. */
+  parameterTypes: Record<string, string[]>;
+  /** Per-property descriptions rendered into the model-visible tool contract. */
+  parameterDescriptions: Record<string, string>;
   /** Scalar params rendered as `key: value` header lines. */
   headerParams: string[];
   /** The free-form param carried as the fence body (mutually exclusive with editPair). */
@@ -361,7 +363,8 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
     return {
       name,
       description: CODE_MODE_SHELL_DESCRIPTION,
-      parameterTypes: { input: "string" },
+      parameterTypes: { input: ["string"] },
+      parameterDescriptions: {},
       headerParams: [],
       bodyParam: "input",
       bodyLabel: "command",
@@ -373,10 +376,19 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
   const props = Object.keys(propsSchema);
 
   const parameterTypes = Object.fromEntries(
-    Object.entries(propsSchema).map(([k, v]: any) => [
-      k,
-      v?.type ?? "string",
-    ]),
+    Object.entries(propsSchema).map(([k, v]: any) => {
+      const direct = typeof v?.type === "string" ? [v.type] : [];
+      const alternatives = [...(v?.anyOf ?? []), ...(v?.oneOf ?? [])]
+        .map((option: any) => option?.type)
+        .filter((type: unknown): type is string => typeof type === "string");
+      return [k, [...new Set([...direct, ...alternatives])]];
+    }),
+  );
+
+  const parameterDescriptions = Object.fromEntries(
+    Object.entries(propsSchema)
+      .filter(([, value]: any) => typeof value?.description === "string")
+      .map(([key, value]: any) => [key, value.description]),
   );
 
   const search = props.find((p) => SEARCH_KEYS.includes(p));
@@ -386,6 +398,7 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
       name,
       description,
       parameterTypes,
+      parameterDescriptions,
       editPair: { search, replace },
       headerParams: props.filter((p) => p !== search && p !== replace),
     };
@@ -398,6 +411,7 @@ export function deriveFencedSpec(tool: ToolDef): FencedToolSpec {
     name,
     description,
     parameterTypes,
+    parameterDescriptions,
     bodyParam,
     headerParams: props.filter((p) => p !== bodyParam),
   };
@@ -462,6 +476,10 @@ export function renderFencedCall(spec: FencedToolSpec, args: Record<string, unkn
 /** A self-documenting template shown in the per-request <tools> block. */
 function renderFencedTemplate(spec: FencedToolSpec): string {
   const lines: string[] = [];
+  for (const [key, description] of Object.entries(spec.parameterDescriptions)) {
+    lines.push(`${key}: ${description}`);
+  }
+  if (lines.length) lines.push("");
   for (const h of spec.headerParams) lines.push(`${h}: <${h}>`);
   if (spec.editPair) {
     lines.push("<<<<<<< SEARCH");
@@ -1282,7 +1300,28 @@ function scanFences(text: string, isTool: (info: string) => boolean, from = 0): 
       }
     } else {
       const top = stack[stack.length - 1];
-      if (f && f.char === top.char && f.bare && f.len >= top.len) {
+      // M365 sometimes concatenates a closing fence and the next opener on one
+      // line (` ``````terminal `). Treat the first run as this block's closer
+      // and the second as a separate top-level tool fence, rather than nesting
+      // it and leaking its headers into the first command.
+      const adjacent = line.match(new RegExp(
+        `^([ \t]*)(${escapeRegExp(top.char)}{${top.len}})(${escapeRegExp(top.char)}{${top.len},})([A-Za-z0-9_.-]+)[ \t]*$`,
+      ));
+      if (stack.length === 1 && adjacent && isTool(adjacent[4])) {
+        const closeEnd = offset + adjacent[1].length + adjacent[2].length;
+        blocks.push({ info: open.info, inner: body(open.bodyStart, offset - 1, open.indent), start: open.start, end: closeEnd });
+        const nextStart = closeEnd;
+        const nextFence: FenceLine = {
+          indent: 0,
+          char: adjacent[3][0],
+          len: adjacent[3].length,
+          info: adjacent[4],
+          bare: false,
+        };
+        open = { info: adjacent[4], start: nextStart, bodyStart: lineEnd + 1, indent: 0 };
+        stack[0] = nextFence;
+        glued = null;
+      } else if (f && f.char === top.char && f.bare && f.len >= top.len) {
         stack.pop();
         if (stack.length === 0) {
           blocks.push({ info: open.info, inner: body(open.bodyStart, offset - 1, open.indent), start: open.start, end: lineEnd });
@@ -1408,7 +1447,20 @@ function makeCall(name: string, args: Record<string, unknown>): ParsedToolCall {
 const TRUE_WORDS = new Set(["true", "yes", "y", "1", "on"]);
 const FALSE_WORDS = new Set(["false", "no", "n", "0", "off"]);
 
-function coerceHeaderValue(value: string, declaredType: string | undefined): unknown {
+function coerceHeaderValue(value: string, declaredTypes: string[] | undefined): unknown {
+  // Header input is already text. If string is an allowed alternative,
+  // preserving it avoids coercing an ambiguous value such as "42" through a
+  // later numeric union branch.
+  if (declaredTypes?.includes("string")) return value;
+
+  for (const declaredType of declaredTypes ?? []) {
+    const coerced = coerceHeaderValueAs(value, declaredType);
+    if (coerced !== value) return coerced;
+  }
+  return value;
+}
+
+function coerceHeaderValueAs(value: string, declaredType: string): unknown {
   switch (declaredType) {
     case "boolean": {
       const v = value.toLowerCase();
@@ -1660,21 +1712,22 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
     for (; i < lines.length; i++) {
       const line = lines[i];
       const m = line.match(/^([A-Za-z0-9_]+):[ \t]?(.*)$/);
-      if (m && spec.headerParams.includes(m[1])) {
+      if (m && (spec.headerParams.includes(m[1]) || headerOnly)) {
         closeOpen();
         const key = m[1];
-        const type = spec.parameterTypes[key];
-        if (m[2].trim() === "" && (type === "array" || type === "object")) {
-          const end = yamlBlockEnd(lines, i + 1, type === "array");
-          const value = end > i + 1 ? parseYamlBlockValue(lines.slice(i + 1, end), type) : undefined;
+        const types = spec.parameterTypes[key];
+        const blockType = types?.find((type) => type === "array" || type === "object");
+        if (m[2].trim() === "" && blockType) {
+          const end = yamlBlockEnd(lines, i + 1, blockType === "array");
+          const value = end > i + 1 ? parseYamlBlockValue(lines.slice(i + 1, end), blockType) : undefined;
           if (value !== undefined) {
             args[key] = value;
             i = end - 1;
             continue;
           }
         }
-        args[key] = coerceHeaderValue(m[2].trim(), type);
-        if (headerOnly && (type ?? "string") === "string") open = { key, inline: m[2].trim(), more: [] };
+        args[key] = coerceHeaderValue(m[2].trim(), types);
+        if (headerOnly && (!types?.length || types.includes("string"))) open = { key, inline: m[2].trim(), more: [] };
       } else if (open) {
         open.more.push(line);
       } else if (line.trim() === "") {
@@ -1698,7 +1751,11 @@ function parseFencedInner(spec: FencedToolSpec, inner: string): Record<string, u
     args[spec.editPair.search] = sr[1];
     args[spec.editPair.replace] = sr[2];
   } else if (spec.bodyParam !== undefined) {
-    args[spec.bodyParam] = spec.codeModeShell ? toCodeModeInput(rest, spec.codeModeShell) : rest;
+    const unwrappedCommand =
+      spec.bodyParam === "command"
+        ? (rest.match(/^<command>\n?((?:(?!<\/command>)[\s\S])*?)(?:\n)?<\/command>$/)?.[1] ?? rest)
+        : rest;
+    args[spec.bodyParam] = spec.codeModeShell ? toCodeModeInput(unwrappedCommand, spec.codeModeShell) : unwrappedCommand;
   }
 
   return args;

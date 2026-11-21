@@ -28,3 +28,11 @@ describe("ChatMessage role normalization", () => {
     expect(req.messages[0].role).toBe("system");
   });
 });
+
+describe("parallel_tool_calls capability", () => {
+  it("preserves explicit true and leaves omission undefined", () => {
+    const base = { model: "claude-sonnet", messages: [{ role: "user", content: "hi" }] };
+    expect(ChatCompletionRequest.parse({ ...base, parallel_tool_calls: true }).parallel_tool_calls).toBe(true);
+    expect(ChatCompletionRequest.parse(base).parallel_tool_calls).toBeUndefined();
+  });
+});

@@ -89,7 +89,9 @@ TASK_GAP="${TASK_GAP:-0}"
 CFG="$HOME/.config/opencode-m365"
 ARCHIVE="${ARCHIVE:-$CFG/sweeps/$TAG}"
 # The proxy resolves M365_LOG_FILE / M365_FRAME_DIR against $CFG, not the cwd.
-[[ "$ARCHIVE" == /* ]] || ARCHIVE="$REPO/$ARCHIVE"
+if [[ "$ARCHIVE" != /* && ! "$ARCHIVE" =~ ^[A-Za-z]:[/\] ]]; then
+  ARCHIVE="$REPO/$ARCHIVE"
+fi
 PROXY_CMD="${PROXY_CMD:-node packages/proxy/bin/m365-proxy.mjs}"
 BASE_ENV=(M365_DEBUG=1 M365_DUMP_FRAMES=1 M365_NO_CONFAB_RETRY=1 M365_NO_INTERACTIVE=1)
 # Throttle avoidance (M365_AVOID_THROTTLING=1) reads the debug logs under $CFG; an archive
@@ -160,6 +162,9 @@ need() {
   done
 }
 need node curl
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) need powershell.exe cygpath ;;
+esac
 [ "$need_pi" = 0 ] || need pi python3
 if [ "$need_docker" = 1 ]; then
   need docker
@@ -183,9 +188,34 @@ printf 'label\tphase\tenv\tarm\tkind\tmodel\tstart\tend\tresult\n' > "$ARCHIVE/m
 
 CONTROL="$(mktemp "${TMPDIR:-/tmp}/m365-framing.XXXXXX")"
 PROXY_PID=""
+is_windows_host() {
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+windows_listener_pid() {
+  powershell.exe -NoLogo -NoProfile -NonInteractive -Command     "(Get-NetTCPConnection -LocalPort $PORT -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique) -join ','"     2>/dev/null | tr -d '\r'
+}
 stop_proxy() {
   [ -n "$PROXY_PID" ] || return 0
-  kill "$PROXY_PID" 2>/dev/null; wait "$PROXY_PID" 2>/dev/null; PROXY_PID=""
+  if is_windows_host; then
+    if [ "$PROXY_CMD" = "node packages/proxy/bin/m365-proxy.mjs" ]; then
+      local stop_script windows_archive windows_repo
+      stop_script="$(cygpath -w "$REPO/scripts/windows/stop.ps1")"
+      windows_archive="$(cygpath -w "$ARCHIVE")"
+      windows_repo="$(cygpath -w "$REPO")"
+      powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass         -File "$stop_script" -Port "$PORT"         -ConfigDir "$windows_archive" -RepoDir "$windows_repo" >/dev/null
+    elif owns_port; then
+      powershell.exe -NoLogo -NoProfile -NonInteractive -Command         "Stop-Process -Id $PROXY_PID -ErrorAction Stop" >/dev/null
+    else
+      return 1
+    fi
+  else
+    kill "$PROXY_PID" 2>/dev/null
+    wait "$PROXY_PID" 2>/dev/null
+  fi
+  PROXY_PID=""
 }
 trap 'stop_proxy; rm -f "$CONTROL"' EXIT
 trap 'echo "interrupted" > "$ARCHIVE/FAILED"; exit 130' INT TERM
@@ -200,8 +230,15 @@ start_proxy() {
     $penv $PROXY_CMD "$PORT" > "$ARCHIVE/$label-proxy.out" 2>&1 &
   PROXY_PID=$!
   for _ in $(seq 1 120); do
-    curl -s -m2 "http://localhost:$PORT/health" >/dev/null && owns_port && return 0
-    kill -0 "$PROXY_PID" 2>/dev/null || { PROXY_PID=""; return 1; }
+    if is_windows_host; then
+      listener_pid="$(windows_listener_pid)"
+      if [ -n "$listener_pid" ]; then PROXY_PID="$listener_pid"; fi
+      curl -s -m2 "http://localhost:$PORT/health" >/dev/null && owns_port && return 0
+      [ -z "$listener_pid" ] || sleep 1
+    else
+      curl -s -m2 "http://localhost:$PORT/health" >/dev/null && owns_port && return 0
+      kill -0 "$PROXY_PID" 2>/dev/null || { PROXY_PID=""; return 1; }
+    fi
     sleep 1
   done
   return 1
@@ -213,7 +250,9 @@ start_proxy() {
 # root they show the pid only for our own processes, so another account's proxy
 # reads as not ours. With none of them on PATH, trust /health.
 owns_port() {
-  if command -v ss >/dev/null 2>&1; then
+  if is_windows_host; then
+    [ "$(windows_listener_pid)" = "$PROXY_PID" ]
+  elif command -v ss >/dev/null 2>&1; then
     ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -q "pid=$PROXY_PID,"
   elif command -v lsof >/dev/null 2>&1; then
     lsof -niTCP:"$PORT" -sTCP:LISTEN 2>/dev/null |

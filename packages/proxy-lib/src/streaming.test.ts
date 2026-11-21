@@ -2,6 +2,8 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 // Replace core's ModelSession with a scripted fake so we can exercise the handler's
 // streaming path with no auth/WebSocket. Everything else in core stays real.
+const observations: Array<Record<string, unknown>> = [];
+
 const scripted: {
   deltas: string[];
   fullText?: string;
@@ -125,7 +127,13 @@ vi.mock("@m365-copilot/core", async (importActual) => {
     }
     close() { runtimeClosed.push(this.conversationId); }
   }
-  return { ...actual, ModelSession: FakeModelSession, AetherSession: FakeAetherSession, awaitTurnBudget };
+  return {
+    ...actual,
+    ModelSession: FakeModelSession,
+    AetherSession: FakeAetherSession,
+    awaitTurnBudget,
+    recordObservation: (observation: Record<string, unknown>) => observations.push(observation),
+  };
 });
 
 /** Every run() on a fake agent-runtime session, in order. */
@@ -339,11 +347,12 @@ describe("a tool call the proxy can't read", () => {
     expect(scripted.texts).toHaveLength(2);
   });
 
-  it("doesn't force a call after asking again, whatever the answer to that was", async () => {
-    // The re-ask told the model it could reply without the call; a confab retry
-    // on that reply would force the call anyway (review, #71).
-    const msg = await ask([UNCLOSED, "I don't have access to your project files or the ability to run commands here.", "```bash\nls\n```"]);
+  it("doesn't force an ordinary answer after asking again", async () => {
+    // A valid prose answer remains final; only a capability denial enters the
+    // existing give-up recovery path after the syntax re-ask.
+    const msg = await ask([UNCLOSED, "The requested analysis is complete.", "```bash\nls\n```"]);
     expect(msg.tool_calls).toBeUndefined();
+    expect(msg.content).toContain("analysis is complete");
     expect(scripted.texts).toHaveLength(2);
   });
 
@@ -950,6 +959,241 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
   // Live: after a real tool result showed no PDF tool installed, the model said
   // "bash is not enabled"; the forcing prompt then claimed "you have not run any
   // command yet", and the model refused that too.
+  async function askStreaming(messages: any[], pool: InstanceType<typeof SessionPool>) {
+    const res = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "gpt-5.6-think-deeper", stream: true, tools, messages,
+    }), pool);
+    const chunks = (await res.text()).split("\n")
+      .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+      .map((line) => JSON.parse(line.slice(6)));
+    const toolCalls = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+    const content = chunks.map((chunk) => chunk.choices?.[0]?.delta?.content ?? "").join("");
+    return { toolCalls, content };
+  }
+
+  it("recovers a first harness turn streaming give-up after an unreadable call", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf step-one\n```LONG_CHAIN_OK:8" },
+      { fullText: "I can't execute the requested terminal calls because no terminal tool is available in this session." },
+      { fullText: "```bash\nprintf recovered\n```" },
+    ];
+
+    const recovered = await askStreaming(
+      [{ role: "user", content: `run a command ${Math.random()}` }],
+      new SessionPool(),
+    );
+
+    expect(scripted.texts).toHaveLength(3);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(JSON.parse(recovered.toolCalls[0].function.arguments).command).toBe("printf recovered");
+    expect(recovered.content).toBe("");
+    scripted.queue = [];
+  });
+
+  it("recovers all four exact Phase 11 capability refusals after a tool result", async () => {
+    const replies = [
+      "I’m unable to complete the repository assessment because the terminal output could not be retrieved reliably. I won’t invent details about the requested files or architecture.",
+      "I’m unable to complete the code fix because the test command was moved to a background process, and no process-management tool is currently available to retrieve its output.",
+      "Available skills reported by `hermes skills list`.\n\nVerified total: 38 enabled built-in skills, 0 disabled.\n\nRead-only result: the workspace scan found one file, `AGENTS.md`; no source-code files were present to analyze. I could not write `skill-evidence.txt` because the current execution context no longer exposes a file-writing tool.\n\nT3_DONE",
+      "I can’t generate or validate the requested DOCX and PDF files because file-generation capabilities are disabled in this environment.\n\nT5_DONE",
+    ];
+
+    for (const [index, reply] of replies.entries()) {
+      scripted.result = null;
+      scripted.texts = [];
+      scripted.convs = [];
+      scripted.newConversations = 0;
+      scripted.queue = [
+        { fullText: "```bash\nprintf alpha\n```" },
+        { fullText: reply },
+        { fullText: "```bash\nprintf recovered-" + index + "\n```" },
+      ];
+      const pool = new SessionPool();
+      const messages: any[] = [{ role: "user", content: `phase11-${index} ${Math.random()}` }];
+      const first = await ask(messages, pool);
+      messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+      messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+      const recovered = await ask(messages, pool);
+
+      expect(scripted.texts, reply).toHaveLength(3);
+      expect(scripted.newConversations, reply).toBe(1);
+      expect(JSON.parse(recovered.tool_calls[0].function.arguments).command, reply)
+        .toBe(`printf recovered-${index}`);
+    }
+    scripted.queue = [];
+  });
+
+  it("recovers the observed curly-apostrophe capability denial after a real tool result", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "I’m sorry, but I can’t complete the remaining terminal calls in this response because the terminal tool is not currently available." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `run two commands ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    const recovered = await ask(messages, pool);
+
+    expect(scripted.texts).toHaveLength(3);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf beta");
+    scripted.queue = [];
+  });
+
+  it("recovers a Turkish capability denial after a real tool result", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "Devam edebilmem icin terminal erisimi yeniden etkinlestirilmeli." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `run two commands ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    const recovered = await ask(messages, pool);
+
+    expect(scripted.texts).toHaveLength(3);
+    expect(scripted.newConversations).toBe(1);
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf beta");
+    scripted.queue = [];
+  });
+
+  it("does not recover an ordinary final answer when tools were available but unused", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    scripted.queue = [{ fullText: "The requested analysis is complete. No further action is needed." }];
+
+    const answer = await ask(
+      [{ role: "user", content: `summarize the result ${Math.random()}` }],
+      new SessionPool(),
+    );
+
+    expect(scripted.texts).toHaveLength(1);
+    expect(scripted.newConversations).toBe(0);
+    expect(answer.content).toContain("analysis is complete");
+    scripted.queue = [];
+  });
+
+  it("retries a repeated turn-1 tool-unavailable give-up once more", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: "Terminal aracı bu oturumda etkin değil; komutları çalıştıramam." },
+      { fullText: "```bash\npwd\n```" },
+    ];
+    const m = await ask(
+      [{ role: "user", content: `run two read-only commands ${Math.random()}` }],
+      new SessionPool(),
+    );
+    expect(scripted.texts).toHaveLength(3);
+    expect(JSON.parse(m.tool_calls[0].function.arguments).command).toBe("pwd");
+    scripted.queue = [];
+  });
+
+  it("rebuilds a detected mid-task give-up with the full tool contract in a fresh conversation", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `run two commands ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    const recovered = await ask(messages, pool);
+
+    // Normal continuation stays compact and preserves the exact call/result pair.
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash" command="printf alpha">');
+    expect(scripted.texts[1]).toContain("alpha");
+    expect(scripted.texts[1]).not.toContain("<tools>");
+
+    // A detected give-up is recovered outside the state that lost the contract.
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.convs[2]).not.toBe(scripted.convs[1]);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(scripted.texts[2]).toContain("<tools>\nbash\n```bash");
+    expect(scripted.texts[2]).toContain('<tool_response tool="bash" command="printf alpha">');
+    expect(scripted.texts[2]).toContain("alpha");
+    expect(scripted.texts[2]).not.toContain("only the first");
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf beta");
+    scripted.queue = [];
+  });
+
+  it("uses full-contract recovery instead of requesting a generic probe on an initial give-up", async () => {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: "```bash\nprintf step-one\n```" },
+    ];
+
+    const recovered = await ask(
+      [{ role: "user", content: `run exactly eight numbered commands ${Math.random()}` }],
+      new SessionPool(),
+    );
+
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).not.toContain("ls -la");
+    expect(scripted.texts[1]).not.toContain("cat the relevant");
+    expect(JSON.parse(recovered.tool_calls[0].function.arguments).command).toBe("printf step-one");
+    scripted.queue = [];
+  });
+
+  it("keeps the same-conversation forcing retry when full give-up resend is disabled", async () => {
+    process.env.M365_NO_GIVEUP_FULL_RESEND = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "```bash\nprintf alpha\n```" },
+      { fullText: "Terminal aracı bu oturumda etkin değil; komutları çalıştıramam." },
+      { fullText: "```bash\nprintf beta\n```" },
+    ];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `kill switch ${Math.random()}` }];
+    const first = await ask(messages, pool);
+    messages.push({ role: "assistant", content: null, tool_calls: first.tool_calls });
+    messages.push({ role: "tool", tool_call_id: first.tool_calls[0].id, content: "alpha" });
+    await ask(messages, pool);
+
+    expect(scripted.newConversations).toBe(0);
+    expect(scripted.convs[2]).toBe(scripted.convs[1]);
+    expect(scripted.texts[2]).not.toContain("<tools>");
+    expect(scripted.texts[2]).toContain("Your tools are working");
+    delete process.env.M365_NO_GIVEUP_FULL_RESEND;
+    scripted.queue = [];
+  });
+
   it("doesn't tell a model that already ran tools that it ran nothing", async () => {
     scripted.result = null;
     scripted.texts = [];
@@ -965,7 +1209,9 @@ describe("follow-up turns and give-ups (Windows / pi, measured)", () => {
     messages.push({ role: "tool", tool_call_id: m1.tool_calls[0].id, content: "none" });
     const m2 = await ask(messages, pool);
     expect(scripted.texts).toHaveLength(3);
-    expect(scripted.texts[2]).toContain("Your tools are working");
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts[2]).toContain("<tools>");
+    expect(scripted.texts[2]).toContain('<tool_response tool="bash" command="command -v pandoc || echo none">');
     expect(scripted.texts[2]).not.toContain("you have not run any command yet");
     expect(JSON.parse(m2.tool_calls[0].function.arguments).command).toBe("py -m pip install fpdf2");
     scripted.queue = [];
@@ -1562,6 +1808,41 @@ describe("Priority access (Opus 5.5, Sonnet 5.5): OutOfCredits, remembering it, 
     expect(scripted.models).toEqual(["claude-opus-4.8"]);
   });
 
+  it("observes a remembered priority-access 429 without contacting M365", async () => {
+    scripted.queue = [REFUSAL];
+    await send();
+    observations.length = 0;
+
+    const res = await send("claude-opus", "another observed task");
+
+    expect(res.status).toBe(429);
+    expect(scripted.models).toEqual([]);
+    expect(observations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "request",
+        model: "claude-opus",
+        stream: false,
+        mode: "full",
+        tools: 1,
+      }),
+      expect.objectContaining({
+        kind: "throttle",
+        model: "claude-opus",
+        stream: false,
+        mode: "full",
+        tools: 1,
+      }),
+      expect.objectContaining({
+        kind: "priority_quota",
+        model: "claude-opus",
+        stream: false,
+        mode: "full",
+        tools: 1,
+        remaining: 0,
+      }),
+    ]));
+  });
+
   it("with M365_OPUS_FALLBACK_MODEL, re-sends the whole request to it in a fresh conversation", async () => {
     process.env.M365_OPUS_FALLBACK_MODEL = "claude-opus-4.8";
     scripted.queue = [REFUSAL, { fullText: "```bash\nls\n```" }];
@@ -1818,6 +2099,306 @@ describe("stopping a turn that writes its own <tool_response> (early stop)", () 
   });
 });
 
+describe("request-scoped parallel tool calls", () => {
+  const tools = [{
+    type: "function",
+    function: {
+      name: "bash",
+      parameters: { type: "object", properties: { command: { type: "string" } } },
+    },
+  }];
+  const two = "```bash\npwd\n```\n\n```bash\nprintf parallel\n```";
+
+  afterEach(() => {
+    delete process.env.M365_PARALLEL_TOOLS;
+    delete process.env.M365_NO_PARALLEL_TOOLS;
+    scripted.queue = [];
+  });
+
+  async function request(stream: boolean, parallel_tool_calls?: boolean) {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: two }];
+    return handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream,
+      parallel_tool_calls,
+      tools,
+      messages: [{ role: "user", content: `parallel ${stream} ${Math.random()}` }],
+    }), new SessionPool());
+  }
+
+  it("keeps the serial contract and only-first behavior by default", async () => {
+    const response = await request(false);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("stays fully serial when only the request flag is enabled", async () => {
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+
+  it("returns two ordered, uniquely identified calls when env and request flag are enabled", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(2);
+    expect(message.tool_calls.map((c: any) => JSON.parse(c.function.arguments).command)).toEqual(["pwd", "printf parallel"]);
+    expect(new Set(message.tool_calls.map((c: any) => c.id)).size).toBe(2);
+    // Handler behavior proves the request capability reached parsing/rendering.
+    // Prompt wording itself is covered in core because relay variants may omit it
+    // from the upstream text captured by this handler fixture.
+  });
+
+  it("streams two independently indexed calls", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    const response = await request(true, true);
+    const chunks = (await response.text()).split("\n")
+      .filter((line) => line.startsWith("data: ") && line !== "data: [DONE]")
+      .map((line) => JSON.parse(line.slice(6)));
+    const calls = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+    expect(calls.map((c: any) => c.index)).toEqual([0, 1]);
+    expect(new Set(calls.map((c: any) => c.id)).size).toBe(2);
+    expect(chunks.at(-1).choices[0].finish_reason).toBe("tool_calls");
+  });
+
+  it("maps both tool results by tool_call_id on the next delta turn", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: two }, { fullText: "PARALLEL_OK" }];
+    const pool = new SessionPool();
+    const messages: any[] = [{ role: "user", content: `parallel history ${Math.random()}` }];
+    const first = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet", stream: false, parallel_tool_calls: true, tools, messages,
+    }), pool);
+    const calls = (await first.json()).choices[0].message.tool_calls;
+    messages.push({ role: "assistant", content: null, tool_calls: calls });
+    messages.push({ role: "tool", tool_call_id: calls[0].id, content: "cwd-result" });
+    messages.push({ role: "tool", tool_call_id: calls[1].id, content: "printf-result" });
+    await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet", stream: false, parallel_tool_calls: true, tools, messages,
+    }), pool);
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash" command="pwd">');
+    expect(scripted.texts[1]).toContain("cwd-result");
+    expect(scripted.texts[1]).toContain('<tool_response tool="bash" command="printf parallel">');
+    expect(scripted.texts[1]).toContain("printf-result");
+    expect(scripted.texts[1]).not.toContain("only the first");
+  });
+
+  it("recovers the Phase 10 parallel zero-call capability refusal", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "The runtime permits exactly one tool call per turn." },
+      { fullText: two },
+    ];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `recover Phase 10 parallel refusal ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).toContain("PARALLEL TOOL CALLS ARE ENABLED");
+    expect(message.tool_calls).toHaveLength(2);
+  });
+
+  it("does not recover a normal answer that explains a user's one-call rule", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.newConversations = 0;
+    const explanation = "Your policy permits exactly one tool call per turn, so document that rule in the user guide.";
+    scripted.queue = [{ fullText: explanation }];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `explain the policy ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(0);
+    expect(scripted.texts).toHaveLength(1);
+    expect(message.tool_calls).toBeUndefined();
+    expect(message.content).toBe(explanation);
+  });
+
+  it("keeps full-contract give-up recovery active in parallel mode", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.convs = [];
+    scripted.newConversations = 0;
+    scripted.queue = [
+      { fullText: "I can't execute terminal commands in this session because no terminal tool is enabled." },
+      { fullText: two },
+    ];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: true,
+      tools,
+      messages: [{ role: "user", content: `recover parallel ${Math.random()}` }],
+    }), new SessionPool());
+    const message = (await response.json()).choices[0].message;
+    expect(scripted.newConversations).toBe(1);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("<tools>");
+    expect(scripted.texts[1]).toContain("PARALLEL TOOL CALLS ARE ENABLED");
+    expect(scripted.convs[1]).not.toBe(scripted.convs[0]);
+    expect(message.tool_calls).toHaveLength(2);
+  });
+
+  it("honors the environment kill switch", async () => {
+    process.env.M365_PARALLEL_TOOLS = "1";
+    process.env.M365_NO_PARALLEL_TOOLS = "1";
+    const response = await request(false, true);
+    const message = (await response.json()).choices[0].message;
+    expect(message.tool_calls).toHaveLength(1);
+    expect(scripted.texts[0]).not.toContain("PARALLEL TOOL CALLS ARE ENABLED");
+  });
+});
+
+describe("tool argument schema validation", () => {
+  const configure = {
+    type: "function",
+    function: {
+      name: "configure",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string" },
+          retries: { type: "integer" },
+          enabled: { type: "boolean" },
+        },
+        required: ["target", "retries"],
+        additionalProperties: false,
+      },
+    },
+  };
+
+  afterEach(() => {
+    delete process.env.M365_NO_ARG_VALIDATION;
+    delete process.env.M365_PARALLEL_TOOLS;
+    scripted.queue = [];
+  });
+
+  async function ask(replies: string[], options: { parallel?: boolean; tools?: any[] } = {}) {
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = replies.map((fullText) => ({ fullText }));
+    if (options.parallel) process.env.M365_PARALLEL_TOOLS = "1";
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream: false,
+      parallel_tool_calls: options.parallel,
+      tools: options.tools ?? [configure],
+      messages: [{ role: "user", content: `configure ${Math.random()}` }],
+    }), new SessionPool());
+    return (await response.json()).choices[0].message;
+  }
+
+  it.each([
+    ["missing required field", "```configure\ntarget: app\n```", "required property \"retries\""],
+    ["wrong scalar type", "```configure\ntarget: app\nretries: many\n```", "property \"retries\" must be an integer"],
+    ["additional property", "```configure\ntarget: app\nretries: 3\nextra: nope\n```", "additional property \"extra\" is not allowed"],
+  ])("asks exactly once to correct a %s", async (_name, invalid, error) => {
+    const valid = "```configure\ntarget: app\nretries: 3\n```";
+    const message = await ask([invalid, valid]);
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain(error);
+    expect(scripted.texts[1]).toContain("send the corrected tool call once");
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({ target: "app", retries: 3 });
+  });
+
+  it("coerces only lossless integer and boolean strings", async () => {
+    const message = await ask(["```configure\ntarget: app\nretries: \"30\"\nenabled: \"true\"\n```"]);
+    expect(scripted.texts).toHaveLength(1);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: 30, enabled: true,
+    });
+  });
+
+  it("passes a valid call through unchanged", async () => {
+    const message = await ask(["```configure\ntarget: app\nretries: 30\nenabled: true\n```"]);
+    expect(scripted.texts).toHaveLength(1);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: 30, enabled: true,
+    });
+  });
+
+  it("bypasses validation under M365_NO_ARG_VALIDATION=1", async () => {
+    process.env.M365_NO_ARG_VALIDATION = "1";
+    const message = await ask(["```configure\ntarget: app\nretries: many\nextra: kept\n```"]);
+    expect(scripted.texts).toHaveLength(1);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: "many", extra: "kept",
+    });
+  });
+
+  it("validates every call in parallel mode and retries the whole batch once", async () => {
+    const invalid = "```configure\ntarget: first\nretries: 1\n```\n```configure\ntarget: second\n```";
+    const valid = "```configure\ntarget: first\nretries: 1\n```\n```configure\ntarget: second\nretries: 2\n```";
+    const message = await ask([invalid, valid], { parallel: true });
+    expect(scripted.texts).toHaveLength(2);
+    expect(scripted.texts[1]).toContain("call 2");
+    expect(scripted.texts[1]).toContain("required property \"retries\"");
+    expect(message.tool_calls).toHaveLength(2);
+    expect(message.tool_calls.map((c: any) => JSON.parse(c.function.arguments).retries)).toEqual([1, 2]);
+  });
+
+  it("fails open to the losslessly transformed original call when correction remains invalid", async () => {
+    const invalid = "```configure\ntarget: app\nretries: \"30\"\nextra: kept\n```";
+    const message = await ask([invalid, "```configure\ntarget: app\nretries: many\n```"]);
+    expect(scripted.texts).toHaveLength(2);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({
+      target: "app", retries: 30, extra: "kept",
+    });
+  });
+
+  it("fails open to the original call when correction returns plain text", async () => {
+    const invalid = "```configure\ntarget: app\n```";
+    const message = await ask([invalid, "I cannot correct that call."]);
+    expect(scripted.texts).toHaveLength(2);
+    expect(JSON.parse(message.tool_calls[0].function.arguments)).toEqual({ target: "app" });
+  });
+
+  it.each([false, true])("applies fail-open validation to stream=%s", async (stream) => {
+    const invalid = "```configure\ntarget: app\n```";
+    scripted.result = null;
+    scripted.texts = [];
+    scripted.queue = [{ fullText: invalid }, { fullText: "No corrected call." }];
+    const response = await handleChatCompletion(ChatCompletionRequest.parse({
+      model: "claude-sonnet",
+      stream,
+      tools: [configure],
+      messages: [{ role: "user", content: `configure stream ${Math.random()}` }],
+    }), new SessionPool());
+    const raw = await response.text();
+    const chunks = raw.split("\n")
+      .filter((line) => line.startsWith("data: {"))
+      .map((line) => JSON.parse(line.slice(6)));
+    const call = stream
+      ? chunks.flatMap((chunk) => chunk.choices ?? [])
+          .flatMap((choice) => choice.delta?.tool_calls ?? [])[0]
+      : JSON.parse(raw).choices[0].message.tool_calls[0];
+    expect(JSON.parse(call.function.arguments)).toEqual({ target: "app" });
+  });
+});
+
 describe("Claude Code and Codex behind copilot-api", () => {
   const CLAUDE_CODE_UA = "claude-cli/2.1.286 (external, sdk-cli)";
   const bashTool = [{ type: "function", function: { name: "Bash", parameters: { type: "object", properties: { command: { type: "string" } } } } }];
@@ -1998,6 +2579,9 @@ describe("a PowerShell command that lost a [Type]: to M365's post-processing (§
   });
 });
 describe("a conversation M365 has lost (§46)", () => {
+  // Its forcing-turn tests need the forcing prompt; daily's H45 full give-up resend is on by default.
+  beforeEach(() => { process.env.M365_NO_GIVEUP_FULL_RESEND = "1"; });
+  afterEach(() => { delete process.env.M365_NO_GIVEUP_FULL_RESEND; });
   type Msg = { role: string; content: string };
   const ask = (pool: InstanceType<typeof SessionPool>, messages: Msg[], stream = false) =>
     handleChatCompletion(ChatCompletionRequest.parse({ model: "claude-sonnet", stream, messages }), pool);
@@ -2633,6 +3217,9 @@ describe("the agent runtime backends: Cowork and Code (§48)", () => {
 
 // Synthetic ModelSession transport, real handler/parser/renderer: no credentials or network.
 describe("capability-aware existing recovery", () => {
+  // These test the forcing-prompt path; daily's H45 full give-up resend is on by default.
+  beforeEach(() => { process.env.M365_NO_GIVEUP_FULL_RESEND = "1"; });
+  afterEach(() => { delete process.env.M365_NO_GIVEUP_FULL_RESEND; });
   const stage = { type: "function", function: { name: "stage_skill", description: "Stage a skill by name", parameters: { type: "object", properties: { skill: { type: "string" }, enabled: { type: "boolean" } } } } };
   const shell = { type: "function", function: { name: "Bash", parameters: { type: "object", properties: { command: { type: "string" } } } } };
   const reasons = {
@@ -2704,7 +3291,7 @@ describe("capability-aware existing recovery", () => {
         expect(res.status).toBe(200);
         if (stream) expect(wire).toContain("data: [DONE]");
         expect(scripted.texts).toHaveLength(2);
-        const definitions = "<tools>\nstage_skill — Stage literal <tools> and </tools> markers without truncation\n```stage_skill\nskill: <skill>\nenabled: <enabled>\n```\n\ninspect_skill — Inspect after the literal markers\n```inspect_skill\nskill: <skill>\nverbose: <verbose>\n```\n</tools>";
+        const definitions = "<tools>\nstage_skill — Stage literal <tools> and </tools> markers without truncation\n```stage_skill\nskill: Accept <tools> and </tools> as literal skill text\nenabled: Keep </tools> and <tools> literal here too\n\nskill: <skill>\nenabled: <enabled>\n```\n\ninspect_skill — Inspect after the literal markers\n```inspect_skill\nskill: <skill>\nverbose: <verbose>\n```\n</tools>";
         expect(scripted.texts[1]).toBe(`${corrections[reason as keyof typeof corrections]}\n\nUse ONE fenced tool call with an exact tool name and the argument format below, then wait for its <tool_response>. Output only that single tool block, nothing else.\n\n${definitions}`);
         expect(scripted.texts[1]).not.toMatch(/```bash|WRITING A SHELL SCRIPT|HOST PLATFORM|real filesystem|install it/);
         const calls = chunks.flatMap(c => c.choices?.[0]?.message?.tool_calls ?? c.choices?.[0]?.delta?.tool_calls ?? []);

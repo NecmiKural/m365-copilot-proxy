@@ -2,7 +2,7 @@ import { getToken } from "./auth.js";
 import { CachePersistenceError } from "./storage.js";
 import { getOrCreateAgent } from "./agent.js";
 import { CopilotSession } from "./session.js";
-import { uploadImage, type ImageAnnotation } from "./image-input.js";
+import { resolveImageInput, uploadImage, type ImageAnnotation } from "./image-input.js";
 import { uploadFile, type FileAnnotation } from "./file-upload.js";
 import { createLogger, trunc } from "./log.js";
 import { awaitTurnBudget } from "./turn-budget.js";
@@ -163,10 +163,21 @@ export class ModelSession implements TurnSession {
     // Any other data URL is a document, which goes to OneDrive like the web client's (file-upload.ts).
     // A failed upload is said in the text, so the model doesn't answer about a file it never got.
     const annotations: (ImageAnnotation | FileAnnotation)[] = [];
+    const imageDimensions: string[] = [];
+    let imageIndex = 0;
     for (const url of images) {
       const isImage = !/^data:(?!image\/)/i.test(url);
       try {
-        annotations.push(isImage ? await uploadImage(token, this.conversationId, url) : await uploadFile(url));
+        if (isImage) {
+          imageIndex++;
+          const resolved = await resolveImageInput(url);
+          annotations.push(await uploadImage(token, this.conversationId, resolved.dataUrl));
+          if (resolved.width && resolved.height) {
+            imageDimensions.push(`image ${imageIndex}: ${resolved.width}x${resolved.height} pixels`);
+          }
+        } else {
+          annotations.push(await uploadFile(url));
+        }
       } catch (err: any) {
         if (err instanceof CachePersistenceError) throw err;
         const what = isImage ? "image" : "file";
@@ -175,6 +186,11 @@ export class ModelSession implements TurnSession {
 
 (Note: an attached ${what} could not be passed on — ${err.message.slice(0, 120)}. Don't describe it; say it didn't arrive.)`;
       }
+    }
+    if (imageDimensions.length > 0) {
+      text += `
+
+(Original image dimensions before upstream processing: ${imageDimensions.join("; ")}. Report coordinates in this original pixel coordinate system.)`;
     }
     const wantAgent = this.useAgent && useAgent;
 
