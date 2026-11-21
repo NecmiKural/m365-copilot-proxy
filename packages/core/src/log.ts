@@ -52,11 +52,12 @@ function timestamp(): string {
   return new Date().toISOString();
 }
 
-/** Rewrites LOG_FILE with only its newest MAX_LOG_BYTES, on a line boundary. */
-function trimToWindow(size: number) {
+/** Rewrites LOG_FILE with only its newest MAX_LOG_BYTES, on a line boundary; true once it has. */
+function trimToWindow(size: number): boolean {
   const keep = Math.min(MAX_LOG_BYTES, size);
   const tmp = `${LOG_FILE}.tmp`;
   let fd: number | undefined;
+  let tail: Buffer | undefined;
   try {
     fd = openSync(LOG_FILE, "r");
     const buf = Buffer.alloc(keep);
@@ -72,14 +73,29 @@ function trimToWindow(size: number) {
     // Close before the rename: Windows refuses to replace a file this process holds open (EPERM).
     closeSync(fd);
     fd = undefined;
-    writeFileSync(tmp, buf.subarray(start, n));
+    tail = buf.subarray(start, n);
+    writeFileSync(tmp, tail);
     renameSync(tmp, LOG_FILE); // atomic: readers see the old or the new file
+    return true;
   } catch {
-    // best effort
+    if (tail === undefined) return false; // best effort
+    // Windows also refuses while another process has the log open (a terminal
+    // tailing it), but lets it be rewritten in place.
+    try { rmSync(tmp, { force: true }); } catch { /* best effort */ }
+    try {
+      writeFileSync(LOG_FILE, tail);
+      return true;
+    } catch {
+      return false;
+    }
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
 }
+
+// After a trim that failed, the next one waits for another tenth of the window,
+// instead of re-reading the whole window (50MB by default) on every line.
+let nextTrimAt = TRIM_AT_BYTES;
 
 function trimIfNeeded(next: number) {
   let size: number;
@@ -88,8 +104,8 @@ function trimIfNeeded(next: number) {
   } catch {
     return; // no log yet, nothing to trim
   }
-  if (size + next < TRIM_AT_BYTES) return;
-  trimToWindow(size);
+  if (size + next < nextTrimAt) return;
+  nextTrimAt = trimToWindow(size) ? TRIM_AT_BYTES : size + Math.ceil(MAX_LOG_BYTES / 10);
 }
 
 function write(level: string, component: string, ...args: unknown[]) {
